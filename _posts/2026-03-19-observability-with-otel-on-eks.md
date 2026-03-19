@@ -1,38 +1,39 @@
 ---
 title: "End-to-End Observability with OpenTelemetry on EKS"
-date: 2026-03-19 13:00:00 +0900
-categories: [Tech Blog]
 tags: [Observability, Container]
-author: whchoi98
+categories: [Tech Blog]
+key: otel-eks
+aside:
+  toc: true
 ---
 
-## Introduction
-
 Observability is critical for operating containerized workloads reliably. This post demonstrates how to implement end-to-end observability on Amazon EKS using OpenTelemetry.
+
+<!--more-->
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│              Amazon EKS                  │
-│                                          │
-│  ┌──────────┐    ┌────────────────────┐ │
-│  │ App Pods  │───▶│ OTel Collector     │ │
-│  │ (with SDK)│    │ (DaemonSet)        │ │
-│  └──────────┘    └──────┬─────────────┘ │
-└─────────────────────────┼───────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-   ┌──────────┐   ┌──────────┐   ┌──────────┐
-   │CloudWatch│   │ AWS X-Ray│   │  AMP      │
-   │  Logs    │   │ (Traces) │   │(Metrics)  │
-   └──────────┘   └──────────┘   └──────────┘
-                          │
-                   ┌──────▼──────┐
-                   │   Grafana   │
-                   │   (AMG)     │
-                   └─────────────┘
++-------------------------------------------+
+|              Amazon EKS                    |
+|                                            |
+|  +------------+    +--------------------+  |
+|  | App Pods   |--->| OTel Collector     |  |
+|  | (with SDK) |    | (DaemonSet)        |  |
+|  +------------+    +----------+---------+  |
++-----------------------------|---------------+
+                              |
+          +-------------------+-------------------+
+          v                   v                   v
+   +------------+     +------------+     +------------+
+   | CloudWatch |     | AWS X-Ray  |     |    AMP     |
+   |   Logs     |     |  (Traces)  |     | (Metrics)  |
+   +------------+     +------------+     +------------+
+                              |
+                       +------v------+
+                       |   Grafana   |
+                       |    (AMG)    |
+                       +-------------+
 ```
 
 ## Deploy OTel Collector
@@ -117,5 +118,5 @@ trace.set_tracer_provider(provider)
 
 OpenTelemetry provides a vendor-neutral observability framework. With ADOT on EKS, you get traces, metrics, and logs flowing into AWS-native services seamlessly.
 
-> Check the Observability Workshop for step-by-step setup.
-{: .prompt-tip }
+Check the Observability Workshop for step-by-step setup.
+{:.info}

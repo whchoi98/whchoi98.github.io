@@ -1,0 +1,17 @@
+header:
+  - titles:
+      en: Workshop
+      ko: Workshop
+    url: /workshop.html
+  - titles:
+      en: Tech Blog
+      ko: Tech Blog
+    url: /techblog.html
+  - titles:
+      en: Archive
+      ko: Archive
+    url: /archive.html
+  - titles:
+      en: About
+      ko: About
+    url: /about.html

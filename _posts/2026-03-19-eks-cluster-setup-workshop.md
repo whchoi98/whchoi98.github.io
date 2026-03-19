@@ -1,14 +1,15 @@
 ---
 title: "EKS Workshop - Cluster Setup and Configuration"
-date: 2026-03-19 10:00:00 +0900
-categories: [Workshop]
 tags: [Container, AWS-Core]
-author: whchoi98
+categories: [Workshop]
+key: eks-workshop
+aside:
+  toc: true
 ---
 
-## Overview
-
 This workshop guides you through setting up an Amazon EKS cluster from scratch.
+
+<!--more-->
 
 ## Prerequisites
 
@@ -64,5 +65,5 @@ spec:
 
 You now have a running EKS cluster with a sample application deployed.
 
-> Next workshop: Configuring ALB Ingress Controller
-{: .prompt-info }
+Next workshop: Configuring ALB Ingress Controller
+{:.info}

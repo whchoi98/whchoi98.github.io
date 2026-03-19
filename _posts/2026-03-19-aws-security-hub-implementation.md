@@ -1,14 +1,15 @@
 ---
 title: "Implementing AWS Security Hub for Cloud Security Posture"
-date: 2026-03-19 12:00:00 +0900
-categories: [Tech Blog]
 tags: [Cloud-Security, AWS-Core]
-author: whchoi98
+categories: [Tech Blog]
+key: security-hub
+aside:
+  toc: true
 ---
 
-## Overview
-
 AWS Security Hub provides a comprehensive view of your security posture across AWS accounts. This post covers practical implementation patterns.
+
+<!--more-->
 
 ## Enabling Security Hub
 
@@ -75,5 +76,5 @@ aws securityhub invite-members \
 
 Security Hub is essential for maintaining cloud security posture at scale. Combined with automated remediation, it enables proactive security management.
 
-> See the Cloud Security Workshop series for hands-on labs.
-{: .prompt-info }
+See the Cloud Security Workshop series for hands-on labs.
+{:.info}

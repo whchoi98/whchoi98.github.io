@@ -1,7 +1,11 @@
 source "https://rubygems.org"
 
-gem "jekyll-theme-chirpy", "~> 7.2"
+gem "github-pages", group: :jekyll_plugins
+gem "jekyll-text-theme"
 
 group :jekyll_plugins do
-  gem "html-proofer", "~> 5.0"
+  gem "jekyll-feed"
+  gem "jekyll-paginate"
+  gem "jekyll-sitemap"
+  gem "jemoji"
 end

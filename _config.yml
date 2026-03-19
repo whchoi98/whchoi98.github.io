@@ -1,101 +1,133 @@
-theme: jekyll-theme-chirpy
+# TeXt Theme Configuration
+# https://github.com/kitian616/jekyll-TeXt-theme
 
+## => Site Settings
+##############################
+text_skin: dark # "default", "dark", "forest", "ocean", "chocolate", "orange"
+highlight_theme: tomorrow-night-eighties # "default", "tomorrow", "tomorrow-night", "tomorrow-night-eighties", "tomorrow-night-blue", "tomorrow-night-bright"
+url: https://whchoi98.github.io
+baseurl:
+title: WooHyung Choi Tech Blog
+description: >
+  AWS Solutions Architect's Workshop & Tech Notes -
+  AIML, Container, AWS Core, Cloud Security, Observability
+
+## => Language and Timezone
+##############################
 lang: en
-
 timezone: Asia/Seoul
 
-title: WooHyung Choi Tech Blog
-
-tagline: AWS Solutions Architect's Workshop & Tech Notes
-
-description: >-
-  A technical blog covering AWS workshops, AIML, Container, Cloud Security,
-  and Observability topics by whchoi98.
-
-url: "https://whchoi98.github.io"
-
-github:
-  username: whchoi98
-
-social:
-  name: whchoi98
+## => Author and Social
+##############################
+author:
+  type: person
+  name: WooHyung Choi
+  url: https://github.com/whchoi98
+  avatar: /assets/img/avatar.png
+  bio: AWS Solutions Architect
   email: whchoi98@gmail.com
-  links:
-    - https://github.com/whchoi98
+  github: whchoi98
+  linkedin: # your linkedin username
 
+## => GitHub Repository
+##############################
+repository: whchoi98/whchoi98.github.io
+repository_tree: main
+
+## => Paths
+##############################
+paths:
+  root: /
+  home: /
+  archive: /archive.html
+  rss: /feed.xml
+
+## => Post
+##############################
+excerpt_separator: <!--more-->
+license: CC-BY-NC-4.0
+
+## TOC
+toc:
+  selectors: "h1,h2,h3"
+
+## => Markdown Enhancements
+##############################
+mathjax: false
+mathjax_autoNumber: false
+mermaid: true
+chart: false
+
+## => Paginate
+##############################
+paginate: 8
+paginate_path: /page:num
+
+## => Sources
+##############################
+sources: unpkg
+
+## => Sharing
+##############################
+sharing:
+  provider: false
+
+## => Comments
+##############################
+comments:
+  provider: false
+
+## => Pageview
+##############################
+pageview:
+  provider: false
+
+## => Search
+##############################
+search:
+  provider: default
+
+## => Analytics
+##############################
 analytics:
-  google:
-    id:
+  provider: false
 
-theme_mode: dark
+## => Build
+##############################
+markdown: kramdown
+highlighter: rouge
+permalink: date
 
-avatar: /assets/img/avatar.png
+remote_theme: kitian616/jekyll-TeXt-theme
 
-toc: true
-
-disqus:
-  comments: false
-
-paginate: 10
-
-kramdown:
-  syntax_highlighter: rouge
-  syntax_highlighter_opts:
-    css_class: highlight
-    span:
-      line_numbers: false
-    block:
-      line_numbers: true
-      start_line: 1
-
-collections:
-  tabs:
-    output: true
-    sort_by: order
+exclude:
+  - CHANGELOG.md
+  - Gemfile
+  - Gemfile.lock
+  - LICENSE
+  - README.md
+  - /docs
+  - /node_modules
+  - /vendor
 
 defaults:
   - scope:
       path: ""
       type: posts
     values:
-      layout: post
-      comments: true
-      toc: true
-      permalink: /posts/:title/
-  - scope:
-      path: _tabs
-      type: tabs
-    values:
-      layout: page
-      permalink: /:title/
+      layout: article
+      sharing: true
+      license: true
+      aside:
+        toc: true
+      show_edit_on_github: false
+      show_subscribe: true
+      pageview: true
 
-sass:
-  style: compressed
-
-compress_html:
-  clippings: all
-  comments: all
-  endings: all
-  profile: false
-  blanklines: false
-  ignore:
-    envs: [development]
-
-exclude:
-  - "*.gem"
-  - "*.gemspec"
-  - docs
-  - tools
-  - README.md
-  - LICENSE
-  - "*.config.js"
-  - package*.json
-
-jekyll-archives:
-  enabled: [categories, tags]
-  layouts:
-    category: category
-    tag: tag
-  permalinks:
-    tag: /tags/:name/
-    category: /categories/:name/
+## => Plugins
+##############################
+plugins:
+  - jekyll-feed
+  - jekyll-paginate
+  - jekyll-sitemap
+  - jemoji

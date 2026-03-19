@@ -1,36 +1,37 @@
 ---
 title: "Building RAG Architecture with Amazon Bedrock"
-date: 2026-03-19 11:00:00 +0900
-categories: [Tech Blog]
 tags: [AIML, AWS-Core]
-author: whchoi98
+categories: [Tech Blog]
+key: bedrock-rag
+aside:
+  toc: true
 ---
 
-## Introduction
-
 Retrieval-Augmented Generation (RAG) combines the power of large language models with your organization's knowledge base. This post explores how to build a production-ready RAG architecture using Amazon Bedrock.
+
+<!--more-->
 
 ## Architecture Overview
 
 ```
 User Query
-    │
-    ▼
-┌─────────────┐    ┌──────────────────┐
-│  Application │───▶│ Amazon Bedrock    │
-│  (Lambda)    │    │ Knowledge Base    │
-└─────────────┘    └────────┬─────────┘
-                            │
-                   ┌────────▼─────────┐
-                   │ OpenSearch        │
-                   │ Serverless        │
-                   │ (Vector Store)    │
-                   └────────┬─────────┘
-                            │
-                   ┌────────▼─────────┐
-                   │ Amazon S3         │
-                   │ (Document Store)  │
-                   └──────────────────┘
+    |
+    v
++---------------+    +----------------------+
+|  Application  |--->| Amazon Bedrock       |
+|  (Lambda)     |    | Knowledge Base       |
++---------------+    +----------+-----------+
+                                |
+                     +----------v-----------+
+                     | OpenSearch           |
+                     | Serverless           |
+                     | (Vector Store)       |
+                     +----------+-----------+
+                                |
+                     +----------v-----------+
+                     | Amazon S3            |
+                     | (Document Store)     |
+                     +----------------------+
 ```
 
 ## Key Components
@@ -74,5 +75,5 @@ S3 stores the source documents that feed into the knowledge base.
 
 Amazon Bedrock Knowledge Base simplifies RAG implementation by managing the entire pipeline. Combined with OpenSearch Serverless and S3, you can build a scalable, production-ready RAG system.
 
-> For hands-on practice, check out the upcoming Bedrock RAG Workshop.
-{: .prompt-tip }
+For hands-on practice, check out the upcoming Bedrock RAG Workshop.
+{:.info}
