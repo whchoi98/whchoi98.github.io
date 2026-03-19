@@ -10,9 +10,12 @@ permalink: /docs/workshop/
 # Workshop
 {: .fs-9 }
 
-Step-by-step hands-on labs covering AWS services.
+AWS 서비스 핸즈온 실습 가이드 — Kiro CLI, EKS, Bedrock 등.
 {: .fs-6 .fw-300 }
 
 ---
 
-Hands-on workshops with guided instructions for building and operating AWS infrastructure. Each workshop includes prerequisites, step-by-step instructions, and verification steps.
+Hands-on Labs with step-by-step instructions.
+
+{: .note }
+> 원본 소스(Source): [whchoi98/awsmcp](https://github.com/whchoi98/awsmcp) (Gitbook)
