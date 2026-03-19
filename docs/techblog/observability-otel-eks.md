@@ -1,7 +1,8 @@
 ---
 title: Observability with OpenTelemetry on EKS
-parent: Tech Blog
-nav_order: 3
+parent: Observability
+grand_parent: Tech Blog
+nav_order: 1
 ---
 
 # End-to-End Observability with OpenTelemetry on EKS

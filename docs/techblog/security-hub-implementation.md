@@ -1,7 +1,8 @@
 ---
 title: AWS Security Hub Implementation
-parent: Tech Blog
-nav_order: 2
+parent: Cloud Security
+grand_parent: Tech Blog
+nav_order: 1
 ---
 
 # Implementing AWS Security Hub for Cloud Security Posture

@@ -1,6 +1,7 @@
 ---
 title: Building RAG with Amazon Bedrock
-parent: Tech Blog
+parent: AIML
+grand_parent: Tech Blog
 nav_order: 1
 ---
 
