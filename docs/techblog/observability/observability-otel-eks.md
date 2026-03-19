@@ -3,6 +3,7 @@ title: Observability with OpenTelemetry on EKS
 parent: Observability
 grand_parent: Tech Blog
 nav_order: 1
+last_modified_date: 2026-03-19
 ---
 
 # End-to-End Observability with OpenTelemetry on EKS

@@ -8,4 +8,4 @@ has_children: true
 # Cloud Security
 {: .no_toc }
 
-IAM, GuardDuty, Security Hub, WAF 관련 기술 블로그.
+클라우드 보안(Cloud Security) 기술 블로그 - IAM, GuardDuty, Security Hub, WAF 구현 가이드 및 보안 아키텍처.

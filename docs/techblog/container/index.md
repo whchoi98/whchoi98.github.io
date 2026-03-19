@@ -8,4 +8,4 @@ has_children: true
 # Container
 {: .no_toc }
 
-EKS, ECS, Kubernetes, Docker 관련 기술 블로그.
+컨테이너(Container) 기술 블로그 - EKS, ECS, Kubernetes, Docker 운영 및 아키텍처 심층 분석.

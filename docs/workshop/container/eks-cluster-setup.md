@@ -1,7 +1,9 @@
 ---
 title: EKS Cluster Setup
-parent: Workshop
+parent: Container
+grand_parent: Workshop
 nav_order: 1
+last_modified_date: 2026-03-19
 ---
 
 # EKS Workshop - Cluster Setup and Configuration
