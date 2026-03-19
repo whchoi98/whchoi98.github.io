@@ -1,40 +1,39 @@
-// TechBlog & Workshop Custom Theme
-// Light body with dark code blocks, blue accent
+// Gitbook-inspired TechBlog Theme
+// Clean white, minimal borders, dark code blocks
 
 $color-scheme: light;
 
-// Body
+// Body — clean Gitbook white
 $body-background-color: #ffffff;
-$body-heading-color: #1a202c;
-$body-text-color: #2d3748;
+$body-heading-color: #1f2328;
+$body-text-color: #333333;
 
-// Links — AWS blue accent
-$link-color: #0073bb;
+// Links — Gitbook-style blue
+$link-color: #0366d6;
 
-// Sidebar
-$sidebar-color: #f8f9fb;
-$nav-child-link-color: #4a5568;
+// Sidebar — Gitbook light grey
+$sidebar-color: #fbfbfb;
+$nav-child-link-color: #57606a;
 
 // Buttons
-$base-button-color: #f1f5f9;
-$btn-primary-color: #0073bb;
+$base-button-color: #f6f8fa;
+$btn-primary-color: #0366d6;
 
-// Code blocks — dark background for workshop readability
-$code-background-color: #0d1117;
-$code-linenumber-color: #e6edf3;
+// Code blocks — dark for workshop readability
+$code-background-color: #1e1e1e;
+$code-linenumber-color: #d4d4d4;
 
 // Tables
 $table-background-color: #ffffff;
 
 // Search
 $search-background-color: #ffffff;
-$search-result-preview-color: #4a5568;
+$search-result-preview-color: #57606a;
 
-// Borders
-$border-color: #e2e8f0;
+// Borders — subtle like Gitbook
+$border-color: #e8e8e8;
 
 // Feedback
-$feedback-color: #f1f5f9;
+$feedback-color: #f6f8fa;
 
-// Code syntax highlighting — GitHub Dark for contrast
 @import "./vendor/accessible-pygments/github-dark";
