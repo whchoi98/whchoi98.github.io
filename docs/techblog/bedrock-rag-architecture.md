@@ -1,15 +1,26 @@
 ---
-title: "Building RAG Architecture with Amazon Bedrock"
-tags: [AIML, AWS-Core]
-categories: [Tech Blog]
-key: bedrock-rag
-aside:
-  toc: true
+title: Building RAG with Amazon Bedrock
+parent: Tech Blog
+nav_order: 1
 ---
 
-Retrieval-Augmented Generation (RAG) combines the power of large language models with your organization's knowledge base. This post explores how to build a production-ready RAG architecture using Amazon Bedrock.
+# Building RAG Architecture with Amazon Bedrock
+{: .no_toc }
 
-<!--more-->
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
+
+## Introduction
+
+Retrieval-Augmented Generation (RAG) combines the power of large language models with your organization's knowledge base.
+
+{: .note }
+> Tags: `AIML` `AWS-Core`
 
 ## Architecture Overview
 
@@ -61,19 +72,24 @@ response = bedrock_agent.retrieve_and_generate(
 
 OpenSearch Serverless provides a managed vector database for storing document embeddings.
 
+{: .important }
+> OpenSearch Serverless requires minimum 2 OCUs ($345.60/month minimum).
+
 ### 3. Document Store - Amazon S3
 
 S3 stores the source documents that feed into the knowledge base.
 
 ## Best Practices
 
-- **Chunking Strategy**: Use semantic chunking for better retrieval accuracy
-- **Embedding Model**: Use Amazon Titan Embeddings v2 for multilingual support
-- **Monitoring**: Enable CloudWatch metrics for retrieval latency tracking
+| Practice | Description |
+|:---------|:------------|
+| **Chunking Strategy** | Use semantic chunking for better retrieval accuracy |
+| **Embedding Model** | Use Amazon Titan Embeddings v2 for multilingual support |
+| **Monitoring** | Enable CloudWatch metrics for retrieval latency tracking |
 
 ## Conclusion
 
 Amazon Bedrock Knowledge Base simplifies RAG implementation by managing the entire pipeline. Combined with OpenSearch Serverless and S3, you can build a scalable, production-ready RAG system.
 
-For hands-on practice, check out the upcoming Bedrock RAG Workshop.
-{:.info}
+{: .tip }
+> For hands-on practice, check out the upcoming Bedrock RAG Workshop.

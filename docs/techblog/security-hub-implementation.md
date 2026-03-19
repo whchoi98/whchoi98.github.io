@@ -1,15 +1,26 @@
 ---
-title: "Implementing AWS Security Hub for Cloud Security Posture"
-tags: [Cloud-Security, AWS-Core]
-categories: [Tech Blog]
-key: security-hub
-aside:
-  toc: true
+title: AWS Security Hub Implementation
+parent: Tech Blog
+nav_order: 2
 ---
 
-AWS Security Hub provides a comprehensive view of your security posture across AWS accounts. This post covers practical implementation patterns.
+# Implementing AWS Security Hub for Cloud Security Posture
+{: .no_toc }
 
-<!--more-->
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
+
+## Overview
+
+AWS Security Hub provides a comprehensive view of your security posture across AWS accounts.
+
+{: .note }
+> Tags: `Cloud-Security` `AWS-Core`
 
 ## Enabling Security Hub
 
@@ -21,10 +32,8 @@ aws securityhub enable-security-hub \
 
 ## Security Standards
 
-Security Hub supports multiple compliance frameworks:
-
 | Standard | Description |
-|----------|-------------|
+|:---------|:------------|
 | AWS Foundational Security Best Practices | AWS-recommended security controls |
 | CIS AWS Foundations Benchmark | Center for Internet Security benchmark |
 | PCI DSS | Payment Card Industry standard |
@@ -34,7 +43,6 @@ Security Hub supports multiple compliance frameworks:
 
 ```python
 import boto3
-import json
 
 def lambda_handler(event, context):
     """Auto-remediate Security Hub findings."""
@@ -60,9 +68,10 @@ def lambda_handler(event, context):
     return {'statusCode': 200}
 ```
 
-## Multi-Account Aggregation
+{: .warning }
+> Always test automated remediation in a non-production environment first.
 
-For organizations, configure a delegated administrator:
+## Multi-Account Aggregation
 
 ```bash
 aws securityhub create-members \
@@ -75,6 +84,3 @@ aws securityhub invite-members \
 ## Summary
 
 Security Hub is essential for maintaining cloud security posture at scale. Combined with automated remediation, it enables proactive security management.
-
-See the Cloud Security Workshop series for hands-on labs.
-{:.info}

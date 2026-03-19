@@ -1,15 +1,26 @@
 ---
-title: "End-to-End Observability with OpenTelemetry on EKS"
-tags: [Observability, Container]
-categories: [Tech Blog]
-key: otel-eks
-aside:
-  toc: true
+title: Observability with OpenTelemetry on EKS
+parent: Tech Blog
+nav_order: 3
 ---
 
-Observability is critical for operating containerized workloads reliably. This post demonstrates how to implement end-to-end observability on Amazon EKS using OpenTelemetry.
+# End-to-End Observability with OpenTelemetry on EKS
+{: .no_toc }
 
-<!--more-->
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+{:toc}
+
+---
+
+## Introduction
+
+Observability is critical for operating containerized workloads reliably.
+
+{: .note }
+> Tags: `Observability` `Container`
 
 ## Architecture
 
@@ -90,33 +101,18 @@ spec:
           exporters: [awsemf]
 ```
 
-## Application Instrumentation
-
-For Python applications, add auto-instrumentation:
-
-```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-
-provider = TracerProvider()
-exporter = OTLPSpanExporter(endpoint="http://adot-collector:4317")
-provider.add_span_processor(BatchSpanProcessor(exporter))
-trace.set_tracer_provider(provider)
-```
-
 ## Key Metrics to Monitor
 
 | Metric | Description | Alert Threshold |
-|--------|-------------|-----------------|
+|:-------|:------------|:----------------|
 | Request latency (p99) | 99th percentile response time | > 500ms |
 | Error rate | 5xx responses / total requests | > 1% |
 | Pod restart count | Container crash frequency | > 3 in 5min |
 | CPU/Memory utilization | Resource consumption | > 80% |
 
+{: .important }
+> Set up alerting rules in Amazon Managed Grafana for production workloads.
+
 ## Summary
 
 OpenTelemetry provides a vendor-neutral observability framework. With ADOT on EKS, you get traces, metrics, and logs flowing into AWS-native services seamlessly.
-
-Check the Observability Workshop for step-by-step setup.
-{:.info}
