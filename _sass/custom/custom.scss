@@ -36,94 +36,56 @@
   padding-bottom: 0.3rem;
 }
 
-// === Right TOC: float + sticky (Gitbook style) ===
-// The TOC is inside .main-content. We float it right so it
-// sits beside the content, and use sticky so it follows on scroll.
+// === TOC: Clean inline box (reliable, no overlap) ===
 
-@media (min-width: 1100px) {
-  // Constrain content width to leave room for TOC
-  .main-content {
-    max-width: calc(100% - 260px) !important;
-  }
+.main-content #table-of-contents {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #8b949e;
+  border-bottom: none;
+  margin-bottom: 0.25rem;
+}
 
-  .main-content #table-of-contents {
-    position: fixed;
-    right: 24px;
-    top: 60px;
-    width: 220px;
-    font-size: 0.6rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #8b949e;
-    border-bottom: none;
-    padding-bottom: 0;
-    margin: 0;
-    z-index: 10;
-  }
+.main-content #markdown-toc {
+  background-color: #f8f9fb;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  margin-bottom: 1.5rem;
+  font-size: 0.82rem;
+  line-height: 1.7;
+  list-style: none;
+  columns: 2;
+  column-gap: 2rem;
 
-  // TOC list: fixed to viewport right side
-  .main-content #markdown-toc {
-    position: fixed;
-    right: 24px;
-    top: 90px;
-    width: 220px;
-    max-height: calc(100vh - 120px);
-    overflow-y: auto;
-    margin: 0;
-    padding: 0 0 0 1rem;
-    font-size: 0.78rem;
-    line-height: 1.6;
-    border-left: 1px solid #e8e8e8;
+  li {
     list-style: none;
-    z-index: 10;
+    break-inside: avoid;
+    margin-bottom: 0.2rem;
 
-    li {
-      list-style: none;
-      margin-bottom: 0.3rem;
+    a {
+      color: #57606a;
+      text-decoration: none;
 
-      a {
-        color: #8b949e;
-        text-decoration: none;
-        display: block;
-        padding: 0.1rem 0;
-        transition: color 0.15s;
-
-        &:hover {
-          color: #0366d6;
-        }
+      &:hover {
+        color: #0366d6;
       }
     }
+  }
 
-    ul {
-      list-style: none;
-      padding-left: 0.75rem;
-      margin-top: 0.15rem;
-      margin-bottom: 0;
-    }
+  ul {
+    list-style: none;
+    padding-left: 1rem;
+    margin-top: 0.1rem;
+    margin-bottom: 0.1rem;
   }
 }
 
-// Mobile: inline TOC
-@media (max-width: 1099px) {
-  .main-content #table-of-contents {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: #8b949e;
-    border-bottom: none;
-  }
-
+// Single column on smaller screens
+@media (max-width: 900px) {
   .main-content #markdown-toc {
-    border: 1px solid #e8e8e8;
-    border-radius: 8px;
-    padding: 0.75rem 1.25rem;
-    margin-bottom: 1.5rem;
-    background-color: #f6f8fa;
-    font-size: 0.8rem;
-    list-style: none;
-
-    li { list-style: none; }
-    ul { list-style: none; padding-left: 0.75rem; }
+    columns: 1;
   }
 }
 
