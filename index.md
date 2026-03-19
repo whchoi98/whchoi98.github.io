@@ -22,9 +22,9 @@ AWS Solutions Architect's Workshop & Tech Notes covering AIML, Container, AWS Co
 | Category | Description |
 |:---------|:------------|
 | **AIML** | Amazon Bedrock, SageMaker, Generative AI |
-| **Container** | EKS, ECS, Kubernetes, Docker |
 | **AWS Core** | VPC, EC2, Lambda, S3, CloudFormation |
 | **Cloud Security** | IAM, GuardDuty, Security Hub, WAF |
+| **Container** | EKS, ECS, Kubernetes, Docker |
 | **Observability** | CloudWatch, OpenTelemetry, Prometheus, Grafana |
 
 ---

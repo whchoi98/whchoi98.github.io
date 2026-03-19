@@ -1,7 +1,7 @@
 ---
 title: AWS Core
 parent: Tech Blog
-nav_order: 3
+nav_order: 2
 has_children: true
 ---
 
