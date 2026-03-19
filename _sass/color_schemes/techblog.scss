@@ -1,5 +1,5 @@
 // Gitbook-inspired TechBlog Theme
-// Clean white, minimal borders, dark code blocks
+// Clean white, light code blocks with good contrast
 
 $color-scheme: light;
 
@@ -19,9 +19,9 @@ $nav-child-link-color: #57606a;
 $base-button-color: #f6f8fa;
 $btn-primary-color: #0366d6;
 
-// Code blocks — dark for workshop readability
-$code-background-color: #1e1e1e;
-$code-linenumber-color: #d4d4d4;
+// Code blocks — light grey background for visibility
+$code-background-color: #f6f8fa;
+$code-linenumber-color: #57606a;
 
 // Tables
 $table-background-color: #ffffff;
@@ -36,4 +36,5 @@ $border-color: #e8e8e8;
 // Feedback
 $feedback-color: #f6f8fa;
 
-@import "./vendor/accessible-pygments/github-dark";
+// Light syntax highlighting (GitHub Light)
+@import "./vendor/accessible-pygments/github-light";
