@@ -36,45 +36,7 @@
   padding-bottom: 0.3rem;
 }
 
-// === TOC: Clean inline box (reliable, no overlap) ===
-
-.main-content #table-of-contents {
-  font-size: 0.65rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: #8b949e;
-  border-bottom: none;
-  margin-bottom: 0.25rem;
-}
-
-.main-content #markdown-toc {
-  background-color: #f8f9fb;
-  border: 1px solid #e8e8e8;
-  border-radius: 8px;
-  padding: 0.85rem 1.5rem;
-  margin-bottom: 2rem;
-  font-size: 0.85rem;
-  line-height: 2;
-  list-style: none;
-
-  li {
-    list-style: none;
-
-    a {
-      color: #57606a;
-      text-decoration: none;
-
-      &:hover {
-        color: #0366d6;
-      }
-    }
-  }
-
-  // Hide nested sub-items to keep TOC compact
-  ul {
-    display: none;
-  }
-}
+// === TOC: Use Just the Docs default (no custom styling) ===
 
 // === Content Styles (Gitbook) ===
 
