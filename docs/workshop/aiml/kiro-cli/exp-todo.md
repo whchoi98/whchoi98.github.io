@@ -1,7 +1,7 @@
 ---
 title: "TODO Lists"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 37
 last_modified_date: "2026-03-19"
 ---

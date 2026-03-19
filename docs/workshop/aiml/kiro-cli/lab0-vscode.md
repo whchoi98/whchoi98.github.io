@@ -1,7 +1,7 @@
 ---
 title: "LAB 0. VSCode 서버 구성"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 4
 last_modified_date: "2026-03-19"
 ---

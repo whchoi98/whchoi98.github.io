@@ -1,7 +1,7 @@
 ---
 title: "도구 권한 관리(Tool Permissions)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 15
 last_modified_date: "2026-03-19"
 ---

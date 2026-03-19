@@ -1,7 +1,7 @@
 ---
 title: "LAB 5. Kiro CLI 고급 기능"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 42
 last_modified_date: "2026-03-19"
 ---

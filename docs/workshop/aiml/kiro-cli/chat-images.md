@@ -1,7 +1,7 @@
 ---
 title: "이미지 활용하기(Images)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 17
 last_modified_date: "2026-03-19"
 ---

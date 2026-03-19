@@ -41,38 +41,42 @@
 // sits beside the content, and use sticky so it follows on scroll.
 
 @media (min-width: 1100px) {
-  // Reserve right margin on main-content so text doesn't overlap with TOC
+  // Reserve right space so text doesn't go under TOC
   .main-content {
-    margin-right: 260px;
+    padding-right: 260px;
   }
 
+  // Hide the "TABLE OF CONTENTS" heading on desktop
   .main-content #table-of-contents {
-    float: right;
-    clear: right;
+    position: fixed;
+    right: 24px;
+    top: 60px;
     width: 220px;
-    margin: 0 -260px 1rem 2rem;
     font-size: 0.6rem;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: #8b949e;
     border-bottom: none;
     padding-bottom: 0;
+    margin: 0;
+    z-index: 10;
   }
 
+  // TOC list: fixed to viewport right side
   .main-content #markdown-toc {
-    float: right;
-    clear: right;
-    position: sticky;
-    top: 2rem;
+    position: fixed;
+    right: 24px;
+    top: 90px;
     width: 220px;
-    max-height: calc(100vh - 4rem);
+    max-height: calc(100vh - 120px);
     overflow-y: auto;
-    margin: 0 -260px 2rem 2rem;
+    margin: 0;
     padding: 0 0 0 1rem;
     font-size: 0.78rem;
     line-height: 1.6;
     border-left: 1px solid #e8e8e8;
     list-style: none;
+    z-index: 10;
 
     li {
       list-style: none;

@@ -1,7 +1,7 @@
 ---
 title: "LAB 4. Kiro CLI Part 2"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 41
 last_modified_date: "2026-03-19"
 ---

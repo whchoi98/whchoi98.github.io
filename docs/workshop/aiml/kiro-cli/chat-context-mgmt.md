@@ -1,7 +1,7 @@
 ---
 title: "컨텍스트 관리(Context Management)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 13
 last_modified_date: "2026-03-19"
 ---

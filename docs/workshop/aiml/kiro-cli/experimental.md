@@ -1,7 +1,7 @@
 ---
 title: "실험적 기능(Experimental)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 34
 last_modified_date: "2026-03-19"
 ---

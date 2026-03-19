@@ -1,7 +1,7 @@
 ---
 title: "보안 고려 사항(Security)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 18
 last_modified_date: "2026-03-19"
 ---

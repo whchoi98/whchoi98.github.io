@@ -1,7 +1,7 @@
 ---
 title: "LAB 6. 클라우드 운영 개요"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 43
 last_modified_date: "2026-03-19"
 ---

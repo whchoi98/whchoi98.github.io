@@ -1,7 +1,7 @@
 ---
 title: "프롬프트 관리(Prompt Management)"
-parent: Kiro CLI Workshop
-grand_parent: AIML
+parent: AIML
+grand_parent: Workshop
 nav_order: 12
 last_modified_date: "2026-03-19"
 ---
