@@ -1,0 +1,18 @@
+// Full-width layout
+.main-content-wrap {
+  max-width: none;
+}
+
+.main-content {
+  max-width: none;
+}
+
+.side-bar {
+  min-width: $nav-width;
+}
+
+@media (min-width: #{$content-width + $nav-width}) {
+  .main-content-wrap {
+    max-width: none;
+  }
+}
