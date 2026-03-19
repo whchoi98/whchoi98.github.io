@@ -1,6 +1,6 @@
 ---
 title: "보안 고려 사항(Security)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 18
 last_modified_date: "2026-03-19"
 ---

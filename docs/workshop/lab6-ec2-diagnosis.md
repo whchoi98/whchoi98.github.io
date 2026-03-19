@@ -1,6 +1,6 @@
 ---
 title: "LAB 6-3. EC2 진단하기"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 46
 last_modified_date: "2026-03-19"
 ---

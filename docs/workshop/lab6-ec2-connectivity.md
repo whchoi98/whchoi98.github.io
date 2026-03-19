@@ -1,6 +1,6 @@
 ---
 title: "LAB 6-4. EC2 연결성 분석"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 47
 last_modified_date: "2026-03-19"
 ---

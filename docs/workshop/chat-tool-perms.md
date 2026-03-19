@@ -1,6 +1,6 @@
 ---
 title: "도구 권한 관리(Tool Permissions)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 15
 last_modified_date: "2026-03-19"
 ---

@@ -1,6 +1,6 @@
 ---
 title: "메시지에 응답하기(Responding)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 14
 last_modified_date: "2026-03-19"
 ---

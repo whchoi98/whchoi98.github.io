@@ -1,6 +1,6 @@
 ---
 title: "LAB 0. VSCode 서버 구성"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 4
 last_modified_date: "2026-03-19"
 ---

@@ -1,6 +1,6 @@
 ---
 title: "Chat 대화모드"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 8
 last_modified_date: "2026-03-19"
 ---

@@ -1,6 +1,6 @@
 ---
 title: "Get Started 시작하기"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 5
 last_modified_date: "2026-03-19"
 ---

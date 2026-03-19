@@ -1,6 +1,6 @@
 ---
 title: "에이전트 구성 레퍼런스"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 22
 last_modified_date: "2026-03-19"
 ---

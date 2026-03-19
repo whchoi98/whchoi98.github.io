@@ -1,6 +1,6 @@
 ---
 title: "LAB 6-7. 아키텍처 분석하기"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 50
 last_modified_date: "2026-03-19"
 ---

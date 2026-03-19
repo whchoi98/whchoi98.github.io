@@ -1,6 +1,6 @@
 ---
 title: "모델 선택(Model Selection)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 9
 last_modified_date: "2026-03-19"
 ---

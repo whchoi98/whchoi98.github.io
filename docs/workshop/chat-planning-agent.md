@@ -1,6 +1,6 @@
 ---
 title: "Planning Agent"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 11
 last_modified_date: "2026-03-19"
 ---

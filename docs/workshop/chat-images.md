@@ -1,6 +1,6 @@
 ---
 title: "이미지 활용하기(Images)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 17
 last_modified_date: "2026-03-19"
 ---

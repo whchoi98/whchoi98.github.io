@@ -1,6 +1,6 @@
 ---
 title: "Custom Agents 트러블슈팅"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 24
 last_modified_date: "2026-03-19"
 ---

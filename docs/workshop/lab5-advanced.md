@@ -1,6 +1,6 @@
 ---
 title: "LAB 5. Kiro CLI 고급 기능"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 42
 last_modified_date: "2026-03-19"
 ---

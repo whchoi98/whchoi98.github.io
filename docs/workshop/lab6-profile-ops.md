@@ -1,6 +1,6 @@
 ---
 title: "LAB 6-2. 프로파일 기반 운영"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 45
 last_modified_date: "2026-03-19"
 ---

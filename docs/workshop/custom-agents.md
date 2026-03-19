@@ -1,6 +1,6 @@
 ---
 title: "Custom Agents 커스텀 에이전트"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 20
 last_modified_date: "2026-03-19"
 ---

@@ -1,6 +1,6 @@
 ---
 title: "에이전트 예시(Examples)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 23
 last_modified_date: "2026-03-19"
 ---

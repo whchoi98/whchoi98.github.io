@@ -1,6 +1,6 @@
 ---
 title: "LAB 6. 클라우드 운영 개요"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 43
 last_modified_date: "2026-03-19"
 ---

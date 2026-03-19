@@ -1,6 +1,6 @@
 ---
 title: "컨텍스트 관리(Context Management)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 13
 last_modified_date: "2026-03-19"
 ---

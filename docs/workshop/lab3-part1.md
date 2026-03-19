@@ -1,6 +1,6 @@
 ---
 title: "LAB 3. Kiro CLI Part 1"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 40
 last_modified_date: "2026-03-19"
 ---

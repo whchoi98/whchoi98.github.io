@@ -1,6 +1,6 @@
 ---
 title: "설치(Installation)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 6
 last_modified_date: "2026-03-19"
 ---

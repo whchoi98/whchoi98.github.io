@@ -1,6 +1,6 @@
 ---
 title: "Knowledge Management"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 35
 last_modified_date: "2026-03-19"
 ---

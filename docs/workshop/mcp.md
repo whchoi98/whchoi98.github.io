@@ -1,6 +1,6 @@
 ---
 title: "MCP"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 25
 last_modified_date: "2026-03-19"
 ---

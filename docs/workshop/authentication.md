@@ -1,6 +1,6 @@
 ---
 title: "인증 방식(Authentication)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 7
 last_modified_date: "2026-03-19"
 ---

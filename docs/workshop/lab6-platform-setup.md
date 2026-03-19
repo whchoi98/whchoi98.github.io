@@ -1,6 +1,6 @@
 ---
 title: "LAB 6-1. 플랫폼 운영 환경 설정"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 44
 last_modified_date: "2026-03-19"
 ---

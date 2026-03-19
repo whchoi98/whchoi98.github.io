@@ -1,6 +1,6 @@
 ---
 title: "실험적 기능(Experimental)"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 34
 last_modified_date: "2026-03-19"
 ---

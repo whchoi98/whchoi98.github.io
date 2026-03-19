@@ -1,6 +1,6 @@
 ---
 title: "Auto Complete"
-parent: Workshop
+parent: Kiro CLI Workshop
 nav_order: 32
 last_modified_date: "2026-03-19"
 ---
