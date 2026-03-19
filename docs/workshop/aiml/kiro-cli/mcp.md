@@ -23,12 +23,11 @@ Model Context Protocol(MCP) 은 외부 서버와의 통합을 통해 Kiro의 기
 
 MCP 서버는 전문 도메인 지식, 외부 API, 커스텀 도구 등을 제공하며, 이를 Kiro가 직접 호출하여 보다 풍부하고 정교한 개발 워크플로우를 수행할 수 있습니다.
 
-{% hint style="info" %}
+{: .note }
 Tip\
 \
 인터랙티브 채팅 세션에서는 /mcp 슬래시 명령을 사용하여 현재 로드된 MCP 서버 목록을 확인할 수 있습니다.\
 자세한 내용은 _Slash Commands_ 문서를 참고하십시오.
-{% endhint %}
 
 ***
 

@@ -100,9 +100,8 @@ MCP는 Client-Server 아키텍처를 따르며, 3가지 주요 구성 요소로 
 
 #### 로컬 실행 vs 컨테이너 실행
 
-{% hint style="info" %}
+{: .note }
 ####  “MCP Server는 항상 원격 서버인가?”  -  아니요. 대부분의 MCP Server는 로컬 프로세스(local process)로 실행됩니다.
-{% endhint %}
 
 **로컬 실행 방법:**
 

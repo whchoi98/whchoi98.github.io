@@ -167,9 +167,8 @@ Run /context show to see usage per context file
 Are you sure? This will erase the conversation history and context from hooks for the current session. [y/n]:
 ```
 
-{% hint style="info" %}
+{: .note }
 이 작업은 되돌릴 수 없으므로 주의가 필요합니다.
-{% endhint %}
 
 ***
 

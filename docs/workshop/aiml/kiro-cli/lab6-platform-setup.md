@@ -17,9 +17,8 @@ last_modified_date: "2026-03-19"
 
 ---
 
-{% hint style="warning" %}
+{: .warning }
 Kiro CLI 기반 플랫폼 운영하기 목차를 수행하기 위해서는, AWS 자원이 배포 됩니다. 따라서 비용이 발생할 수 있기 때문에 주의가 필요합니다.
-{% endhint %}
 
 ## 1. Kiro CLI 실습 환경 구성
 

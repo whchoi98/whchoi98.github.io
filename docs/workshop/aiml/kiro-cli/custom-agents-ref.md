@@ -208,9 +208,8 @@ last_modified_date: "2026-03-19"
 * "@git-\*/\*" → git-\* 서버의 모든 도구
 * Built-in 도구 prefix 매칭: "r\*" → read
 
-{% hint style="info" %}
+{: .note }
 주의: allowedTools는 "\*" 로 전체 허용을 지원하지 않습니다. (보안 이유)
-{% endhint %}
 
 ***
 

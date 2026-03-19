@@ -38,9 +38,8 @@ IAM Identity Center를 인증(Sign-in) 방식으로 사용하는 Pro-tier 고객
 
 계정 수준 프로필이 조직 수준 프로필보다 우선 적용(Supersede) 됩니다.
 
-{% hint style="info" %}
+{: .note }
 #### 주의 사항 -  MCP 토글 및 레지스트리 설정은 클라이언트 측(Client-side)에서 강제됩니다. 따라서 최종 사용자가 기술적으로 이를 우회할 가능성이 존재함을 인지해야 합니다.
-{% endhint %}
 
 ***
 
@@ -61,9 +60,8 @@ IAM Identity Center를 인증(Sign-in) 방식으로 사용하는 Pro-tier 고객
 
 ### 3.1 지원 범위
 
-{% hint style="info" %}
+{: .note }
 MCP 허용 목록 기능은 현재 Q 구독 사용자만 지원됩니다.
-{% endhint %}
 
 ### 3.2 MCP 허용 목록 개념
 
