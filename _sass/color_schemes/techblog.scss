@@ -1,0 +1,40 @@
+// TechBlog & Workshop Custom Theme
+// Light body with dark code blocks, blue accent
+
+$color-scheme: light;
+
+// Body
+$body-background-color: #ffffff;
+$body-heading-color: #1a202c;
+$body-text-color: #2d3748;
+
+// Links — AWS blue accent
+$link-color: #0073bb;
+
+// Sidebar
+$sidebar-color: #f8f9fb;
+$nav-child-link-color: #4a5568;
+
+// Buttons
+$base-button-color: #f1f5f9;
+$btn-primary-color: #0073bb;
+
+// Code blocks — dark background for workshop readability
+$code-background-color: #0d1117;
+$code-linenumber-color: #e6edf3;
+
+// Tables
+$table-background-color: #ffffff;
+
+// Search
+$search-background-color: #ffffff;
+$search-result-preview-color: #4a5568;
+
+// Borders
+$border-color: #e2e8f0;
+
+// Feedback
+$feedback-color: #f1f5f9;
+
+// Code syntax highlighting — GitHub Dark for contrast
+@import "./vendor/accessible-pygments/github-dark";
