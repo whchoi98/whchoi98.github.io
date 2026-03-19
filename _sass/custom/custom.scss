@@ -41,12 +41,11 @@
 // sits beside the content, and use sticky so it follows on scroll.
 
 @media (min-width: 1100px) {
-  // Reserve right space so text doesn't go under TOC
+  // Constrain content width to leave room for TOC
   .main-content {
-    padding-right: 260px;
+    max-width: calc(100% - 260px) !important;
   }
 
-  // Hide the "TABLE OF CONTENTS" heading on desktop
   .main-content #table-of-contents {
     position: fixed;
     right: 24px;
