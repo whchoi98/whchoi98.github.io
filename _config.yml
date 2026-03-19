@@ -6,7 +6,7 @@
 text_skin: dark # "default", "dark", "forest", "ocean", "chocolate", "orange"
 highlight_theme: tomorrow-night-eighties # "default", "tomorrow", "tomorrow-night", "tomorrow-night-eighties", "tomorrow-night-blue", "tomorrow-night-bright"
 url: https://whchoi98.github.io
-baseurl:
+baseurl: ""
 title: WooHyung Choi Tech Blog
 description: >
   AWS Solutions Architect's Workshop & Tech Notes -
@@ -127,6 +127,7 @@ defaults:
 ## => Plugins
 ##############################
 plugins:
+  - jekyll-remote-theme
   - jekyll-feed
   - jekyll-paginate
   - jekyll-sitemap
