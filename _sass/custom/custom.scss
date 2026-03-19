@@ -51,18 +51,14 @@
   background-color: #f8f9fb;
   border: 1px solid #e8e8e8;
   border-radius: 8px;
-  padding: 0.75rem 1.5rem;
-  margin-bottom: 1.5rem;
-  font-size: 0.82rem;
-  line-height: 1.7;
+  padding: 0.85rem 1.5rem;
+  margin-bottom: 2rem;
+  font-size: 0.85rem;
+  line-height: 2;
   list-style: none;
-  columns: 2;
-  column-gap: 2rem;
 
   li {
     list-style: none;
-    break-inside: avoid;
-    margin-bottom: 0.2rem;
 
     a {
       color: #57606a;
@@ -74,18 +70,9 @@
     }
   }
 
+  // Hide nested sub-items to keep TOC compact
   ul {
-    list-style: none;
-    padding-left: 1rem;
-    margin-top: 0.1rem;
-    margin-bottom: 0.1rem;
-  }
-}
-
-// Single column on smaller screens
-@media (max-width: 900px) {
-  .main-content #markdown-toc {
-    columns: 1;
+    display: none;
   }
 }
 
