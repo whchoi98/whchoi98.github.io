@@ -3,7 +3,7 @@ title: "MCP Tool Forge - MCP 도구를 코드로 변환하는 CLI"
 parent: AIML
 grand_parent: Tech Blog
 nav_order: 2
-last_modified_date: 2026-03-19
+last_modified_date: "2026-03-19"
 ---
 
 # MCP Tool Forge — MCP 서버 도구(Tool)를 실행 가능한 코드로 변환하는 Python CLI

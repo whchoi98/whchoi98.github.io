@@ -3,6 +3,7 @@ title: Observability
 parent: Tech Blog
 nav_order: 5
 has_children: true
+last_modified_date: "2026-03-19"
 ---
 
 # Observability

@@ -3,6 +3,7 @@ title: Workshop
 layout: default
 nav_order: 2
 has_children: true
+last_modified_date: "2026-03-19"
 permalink: /docs/workshop/
 ---
 

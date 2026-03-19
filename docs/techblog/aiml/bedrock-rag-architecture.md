@@ -3,7 +3,7 @@ title: Building RAG with Amazon Bedrock
 parent: AIML
 grand_parent: Tech Blog
 nav_order: 1
-last_modified_date: 2026-03-19
+last_modified_date: "2026-03-19"
 ---
 
 # Building RAG Architecture with Amazon Bedrock

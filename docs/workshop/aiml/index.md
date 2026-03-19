@@ -3,6 +3,7 @@ title: AIML
 parent: Workshop
 nav_order: 1
 has_children: true
+last_modified_date: "2026-03-19"
 ---
 
 # AIML Workshop
