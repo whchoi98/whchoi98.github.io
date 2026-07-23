@@ -140,7 +140,7 @@
     캡스톤은 네 가지 미션 중 <strong>하나를 선택</strong>해 완주하며, 별도 인프라 없이 혼자서도 처음부터 끝까지 수행할 수 있습니다.
   </p>
   <div class="hero-meta">
-    <span>구성 <strong>Chapter 랩 5 + Capstone 4</strong></span>
+    <span>구성 <strong>Chapter 랩 6 + Capstone 4 + Reference 3</strong></span>
     <span>환경 <strong>Claude Code on EC2 + Admin 계정</strong></span>
     <span>리전 <strong>ap-northeast-2</strong></span>
     <span>모델 <strong>Opus 4.8, Sonnet 5.0, Sonnet 4.6 (Global CRIS)</strong></span>
@@ -157,6 +157,7 @@
     <span class="day" style="margin-left:14px">DAY 2</span>
     <span class="chip">Ch4 Settings 슈퍼랩</span><span class="arrow">→</span>
     <span class="chip">Ch5 CLI Reference</span><span class="arrow">→</span>
+    <span class="chip">Ch6 Agent SDK</span><span class="arrow">→</span>
     <span class="chip">Capstone 택 1</span>
     <span class="opt">+ OPTION 하네스 엔지니어링 15분</span>
   </div>
@@ -165,7 +166,7 @@
 <main>
 
 <section class="wrap" id="chapters">
-  <div class="sec-title"><h2>Chapter Hands-on Labs</h2><span class="tag">정규 5랩 / 각 40~80분</span></div>
+  <div class="sec-title"><h2>Chapter Hands-on Labs</h2><span class="tag">정규 6랩 / 각 40~80분</span></div>
   <p class="sec-desc">이론 세션 직후 바로 이어지는 실습입니다. 순서대로 진행하며, 각 랩은 이전 랩의 인증 상태를 전제합니다.</p>
   <div class="rows">
 
@@ -214,6 +215,15 @@
       <span class="side"><span class="time">40분 내외</span>준비 + 4 Task <span class="go">랩 열기 →</span></span>
     </a>
 
+    <a class="row" href="ClaudeCode_Ch6_HandsOnLab.html">
+      <span class="ch">CH 06</span>
+      <span class="body">
+        <h3>Agent SDK, Claude Code를 코드에서 부른다</h3>
+        <p>query 함수, resume 대화 메모리, in-process 커스텀 도구, 프로세스를 넘는 미니 상주 점검원.</p>
+      </span>
+      <span class="side"><span class="time">60분 내외</span>준비 + 4 Task <span class="go">랩 열기 →</span></span>
+    </a>
+
   </div>
 </section>
 
@@ -255,6 +265,42 @@
       <p class="desc">Titan 임베딩과 DynamoDB 코사인 검색으로 RAG의 원리를 손으로. 출처 [번호] 인용, 근거 없으면 정직한 거절, 환각 게이트 자격시험.</p>
       <p class="finale"><b>FINALE</b>셀프 인터뷰, 함정 질문에 거절이 뜨면 합격</p>
       <span class="foot">135분 / 6 Mission <span class="go">미션 열기 →</span></span>
+    </a>
+
+  </div>
+</section>
+
+
+<section class="wrap" id="references">
+  <div class="sec-title"><h2>References</h2><span class="tag">찾아보기 3부작</span></div>
+  <p class="sec-desc">랩 진행 중 옆에 띄워 두는 참고 문서입니다. 커맨드 레버, 플러그인, 그리고 파일이 사는 곳.</p>
+  <div class="rows">
+
+    <a class="row" href="ClaudeCode_Reference1_Commands.html">
+      <span class="ch" style="color:var(--lavender)">REF 1</span>
+      <span class="body">
+        <h3>슬래시 커맨드, 세션을 조종하는 30개의 레버</h3>
+        <p>시작/설정, 작업 흐름, 병렬, 검수, 세션 이동, 상태로 묶은 선별 목록과 워크샵 등장 위치.</p>
+      </span>
+      <span class="side"><span class="time">찾아보기</span><span class="go">열기 →</span></span>
+    </a>
+
+    <a class="row" href="ClaudeCode_Reference2_Plugins.html">
+      <span class="ch" style="color:var(--lavender)">REF 2</span>
+      <span class="body">
+        <h3>플러그인, 팀의 하네스를 배포하는 단위</h3>
+        <p>설치 3동사와 워크샵 3종(superpowers, project-init, harness-eval)의 역할, 신뢰 가드.</p>
+      </span>
+      <span class="side"><span class="time">찾아보기</span><span class="go">열기 →</span></span>
+    </a>
+
+    <a class="row" href="ClaudeCode_Reference3_Directory.html">
+      <span class="ch" style="color:var(--lavender)">REF 3</span>
+      <span class="body">
+        <h3>디렉토리 구조, 무엇이 어디 사는가</h3>
+        <p>~/.claude와 .claude, managed의 세 층 지도와 설정 우선순위, CLAUDE.md 계층 합산.</p>
+      </span>
+      <span class="side"><span class="time">찾아보기</span><span class="go">열기 →</span></span>
     </a>
 
   </div>
