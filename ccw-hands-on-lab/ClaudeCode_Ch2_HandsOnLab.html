@@ -367,8 +367,8 @@ kbd {
   max-width: 760px;
 }
 .callout strong { color: var(--text); }
-.callout.tip .co-title { color: var(--orange); }
-
+.callout.tip { border-left: 3px solid var(--orange); }
+.callout.warn { border-left: 3px solid var(--crimson); }
 .callout .co-title {
   display: block;
   font-size: 12px;
@@ -376,7 +376,7 @@ kbd {
   letter-spacing: 0.1em;
   margin-bottom: 5px;
 }
-
+.callout.tip .co-title { color: var(--orange); }
 .callout.warn .co-title { color: #FF5C85; }
 
 /* ============ Checkpoint ============ */
@@ -511,50 +511,6 @@ footer .mail { color: var(--orange); }
   .timeline-inner { padding: 10px 20px; }
   .seg .seg-txt { font-size: 9px; }
   .task-head h2 { font-size: 20px; }
-}
-
-/* ── Korean typography fix: 단어 단위 줄바꿈, 히어로 정돈 ── */
-body { word-break: keep-all; overflow-wrap: break-word; }
-.hero h1 { max-width: 980px; font-size: clamp(26px, 4vw, 38px); text-wrap: balance; }
-.hero .subtitle, .hero .lede, .task-goal, .wrapup .sub { text-wrap: pretty; }
-
-/* ── 잘림 방지 v2: 히어로 압축 + 좁은 화면 대응 ── */
-.hero { padding: 44px 28px 34px; }
-.eyebrow { margin-bottom: 14px; }
-.hero h1 { line-height: 1.3; }
-.hero .subtitle { margin-top: 10px; }
-.hero .lede { margin-top: 12px; }
-.seg-txt { text-overflow: ellipsis; }
-@media (max-width: 620px) {
-  .hero { padding: 26px 16px 24px; }
-  .hero h1 { font-size: 23px; }
-  .hero .subtitle { font-size: 15px; }
-  .hero .lede { font-size: 14px; }
-  .hero-meta { gap: 6px 14px; font-size: 12px; }
-  .seg .seg-txt { display: none; }
-  .timeline-inner { padding: 0 10px; }
-}
-
-/* ── 잘림 방지 v3: 좁은 화면 가로 넘침 제거 ── */
-.tbl { display: block; overflow-x: auto; max-width: 100%; }
-.hero, .layout, .timeline-inner, main, section { min-width: 0; }
-@media (max-width: 620px) {
-  .timeline-label:last-child { display: none; }
-}
-
-/* ── 잘림 방지 v4: 인라인 코드 칩의 최소폭 강제 해제 ── */
-code.inline { white-space: normal; overflow-wrap: anywhere; }
-
-/* ── v5: 소개문/본문 전체 폭 사용 (가독성 캡 해제) ── */
-.hero .lede, .task-goal, p.body, .callout, .part-divider p, .wrapup .sub { max-width: none; }
-.hero .lede { text-wrap: wrap; }
-
-/* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
-.code-head::before {
-  content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
-  width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;
-  box-shadow: 18px 0 0 #FEBC2E, 36px 0 0 #28C840;
 }
 </style>
 </head>
@@ -880,11 +836,13 @@ grep '^tools:' .claude/agents/dangerous-test.md   <span class="cmt"># tools: Rea
 
   <div class="step-title"><span class="step-no">4</span>/clear로 새 위임을 강제한 뒤 재시도</div>
   <div class="callout warn">
-    <span class="co-title">중요, 같은 요청을 그냥 반복하면 여전히 거부됩니다</span>
-    정의 파일 변경은 <strong>다음 새 위임부터</strong> 적용됩니다. 그런데 메인은 직전 턴에서
+    <span class="co-title">중요, /clear는 "정의 인식"용이 아니라 "대화 맥락 리셋"용입니다</span>
+    정의 파일의 생성·수정 자체는 <strong>파일 워처가 몇 초 내 자동 반영</strong>합니다 —
+    재시작도 /clear도 필요 없습니다(유일한 예외: 세션 도중 <code class="inline">.claude/agents/</code> 폴더 자체를
+    새로 만든 경우만 재시작 필요). 문제는 <strong>메인의 대화 맥락</strong>입니다: 직전 턴에서
     "이 에이전트는 수정 불가"를 이미 학습했기 때문에, 같은 요청을 반복하면 재위임 없이 기존 맥락으로
     답하거나 이전 인스턴스를 재개(resume)할 수 있습니다. 재개된 서브에이전트는 <strong>스폰 시점의 도구 권한을 그대로 유지</strong>합니다.
-    <code class="inline">/clear</code>로 맥락을 비워 갱신된 정의로 새 인스턴스가 뜨게 만드세요(세션 재시작도 동일 효과).
+    <code class="inline">/clear</code>는 이 학습된 맥락을 비워 <strong>새 위임(새 인스턴스)</strong>이 일어나게 만드는 용도입니다.
   </div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
@@ -902,9 +860,10 @@ grep '^tools:' .claude/agents/dangerous-test.md   <span class="cmt"># tools: Rea
   </div>
   <p class="body">
     이것이 <strong>의도적 권한 부여와 무분별한 전체 권한의 차이</strong>입니다.
-    동시에, 서브에이전트의 도구 권한이 <strong>인스턴스 스폰 시점에 고정</strong>된다는 점과
-    메인의 대화 맥락이 재위임을 가로막을 수 있다는 점, 그리고 <code class="inline">/clear</code>가
-    이런 상황의 실전 해결책이라는 점까지 함께 체득한 것입니다.
+    동시에, 정의 파일 변경은 파일 워처가 자동 반영하지만 서브에이전트의 도구 권한은
+    <strong>인스턴스 스폰 시점에 고정</strong>된다는 점, 메인의 대화 맥락이 재위임을 가로막을 수 있다는 점,
+    그리고 <code class="inline">/clear</code>가 (정의 인식이 아니라) 이런 맥락 문제의 실전 해결책이라는
+    점까지 함께 체득한 것입니다.
   </p>
 
   <div class="step-title"><span class="step-no">5</span>실습 프로젝트 원상 복구</div>
@@ -1140,12 +1099,21 @@ head -c 400 review-result.json</code></pre>
   <div class="step-title"><span class="step-no">2</span>JSON 후처리</div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code><span class="cmt"># jq가 있다면: 요약과 high severity만 추출</span>
-jq '.summary' review-result.json
-jq '.issues | map(select(.severity == "high"))' review-result.json 2&gt;/dev/null
+    <pre><code><span class="cmt"># --output-format json의 출력은 Claude Code의 "결과 봉투"입니다.</span>
+<span class="cmt"># 리뷰 본문은 .result(문자열), 비용은 .total_cost_usd, 재개 열쇠는 .session_id.</span>
+<span class="cmt"># (.summary/.issues 같은 키는 존재하지 않습니다 — 봉투 스키마가 고정)</span>
+jq -r '.result' review-result.json
+jq -r '.total_cost_usd, .session_id' review-result.json
 
 <span class="cmt"># jq가 없다면</span>
 python3 -m json.tool review-result.json | head -30</code></pre>
+  </div>
+  <div class="callout tip">
+    <span class="co-title">severity별 필터링을 하고 싶다면 --json-schema</span>
+    <code class="inline">.issues[].severity</code>처럼 구조화된 필드를 jq로 다루려면, 모델의 자유 산문을
+    파싱하는 게 아니라 <code class="inline">--json-schema &lt;스키마파일&gt;</code>로 <strong>스키마 검증된
+    최상위 JSON</strong>을 강제해야 합니다. 그 출력은 봉투 없이 스키마 그대로 반환되므로
+    <code class="inline">jq '.issues | map(select(.severity == "high"))'</code>가 그대로 동작합니다.
   </div>
 
   <div class="step-title"><span class="step-no">3</span>CI 통합 패턴 확인 (참고)</div>
@@ -1231,6 +1199,7 @@ jobs:
 
 <footer>
   <div class="who">Claude Code Deep Dive Workshop, Chapter 2 Hands-on Lab</div>
+  <div>Choi, WooHyung / Prin. Solutions Architect / AWS Korea / <span class="mail">whchoi@amazon.com</span></div>
   <div>기준: Claude Code 2.1.x, 2026.07 / 명령어와 출력은 버전에 따라 일부 다를 수 있습니다</div>
 </footer>
 
