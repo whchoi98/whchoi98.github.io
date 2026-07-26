@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
 <title>Chapter 1 Hands-on Lab - Claude Code Deep Dive Workshop</title>
 <style>
 :root {
@@ -19,7 +20,7 @@
   --text: #E2E4EC;
   --muted: #A6ABBE;
   --dim: #7B8198;
-  --font-body: "NanumSquareOTF", "NanumSquare", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-code: "D2Coding", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -321,14 +322,6 @@ kbd {
   align-items: center;
   gap: 7px;
 }
-.code-label::before {
-  content: "";
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-.code-wrap.output .code-label::before { background: var(--dim); }
-.code-wrap.prompt .code-label::before { background: var(--green); }
 .copy-btn {
   font-family: var(--font-body);
   font-size: 12px;
@@ -550,7 +543,7 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 .hero .lede { text-wrap: wrap; }
 
 /* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
+.code-head { position: relative; padding-left: 76px; }
 .code-head::before {
   content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
   width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;
@@ -656,11 +649,13 @@ git --version    <span class="cmt"># 2.x 이상 권장</span></code></pre>
     <span class="time-badge">6분</span>
   </div>
   <p class="task-goal">
-    npm으로 Claude Code를 글로벌 설치하고, <strong>claude doctor</strong> 자가 진단으로
-    시스템 / 네트워크 / 설정 상태를 검증합니다.
+    이 랩의 EC2에는 Claude Code가 <strong>이미 설치되어 있습니다</strong>. 설치 단계는 건너뛰고,
+    <strong>claude doctor</strong> 자가 진단으로 버전과 상태만 검증합니다.
   </p>
 
-  <div class="step-title"><span class="step-no">1</span>Claude Code 설치</div>
+  <div class="step-title"><span class="step-no">1</span>Claude Code 설치 (이 환경에선 생략)</div>
+  <p class="body">실습 EC2에는 사전 설치되어 있으므로 이 단계는 <strong>실행하지 않습니다</strong>.
+  아래 명령은 나중에 본인 PC 등 다른 환경에 직접 설치할 때의 참고입니다.</p>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>npm install -g @anthropic-ai/claude-code</code></pre>
@@ -689,22 +684,21 @@ git --version    <span class="cmt"># 2.x 이상 권장</span></code></pre>
 
   <div class="code-wrap output">
     <div class="code-head"><span class="code-label">출력 예시</span></div>
-    <pre><code>Claude Code Doctor
-
-System
-  OS        macOS 14.6 (arm64)        <span class="ok">OK</span>
-  Node      v20.10.0                  <span class="ok">OK</span>
-  Disk free 12.3 GB                   <span class="ok">OK</span>
-
-Network
-  api.anthropic.com  reachable (43ms) <span class="ok">OK</span>
-  Outbound HTTPS     allowed          <span class="ok">OK</span>
-
-Config
-  Settings file  ~/.claude/settings.json  <span class="ok">OK</span>
-  CLAUDE.md      not found (project root)  i
-
-Issues: 0 errors, 1 info</code></pre>
+    <pre><code>$ claude doctor
+Claude Code doctor
+Running: native (2.1.220)
+Commit: 4073f59596e2
+Platform: linux-arm64
+Path: /home/ec2-user/.local/share/claude/versions/2.1.220
+Config install method: native
+Search: OK (bundled)
+Auto-updates: disabled (set by env: DISABLE_AUTOUPDATER)
+Auto-update channel: latest
+Last update attempt: none recorded
+Remote Control
+Control this session from claude.ai/code or the Claude mobile app
+No installation issues found.
+For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.</code></pre>
   </div>
 
   <div class="checkpoint">
@@ -721,8 +715,9 @@ Issues: 0 errors, 1 info</code></pre>
     <span class="time-badge">5분</span>
   </div>
   <p class="task-goal">
-    3가지 인증 방법 중 <strong>본인 환경에 맞는 하나</strong>를 선택해 설정합니다.
-    워크샵 진행자가 별도 안내한 방법이 있다면 그 방법을 따르세요.
+    이 랩의 터미널에는 <strong>인증이 이미 구성되어 있어 설정 단계를 생략합니다</strong>
+    (c4e 엔드포인트는 Claude Enterprise, ccb 엔드포인트는 Bedrock 용도에 맞게 구성됨).
+    아래 3가지 방법은 다른 환경에서 직접 설정할 때의 참고입니다.
   </p>
 
   <div class="tabs">
@@ -832,7 +827,13 @@ Usage (this session)
   </p>
 
   <div class="step-title"><span class="step-no">1</span>샘플 프로젝트 생성</div>
-  <p class="body">아래 블록 전체를 복사해 터미널에 붙여넣으세요. <code class="inline">~/claude-lab/ch1</code> 아래에 4개 파일이 생성되고 Git 저장소로 초기화됩니다.</p>
+  <p class="body">아래 블록 전체를 복사해 터미널에 붙여넣으세요.</p>
+  <div class="callout tip">
+    <span class="co-title">터미널 위치</span>
+    이 랩의 모든 터미널 명령은 <code class="inline">~/claude-lab/ch1</code>에서 실행합니다.
+    붙여넣기 전에 프롬프트의 현재 경로를 한 번씩 확인하세요.
+  </div>
+  <p class="body"> <code class="inline">~/claude-lab/ch1</code> 아래에 4개 파일이 생성되고 Git 저장소로 초기화됩니다.</p>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>mkdir -p ~/claude-lab/ch1/src &amp;&amp; cd ~/claude-lab/ch1
@@ -1045,7 +1046,7 @@ cat CLAUDE.md</code></pre>
 
   <div class="step-title"><span class="step-no">1</span>버그 재현</div>
   <div class="code-wrap">
-    <div class="code-head"><span class="code-label">Terminal</span><button class="copy-btn" type="button">복사</button></div>
+    <div class="code-head"><span class="code-label">Terminal (~/claude-lab/ch1)</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>npm test</code></pre>
   </div>
   <div class="code-wrap output">
@@ -1113,10 +1114,30 @@ Test 1 ~ 3: <span class="ok">PASS PASS PASS</span></code></pre>
     세션 중 언제든 <kbd>Shift</kbd> + <kbd>Tab</kbd>으로 전환할 수 있습니다.
   </div>
 
-  <div class="checkpoint">
+    <div class="step-title"><span class="step-no">6</span>터미널에서 회귀 확인</div>
+  <p class="body">Plan 모드로 수정한 코드가 기존 테스트를 깨지 않았는지, <code class="inline">~/claude-lab/ch1</code>에서
+  <strong>npm test를 다시 실행</strong>해 직접 확인합니다.</p>
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal (~/claude-lab/ch1)</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>cd ~/claude-lab/ch1
+npm test</code></pre>
+  </div>
+  <div class="code-wrap output">
+    <div class="code-head"><span class="code-label">출력 예시</span></div>
+    <pre><code>$ npm test
+
+&gt; user-service-lab@1.0.0 test
+&gt; node test.js
+
+Test 1 - pro 플랜 사용자: PASS
+Test 2 - free 플랜 사용자: PASS</code></pre>
+  </div>
+
+<div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
     <label class="cp-item"><input type="checkbox" data-cp="t5a"><span>npm test 3개가 모두 PASS로 바뀌었다</span></label>
     <label class="cp-item"><input type="checkbox" data-cp="t5b"><span>Plan 모드에서 계획을 검토하고 승인 / 수정을 경험했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t5z"><span>Plan 실행 후 터미널 npm test가 전부 PASS다</span></label>
   </div>
 </section>
 
@@ -1185,7 +1206,7 @@ cat review.md</code></pre>
 <!-- ================= Wrap-up ================= -->
 <section class="wrapup" id="wrapup">
   <h2>마무리, 학습 목표 체크리스트</h2>
-  <p class="sub">Chapter 1의 학습 목표를 스스로 점검하세요. 미달성 항목은 진행자에게 질문하거나 강의 자료의 해당 Part를 다시 확인합니다.</p>
+  <p class="sub">Chapter 1의 학습 목표를 스스로 점검하세요. 미달성 항목은 강의 자료의 해당 Part를 다시 확인하거나 Slack 채널에 질문을 남기세요.</p>
   <table class="tbl">
     <tr><th>목표</th><th>확인 질문</th><th>관련</th></tr>
     <tr><td>Define</td><td>Copilot / Cursor와 Claude Code의 차이를 설명할 수 있는가</td><td>강의 Part 1</td></tr>
@@ -1265,7 +1286,7 @@ cat review.md</code></pre>
   var taskGroups = {
     t0: ["t0"], t1: ["t1"], t2: ["t2"],
     t3: ["t3a", "t3b"], t4: ["t4a", "t4b"],
-    t5: ["t5a", "t5b"], t6: ["t6"]
+    t5: ["t5a", "t5b", "t5z"], t6: ["t6"]
   };
   var state = {};
 

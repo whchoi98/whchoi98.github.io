@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
 <title>Chapter 4 Hands-on Lab - Claude Code Deep Dive Workshop</title>
 <style>
 :root {
@@ -19,7 +20,7 @@
   --text: #E2E4EC;
   --muted: #A6ABBE;
   --dim: #7B8198;
-  --font-body: "NanumSquareOTF", "NanumSquare", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-code: "D2Coding", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -321,14 +322,6 @@ kbd {
   align-items: center;
   gap: 7px;
 }
-.code-label::before {
-  content: "";
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-.code-wrap.output .code-label::before { background: var(--dim); }
-.code-wrap.prompt .code-label::before { background: var(--green); }
 .copy-btn {
   font-family: var(--font-body);
   font-size: 12px;
@@ -570,7 +563,7 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 .hero .lede { text-wrap: wrap; }
 
 /* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
+.code-head { position: relative; padding-left: 76px; }
 .code-head::before {
   content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
   width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;
@@ -754,9 +747,11 @@ echo "개인 설정 완료"</code></pre>
   </div>
 
   <div class="step-title"><span class="step-no">3</span>병합 결과 검증</div>
+  <p class="body">검증은 <strong>랩 폴더 안에서</strong> 해야 프로젝트 설정이 로드됩니다. 경로부터 맞추고 세션을 엽니다.</p>
   <div class="code-wrap">
-    <div class="code-head"><span class="code-label">Terminal</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>claude</code></pre>
+    <div class="code-head"><span class="code-label">Terminal (~/claude-lab/ch4)</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>cd ~/claude-lab/ch4
+claude</code></pre>
   </div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
@@ -1033,8 +1028,17 @@ claude mcp list</code></pre>
   <div class="callout warn">
     <span class="co-title">연결된 서버는 공짜가 아닙니다</span>
     연결된 서버의 도구 이름과 설명은 <strong>모든 세션의 컨텍스트에 로드</strong>됩니다.
-    쓰지 않는 서버는 제거해 컨텍스트를 아끼세요. <code class="inline">/context</code>로 소비량을 볼 수 있습니다.
+    쓰지 않는 서버는 제거해 컨텍스트를 아끼세요.
   </div>
+
+  <p class="body">제거 전후로 <strong>소비량을 눈으로 비교</strong>해 보세요. all을 붙이면 항목별 상세가 펼쳐집니다.</p>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>/context all</code></pre>
+  </div>
+  <p class="body">색 격자에서 <strong>MCP tools 항목</strong>을 찾아 보세요. 방금 연결했던 서버의 도구 설명이
+  차지하던 토큰이 보이고, 제거 후에는 그 조각이 사라집니다. 시스템 프롬프트, 메모리(CLAUDE.md), 도구, 대화가
+  각각 얼마를 쓰는지 이 화면 하나로 파악하는 습관이 컨텍스트 절약의 시작입니다.</p>
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
@@ -1063,6 +1067,36 @@ claude mcp list</code></pre>
     (구 <code class="inline">.claude/commands/이름.md</code>도 계속 동작), 스킬 디렉토리는 <strong>파일 감시로 즉시 반영</strong>됩니다.
     단, 프로젝트에 skills 디렉토리를 처음 만드는 경우라면 세션을 재시작해야 감시가 시작됩니다.
   </p>
+</section>
+
+<section class="task">
+  <div class="task-head">
+    <span class="task-num">SUPER LAB PREP</span>
+    <h2>실험 울타리 걷어내기</h2>
+    <span class="time-badge">1분</span>
+  </div>
+  <p class="task-goal">Part A에서 깐 <strong>ask / deny 권한 패턴과 Hook은 학습용 울타리</strong>였습니다.
+  슈퍼랩은 Claude가 파일을 여러 개 만들고 고치므로, 그대로 두면 승인 요청이 쏟아져 흐름이 끊깁니다.
+  두 설정 파일을 비우고 새 세션으로 시작하세요.</p>
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal (~/claude-lab/ch4)</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>cd ~/claude-lab/ch4
+echo '{}' > .claude/settings.json
+echo '{}' > .claude/settings.local.json</code></pre>
+  </div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력, 재시작으로 반영</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>/exit</code></pre>
+  </div>
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal, 재진입</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>claude</code></pre>
+  </div>
+  <div class="callout tip">
+    <span class="co-title">배운 것을 지우는 게 아닙니다</span>
+    규칙 문법과 Hook 설계는 이미 손에 남았습니다. 실무에서는 팀에 맞는 울타리를 다시 세우면 되고,
+    지금은 빌드 속도가 우선입니다.
+  </div>
 </section>
 
 <!-- ================= Mission 1 ================= -->
@@ -1172,6 +1206,13 @@ $ARGUMENTS 가 있으면 "### 오늘" 섹션의 항목으로 정리하고, 없�
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>/release-notes HEAD~2..HEAD</code></pre>
   </div>
+  <div class="callout warn">
+    <span class="co-title">HEAD~2가 없다는 에러가 난다면</span>
+    이 저장소의 커밋이 아직 2개뿐이면 <code class="inline">HEAD~2</code>가 가리킬 커밋이 없어
+    git log가 <code class="inline">fatal: ambiguous argument</code> 류의 에러를 냅니다. 정상적인 상황이니
+    범위를 <code class="inline">/release-notes HEAD~1..HEAD</code>로 줄이거나, 커밋을 하나 더 만든 뒤 다시 실행하세요.
+    인자 검증이 없는 스킬의 전형적인 실패 모드를 먼저 만나 본 셈입니다.
+  </div>
   <div class="code-wrap output">
     <div class="code-head"><span class="code-label">관찰 포인트</span></div>
     <pre><code>[Explore 에이전트로 포크 실행]   <span class="cmt"># 프롬프트 아래 서브에이전트 패널에 표시</span>
@@ -1264,11 +1305,19 @@ agent: Explore
   </p>
 
   <div class="step-title"><span class="step-no">3</span>보너스, 스킬 평가 자동화 (네트워크 필요, 선택)</div>
+  <p class="body">아래 세 줄을 <strong>한 줄씩</strong> 실행하세요. 각 명령의 응답을 확인하고 다음으로 넘어갑니다.</p>
   <div class="code-wrap prompt">
-    <div class="code-head"><span class="code-label">Claude 세션 입력, 선택</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/plugin marketplace add anthropics/claude-plugins-official
-/plugin install skill-creator@claude-plugins-official
-/reload-plugins</code></pre>
+    <div class="code-head"><span class="code-label">Claude 세션 입력 1/3, 마켓 등록</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>/plugin marketplace add anthropics/claude-plugins-official</code></pre>
+  </div>
+  <p class="body">공식 마켓은 보통 자동 등록되어 있어 "이미 등록됨" 메시지가 나올 수 있습니다. 정상입니다.</p>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력 2/3, 설치</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>/plugin install skill-creator@claude-plugins-official</code></pre>
+  </div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력 3/3, 반영</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>/reload-plugins</code></pre>
   </div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력, 선택</span><button class="copy-btn" type="button">복사</button></div>
@@ -1330,7 +1379,7 @@ git log --oneline | head -3</code></pre>
 <!-- ================= Wrap-up ================= -->
 <section class="wrapup" id="wrapup">
   <h2>마무리, 학습 목표 체크리스트</h2>
-  <p class="sub">Chapter 4의 학습 목표를 스스로 점검하세요. 미달성 항목은 진행자에게 질문하거나 강의 자료의 해당 Part를 다시 확인합니다.</p>
+  <p class="sub">Chapter 4의 학습 목표를 스스로 점검하세요. 미달성 항목은 강의 자료의 해당 Part를 다시 확인하거나 Slack 채널에 질문을 남기세요.</p>
   <table class="tbl">
     <tr><th>목표</th><th>확인 질문</th><th>관련</th></tr>
     <tr><td>Layers</td><td>5단 우선순위와 팀/개인 설정 분리를 체험했는가</td><td>A1</td></tr>
@@ -1343,7 +1392,19 @@ git log --oneline | head -3</code></pre>
     <tr><td>Share</td><td>스타터 킷을 커밋하고 공유 경로 3가지를 아는가</td><td>M4</td></tr>
   </table>
 
-  <div class="next-box">
+    <h3 style="margin:26px 0 6px; font-size:16px;">가져가면 좋은 추천 스킬 리스트</h3>
+  <p class="sub">팀에 돌아가 처음 만들 스킬 후보들입니다. 전부 오늘 배운 패턴(인자, 주입, 격리, 수동 전용)으로 만들 수 있습니다.</p>
+  <table class="tbl">
+    <tr><th>스킬</th><th>하는 일</th><th>만들 때 포인트</th></tr>
+    <tr><td><code class="inline">/release-notes</code></td><td>커밋 범위를 사용자용 릴리스 노트로</td><td>오늘 빌드, context: fork로 격리 실행</td></tr>
+    <tr><td><code class="inline">/standup</code></td><td>어제 커밋과 오늘 계획을 데일리 포맷으로</td><td>오늘 빌드, git log 주입</td></tr>
+    <tr><td><code class="inline">/pr-desc</code></td><td>현재 diff를 읽어 PR 제목과 본문 초안</td><td>!`git diff --stat` 주입 + 템플릿 강제</td></tr>
+    <tr><td><code class="inline">/test-gap</code></td><td>변경 파일 대비 빠진 테스트 목록화</td><td>읽기 전용 도구만, 제안까지만 하게 제한</td></tr>
+    <tr><td><code class="inline">/db-migrate</code></td><td>마이그레이션 절차를 단계별 안내</td><td>disable-model-invocation: true, 사람이 부를 때만</td></tr>
+    <tr><td><code class="inline">/incident-brief</code></td><td>로그 구간을 타임라인 요약으로</td><td>argument-hint로 시간 범위, 결론 3줄 강제</td></tr>
+  </table>
+
+<div class="next-box">
     <div>
       <div class="nx-label">NEXT CHAPTER</div>
       <h3>Chapter 5 - CLI Reference</h3>

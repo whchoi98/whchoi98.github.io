@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
 <title>Capstone Hands-on Lab - Claude Code Deep Dive Workshop</title>
 <style>
 :root {
@@ -19,7 +20,7 @@
   --text: #E2E4EC;
   --muted: #A6ABBE;
   --dim: #7B8198;
-  --font-body: "NanumSquareOTF", "NanumSquare", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-code: "D2Coding", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -321,14 +322,6 @@ kbd {
   align-items: center;
   gap: 7px;
 }
-.code-label::before {
-  content: "";
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-.code-wrap.output .code-label::before { background: var(--dim); }
-.code-wrap.prompt .code-label::before { background: var(--green); }
 .copy-btn {
   font-family: var(--font-body);
   font-size: 12px;
@@ -570,7 +563,7 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 .hero .lede { text-wrap: wrap; }
 
 /* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
+.code-head { position: relative; padding-left: 76px; }
 .code-head::before {
   content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
   width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;
@@ -678,10 +671,31 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
     <div class="code-head"><span class="code-label">Terminal, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>aws sts get-caller-identity --query Account --output text
 node -v &amp;&amp; git --version &amp;&amp; jq --version
-npx cdk --version
+npx cdk --version</code></pre>
+  </div>
 
-# Global Inference Profile smoke (Sonnet 4.6)
-aws bedrock-runtime converse \
+  <p class="body">Bedrock 호출은 <strong>다른 계정에서 발급받은 Bedrock API 키(Bearer 토큰)</strong>로 인증합니다.
+  SigV4 자격증명 없이 환경변수 하나면 됩니다. 세 단계로 스모크 테스트합니다.</p>
+
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal 1/3, .env에 Bearer 토큰 저장</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>mkdir -p ~/capstone
+cat &gt; ~/capstone/.env &lt;&lt; 'ENVEOF'
+AWS_BEARER_TOKEN_BEDROCK=&lt;발급받은 Bedrock API 키&gt;
+ENVEOF</code></pre>
+  </div>
+  <p class="body">저장 후 파일을 열어 <code class="inline">&lt;발급받은 Bedrock API 키&gt;</code> 자리를 실제 키로 바꾸세요.
+  <strong>리포 바깥(~/capstone/.env)에 두므로</strong> git add -A에 딸려 커밋될 일이 원천적으로 없습니다.</p>
+
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal 2/3, 셸에 로드 (값 노출 없이)</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>set -a; source ~/capstone/.env; set +a</code></pre>
+  </div>
+
+  <div class="code-wrap">
+    <div class="code-head"><span class="code-label">Terminal 3/3, Converse API 스모크</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>aws bedrock-runtime converse \
+  --region ap-northeast-2 \
   --model-id global.anthropic.claude-sonnet-4-6 \
   --messages '[{"role":"user","content":[{"text":"ping"}]}]' \
   --inference-config '{"maxTokens":30}' \
@@ -689,20 +703,27 @@ aws bedrock-runtime converse \
   </div>
   <div class="callout warn">
     <span class="co-title">smoke가 실패한다면</span>
-    <code class="inline">AccessDeniedException</code>은 Bedrock 콘솔의 모델 액세스 미승인,
+    401 또는 <code class="inline">UnrecognizedClientException</code>은 키 오탈자나 만료입니다, ~/capstone/.env를 고치고
+    2/3 로드를 다시 실행하세요. <code class="inline">AccessDeniedException</code>은 발급 계정의 모델 액세스 미승인,
     <code class="inline">ValidationException</code>(on-demand 미지원)은 베이스 모델 ID를 쓴 경우입니다.
-    신형 모델은 반드시 <strong>global. 프로파일 ID</strong>로 호출합니다. 여기서 막히면 부록 트러블슈팅의 모델 항목을 확인하세요. 이 관문만 넘으면 M3는 순항입니다.
+    신형 모델은 반드시 <strong>global. 프로파일 ID</strong>로 호출합니다.
+    Bearer 키는 <strong>Bedrock 호출 전용</strong>이고, CDK 배포는 기존 EC2 롤(SigV4)을 그대로 씁니다. 여기서 막히면 부록 트러블슈팅의 모델 항목을 확인하세요. 이 관문만 넘으면 M3는 순항입니다.
   </div>
 
   <div class="step-title"><span class="step-no">2</span>프로젝트 스캐폴드와 bootstrap (백그라운드)</div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>mkdir -p ~/capstone/ops-center &amp;&amp; cd ~/capstone/ops-center
-npx cdk init app --language typescript
+[ -f cdk.json ] || npx cdk init app --language typescript
 (npx cdk bootstrap &gt; /tmp/bootstrap.log 2&gt;&amp;1 &amp;)
+grep -qxF '.env' .gitignore 2&gt;/dev/null || echo '.env' &gt;&gt; .gitignore
+git config user.name "capstone" &amp;&amp; git config user.email "capstone@lab.local"
 git add -A &amp;&amp; git commit -m "chore: cdk scaffold" 2&gt;/dev/null || true
 echo "bootstrap은 백그라운드 진행 중. tail -f /tmp/bootstrap.log 로 확인 가능"</code></pre>
   </div>
+  <p class="body">두 번째 줄의 가드 덕에 <strong>재실행해도 안전</strong>합니다(이미 초기화된 폴더면 init을 건너뜀).
+  .gitignore와 git 신원 설정은 실수 커밋과 신원 경고를 예방하는 안전벨트입니다.</p>
+  
 
   <div class="step-title"><span class="step-no">3</span>superpowers 설치</div>
   <div class="code-wrap prompt">
@@ -723,15 +744,24 @@ echo "bootstrap은 백그라운드 진행 중. tail -f /tmp/bootstrap.log 로 �
   <div class="step-title"><span class="step-no">4</span>브레인스토밍, 요구사항은 이걸 그대로</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/brainstorm 다음 요구사항으로 "Claude Ops Center"를 설계하자.
+    <pre><code>/superpowers:brainstorming 다음 요구사항으로 "Claude Ops Center"를 설계하자.
 1) 정적 SPA 1페이지 대시보드: S3 + CloudFront(OAC) 서빙
 2) HTTP API(API Gateway v2) + Lambda(Node 22) + DynamoDB 단일 테이블(pk/sk): POST/GET /events
 3) POST /ask: Lambda가 Bedrock Converse API로 Global Inference Profile 호출
-   (기본 global.anthropic.claude-sonnet-4-6, CDK context askModelId로 교체 가능), maxTokens 600, CORS 허용
+   (기본 global.anthropic.claude-sonnet-4-6, CDK context askModelId로 교체 가능), maxTokens 600, CORS 허용.
+   Bedrock 인증은 IAM이 아니라 다른 계정에서 발급한 API 키를 쓴다: 배포 셸의 AWS_BEARER_TOKEN_BEDROCK 값을
+   CDK가 Lambda 환경변수로 주입하고, Bedrock용 IAM 정책은 만들지 않는다
 4) 인프라는 CDK TypeScript 단일 스택, 리전 ap-northeast-2, 리소스는 삭제 가능(DESTROY)
 5) 구현 순서는 Phase 1(events API) → Phase 2(frontend) → Phase 3(/ask) → Phase 4(관측 hook, ship 스킬)
 6) 시간 제약 2시간: 단위 테스트는 생략하고 각 Phase의 smoke curl로 검증을 갈음한다
 결정이 필요하면 이 범위 안에서 최소한으로만 물어봐.</code></pre>
+  </div>
+  <div class="callout tip">
+    <span class="co-title">자동화 옵션, auto mode</span>
+    세션에 <code class="inline">auto mode on</code>을 선언해 두면 superpowers가
+    brainstorming → write-plan → execute-plan의 <strong>단계 전환과 승인 대기를 자동으로</strong> 이어 갑니다.
+    시간이 빠듯할 때 유용합니다. 단계마다 직접 검토하려면 기본(수동)을 유지하고, 되돌리려면
+    <code class="inline">auto mode off</code>입니다.
   </div>
   <p class="body">
     브레인스토밍 질문에는 이 치트시트로 답하세요: <strong>인증 없음(퍼블릭 데모)</strong>,
@@ -747,7 +777,7 @@ echo "bootstrap은 백그라운드 진행 중. tail -f /tmp/bootstrap.log 로 �
   <div class="step-title"><span class="step-no">5</span>계획 생성과 승인</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/write-plan</code></pre>
+    <pre><code>/superpowers:write-plan</code></pre>
   </div>
   <p class="body">
     생성된 계획 문서에서 <strong>Phase가 4개로 나뉘었는지</strong>, Phase 1의 산출물에
@@ -776,7 +806,7 @@ echo "bootstrap은 백그라운드 진행 중. tail -f /tmp/bootstrap.log 로 �
   <div class="step-title"><span class="step-no">1</span>Phase 1 실행 지시</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/execute-plan 계획의 Phase 1만 구현하고 멈춰줘. 구현이 끝나면 npx cdk synth --quiet 로 합성 검증까지 하고 결과를 보고해.</code></pre>
+    <pre><code>/superpowers:execute-plan 계획의 Phase 1만 구현하고 멈춰줘. 구현이 끝나면 npx cdk synth --quiet 로 합성 검증까지 하고 결과를 보고해.</code></pre>
   </div>
   <div class="callout tip">
     <span class="co-title">superpowers가 테스트를 쓰려고 하면</span>
@@ -787,7 +817,8 @@ echo "bootstrap은 백그라운드 진행 중. tail -f /tmp/bootstrap.log 로 �
   <div class="step-title"><span class="step-no">2</span>배포</div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, worktree에서</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>npx cdk deploy --require-approval never --outputs-file cdk-outputs.json</code></pre>
+    <pre><code>set -a; source ~/capstone/.env; set +a   # Bearer 키 로드
+npx cdk deploy --require-approval never --outputs-file cdk-outputs.json</code></pre>
   </div>
   <p class="body">
     첫 배포는 3~5분입니다. <strong>기다리지 말고 지금 바로 M2의 Step 1(프론트 병렬 빌드)을 시작하세요.</strong>
@@ -872,17 +903,14 @@ export class OpsCenterStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_22_X,
       handler: "ask.handler",
       code: lambda.Code.fromAsset("lambda"),
-      environment: { ASK_MODEL_ID: askModelId },
+      environment: {
+        ASK_MODEL_ID: askModelId,
+        // 다른 계정 발급 Bedrock API 키, 배포 셸에서 주입 (IAM 정책 불필요)
+        AWS_BEARER_TOKEN_BEDROCK: process.env.AWS_BEARER_TOKEN_BEDROCK ?? "",
+      },
       timeout: cdk.Duration.seconds(29),
       memorySize: 512,
     });
-    askFn.addToRolePolicy(new iam.PolicyStatement({
-      actions: ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
-      resources: [
-        "arn:aws:bedrock:*::foundation-model/anthropic.*",
-        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
-      ],
-    }));
     api.addRoutes({
       path: "/ask",
       methods: [apigwv2.HttpMethod.POST],
@@ -1017,11 +1045,12 @@ export const handler = async (event) =&gt; {
   <div class="step-title"><span class="step-no">2</span>Phase 2 실행과 API 주소 주입</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/execute-plan Phase 2(S3 + CloudFront + BucketDeployment)만 구현해줘. frontend/ 폴더를 배포 소스로 사용해.</code></pre>
+    <pre><code>/superpowers:execute-plan Phase 2(S3 + CloudFront + BucketDeployment)만 구현해줘. frontend/ 폴더를 배포 소스로 사용해.</code></pre>
   </div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>sed -i "s|PASTE_API_URL|$API|" frontend/index.html
+set -a; source ~/capstone/.env; set +a   # Bearer 키 로드
 npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
 SITE=$(jq -r '.OpsCenterStack.SiteUrl' cdk-outputs.json) &amp;&amp; echo "대시보드: $SITE"</code></pre>
   </div>
@@ -1198,18 +1227,26 @@ setInterval(refresh, 5000);
   <div class="step-title"><span class="step-no">1</span>Phase 3 실행 지시</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/execute-plan Phase 3을 구현해줘. 조건:
+    <pre><code>/superpowers:execute-plan Phase 3을 구현해줘. 조건:
 - lambda/ask.mjs: @aws-sdk/client-bedrock-runtime 의 ConverseCommand 사용, 환경변수 ASK_MODEL_ID(기본 global.anthropic.claude-sonnet-4-6), maxTokens 600, CORS 헤더, 오류는 502 JSON
-- 스택: /ask POST 라우트 추가, Lambda timeout 29초, IAM은 두 리소스에 InvokeModel과 InvokeModelWithResponseStream:
-  arn:aws:bedrock:*::foundation-model/anthropic.* 그리고 arn:aws:bedrock:*:&lt;계정&gt;:inference-profile/*</code></pre>
+- 스택: /ask POST 라우트 추가, Lambda timeout 29초. Bedrock IAM 정책은 만들지 말 것.
+  대신 Lambda environment에 AWS_BEARER_TOKEN_BEDROCK: process.env.AWS_BEARER_TOKEN_BEDROCK ?? "" 를 주입
+  (SDK가 이 환경변수를 자동 인식해 API 키로 인증한다)</code></pre>
   </div>
 
   <div class="step-title"><span class="step-no">2</span>배포와 검증</div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
+    <pre><code>set -a; source ~/capstone/.env; set +a   # Bearer 키를 배포 셸에 로드
+npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
 curl -s -X POST "$API/ask" -H 'Content-Type: application/json' \
   -d '{"question":"HTTP API와 REST API의 차이를 한 문장으로"}' | jq '{answer, model, usage}'</code></pre>
+  </div>
+  <div class="callout warn">
+    <span class="co-title">이후의 모든 deploy는 .env 로드가 선행</span>
+    스택이 배포 셸의 <code class="inline">AWS_BEARER_TOKEN_BEDROCK</code>을 읽어 Lambda에 넣으므로,
+    새 터미널에서 deploy할 때는 항상 <code class="inline">set -a; source ~/capstone/.env; set +a</code>를 먼저 실행하세요.
+    빈 값으로 배포되면 /ask가 401을 반환합니다, 로드 후 재배포가 처방입니다.
   </div>
   <div class="code-wrap output">
     <div class="code-head"><span class="code-label">출력 예시</span></div>
@@ -1388,7 +1425,7 @@ allowed-tools: Bash(npx cdk *) Bash(curl *) Bash(aws cloudformation *)
 캡스톤 스택을 출항시키세요. 참가자 이름: $ARGUMENTS
 
 1. `npx cdk synth --quiet` 로 합성 검증. 실패하면 원인만 보고하고 멈추세요.
-2. `npx cdk deploy --require-approval never --outputs-file cdk-outputs.json` 실행.
+2. `set -a; source ~/capstone/.env; set +a &amp;&amp; npx cdk deploy --require-approval never --outputs-file cdk-outputs.json` 실행 (Bearer 키 로드 포함).
 3. cdk-outputs.json에서 ApiUrl과 SiteUrl을 읽으세요.
 4. Smoke 테스트: `curl -s $ApiUrl/events` 가 JSON을 반환하고, `curl -s -X POST $ApiUrl/events -H "Content-Type: application/json" -d '{"kind":"ship","detail":"smoke"}'` 가 201을 반환해야 합니다.
 5. 최종 보고: SiteUrl, ApiUrl, smoke 결과를 표로 출력하고, 셀프 방문에 쓸 두 URL(SiteUrl, ApiUrl)을 한 줄로 안내하세요.

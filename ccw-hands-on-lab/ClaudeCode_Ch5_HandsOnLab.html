@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
 <title>Chapter 5 Hands-on Lab - Claude Code Deep Dive Workshop</title>
 <style>
 :root {
@@ -19,7 +20,7 @@
   --text: #E2E4EC;
   --muted: #A6ABBE;
   --dim: #7B8198;
-  --font-body: "NanumSquareOTF", "NanumSquare", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-code: "D2Coding", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -321,14 +322,6 @@ kbd {
   align-items: center;
   gap: 7px;
 }
-.code-label::before {
-  content: "";
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-.code-wrap.output .code-label::before { background: var(--dim); }
-.code-wrap.prompt .code-label::before { background: var(--green); }
 .copy-btn {
   font-family: var(--font-body);
   font-size: 12px;
@@ -550,7 +543,7 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 .hero .lede { text-wrap: wrap; }
 
 /* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
+.code-head { position: relative; padding-left: 76px; }
 .code-head::before {
   content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
   width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;

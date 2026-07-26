@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
 <title>Capstone Lab B - Claude Code Deep Dive Workshop</title>
 <style>
 :root {
@@ -19,7 +20,7 @@
   --text: #E2E4EC;
   --muted: #A6ABBE;
   --dim: #7B8198;
-  --font-body: "NanumSquareOTF", "NanumSquare", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-body: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-code: "D2Coding", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -321,14 +322,6 @@ kbd {
   align-items: center;
   gap: 7px;
 }
-.code-label::before {
-  content: "";
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--orange);
-}
-.code-wrap.output .code-label::before { background: var(--dim); }
-.code-wrap.prompt .code-label::before { background: var(--green); }
 .copy-btn {
   font-family: var(--font-body);
   font-size: 12px;
@@ -570,7 +563,7 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 .hero .lede { text-wrap: wrap; }
 
 /* ── macOS 터미널 스타일: 신호등 3버튼 ── */
-.code-head { position: relative; padding-left: 60px; }
+.code-head { position: relative; padding-left: 76px; }
 .code-head::before {
   content: ""; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
   width: 11px; height: 11px; border-radius: 50%; background: #FF5F57;
@@ -702,7 +695,7 @@ git add -A &amp;&amp; git commit -m "chore: cdk scaffold" 2&gt;/dev/null || true
   <div class="step-title"><span class="step-no">3</span>브레인스토밍과 계획</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력, 전체 복사</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/brainstorm 다음 요구사항으로 "Self-Healing 운영실"을 설계하자.
+    <pre><code>/superpowers:brainstorming 다음 요구사항으로 "Self-Healing 운영실"을 설계하자.
 1) 대상 서비스: CDK TypeScript 단일 스택(PatientStack), HTTP API + Lambda(Node 22) + DynamoDB 단일 테이블(pk/sk)
    - GET /health: flags 항목(pk=flags, sk=flags)의 force_error가 true이거나 테이블 접근 실패면 500, 정상이면 200 {"ok":true}
    - GET /order: 정상일 때 주문 항목을 기록하고 order_id 반환
@@ -713,10 +706,17 @@ git add -A &amp;&amp; git commit -m "chore: cdk scaffold" 2&gt;/dev/null || true
 5) 시간 제약 2시간: 단위 테스트 생략, 각 Phase는 smoke curl과 드릴 1회로 검증을 갈음한다
 결정이 필요하면 이 범위 안에서 최소한으로만 물어봐.</code></pre>
   </div>
+  <div class="callout tip">
+    <span class="co-title">자동화 옵션, auto mode</span>
+    세션에 <code class="inline">auto mode on</code>을 선언해 두면 superpowers가
+    brainstorming → write-plan → execute-plan의 <strong>단계 전환과 승인 대기를 자동으로</strong> 이어 갑니다.
+    시간이 빠듯할 때 유용합니다. 단계마다 직접 검토하려면 기본(수동)을 유지하고, 되돌리려면
+    <code class="inline">auto mode off</code>입니다.
+  </div>
   <p class="body">
     치트시트: <strong>인증 없음(데모)</strong>, <strong>알림 채널 불필요(INCIDENTS.md 파일로 충분)</strong>,
     <strong>데몬은 nohup 백그라운드면 충분(systemd는 참고)</strong>.
-    브레인스토밍 후 <code class="inline">/write-plan</code>으로 계획을 만들고 Phase 4개 구성을 확인해 승인하세요.
+    브레인스토밍 후 <code class="inline">/superpowers:write-plan</code>으로 계획을 만들고 Phase 4개 구성을 확인해 승인하세요.
   </p>
   <div class="callout warn">
     <span class="co-title">worktree 순간이동, 다시 한 번</span>
@@ -745,7 +745,7 @@ git add -A &amp;&amp; git commit -m "chore: cdk scaffold" 2&gt;/dev/null || true
   <div class="step-title"><span class="step-no">1</span>Phase 1 실행과 배포</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
-    <pre><code>/execute-plan 계획의 Phase 1(대상 서비스 스택)만 구현하고 멈춰줘. 구현 후 npx cdk synth --quiet 검증까지 하고 보고해.</code></pre>
+    <pre><code>/superpowers:execute-plan 계획의 Phase 1(대상 서비스 스택)만 구현하고 멈춰줘. 구현 후 npx cdk synth --quiet 검증까지 하고 보고해.</code></pre>
   </div>
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal, worktree에서</span><button class="copy-btn" type="button">복사</button></div>

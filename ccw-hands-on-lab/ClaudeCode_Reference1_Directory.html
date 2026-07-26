@@ -3,16 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reference 3, 디렉토리 구조 - Claude Code Deep Dive Workshop</title>
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css">
+<title>Reference 1, 디렉토리 구조 - Claude Code Deep Dive Workshop</title>
 <style>
   :root { --bg:#12181F; --card:#1B242E; --code:#0C1117; --line:#2A3542; --text:#E8ECF1;
     --muted:#8B96A5; --charcoal:#C7CDD6; --orange:#FF9900; --crimson:#B6002E;
     --green:#3FB950; --lavender:#c9a2ff; --dim:#7B8198; }
   * { box-sizing:border-box; margin:0; }
   body { background:var(--bg); color:var(--text); line-height:1.65; word-break:keep-all; overflow-wrap:break-word;
-    font-family:"Pretendard","Noto Sans KR",system-ui,-apple-system,sans-serif; }
+    font-family: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", "Noto Sans KR", system-ui, -apple-system, sans-serif; }
   a { color:var(--orange); text-decoration:none; }
-  code, code.inline { font-family:"JetBrains Mono",ui-monospace,monospace; font-size:.86em;
+  code, code.inline { font-family: "D2Coding", "JetBrains Mono",ui-monospace,monospace; font-size:.86em;
     background:#232D38; color:#FFC466; padding:2px 7px; border-radius:4px; white-space:normal; overflow-wrap:anywhere; }
   .hero { position:relative; max-width:1160px; margin:0 auto; padding:44px 28px 30px; overflow:hidden; }
   .hero::after { content:""; position:absolute; top:-150px; right:-170px; width:440px; height:440px;
@@ -37,7 +38,7 @@
   .callout { background:var(--card); border-radius:8px; padding:14px 18px; margin:16px 0; font-size:14px; color:var(--muted); }
   .co-title { display:block; font-size:12px; font-weight:800; letter-spacing:.1em; margin-bottom:5px; color:var(--orange); }
   .code-wrap { background:var(--code); border:1px solid var(--line); border-radius:10px; margin:14px 0 20px; overflow:hidden; }
-  .code-head { display:flex; align-items:center; justify-content:space-between; padding:8px 14px 8px 60px;
+  .code-head { display:flex; align-items:center; justify-content:space-between; padding:8px 14px 8px 76px;
     border-bottom:1px solid var(--line); background:rgba(255,255,255,.02); position:relative; }
   .code-head::before { content:""; position:absolute; left:16px; top:50%; transform:translateY(-50%);
     width:11px; height:11px; border-radius:50%; background:#FF5F57; box-shadow:18px 0 0 #FEBC2E, 36px 0 0 #28C840; }
@@ -53,8 +54,8 @@
 </head>
 <body>
 <header class="hero">
-  <span class="eyebrow">REFERENCE 3 / DIRECTORY</span>
-  <h1>디렉토리 구조, 무엇이 어디 사는가</h1>
+  <span class="eyebrow">REFERENCE 1 / DIRECTORY</span>
+  <h1>디렉토리 구조, 무엇이 어디에 있는가</h1>
   <div class="subtitle">~/.claude와 .claude, 그리고 managed의 세 층 지도</div>
   <p class="lede">Claude Code의 모든 커스터마이징은 결국 <strong>파일이 어디 놓이느냐</strong>의 문제입니다. 사용자 전역, 프로젝트, 조직 강제의 세 층과 충돌 시 우선순위를 한 장으로 정리했습니다.</p>
 </header>
@@ -168,7 +169,7 @@ Windows      C:\Program Files\ClaudeCode\managed-settings.json</code></pre>
 </section>
 
 <footer>
-  <div class="who">Claude Code Deep Dive Workshop, Reference 3, 디렉토리 구조</div>
+  <div class="who">Claude Code Deep Dive Workshop, Reference 1, 디렉토리 구조</div>
   <div>기준: Claude Code 2.1.x, 2026.07 / 설정 문서: code.claude.com/docs/en/settings</div>
 </footer>
 </body>
