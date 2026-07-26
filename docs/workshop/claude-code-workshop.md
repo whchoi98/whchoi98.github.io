@@ -12,6 +12,7 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 {: .fs-6 .fw-300 }
 
 [랩 포털 열기](/ccw-hands-on-lab/index.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[세션 소개](/ccw-hands-on-lab/eDM.html){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [사전 점검](/ccw-hands-on-lab/ClaudeCode_Preflight_Check.html){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
