@@ -107,7 +107,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: rgba(12, 17, 23, 0.92);
+  background: var(--bg-sticky);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -280,7 +280,7 @@ code.inline {
   font-family: var(--font-code);
   font-size: 0.88em;
   background: var(--bg-inline);
-  color: #FFC466;
+  color: var(--code-amber, #FFC466);
   padding: 2px 7px;
   border-radius: 4px;
   white-space: nowrap;
@@ -310,7 +310,7 @@ kbd {
   justify-content: space-between;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--code-head-bg, rgba(255,255,255,.02));
 }
 .code-label {
   font-size: 11px;
@@ -343,10 +343,10 @@ kbd {
   font-size: 13.5px;
   line-height: 1.7;
 }
-.code-wrap code { font-family: inherit; color: #D8DEE9; }
+.code-wrap code { font-family: inherit; color: var(--code-text, #D8DEE9); }
 .code-wrap.output pre { color: var(--dim); }
-.code-wrap .cmt { color: #5E6B7E; }
-.code-wrap .hl { color: #FFC466; }
+.code-wrap .cmt { color: var(--code-cmt, #5E6B7E); }
+.code-wrap .hl { color: var(--code-amber, #FFC466); }
 .code-wrap .ok { color: var(--green); }
 
 /* ============ Callouts ============ */
@@ -370,7 +370,7 @@ kbd {
   margin-bottom: 5px;
 }
 
-.callout.warn .co-title { color: #FF5C85; }
+.callout.warn .co-title { color: var(--red); }
 
 /* ============ Checkpoint ============ */
 .checkpoint {
@@ -443,19 +443,19 @@ kbd {
 .tbl th, .tbl td {
   text-align: left;
   padding: 10px 16px;
-  border-bottom: 1px solid #FFFFFF14;
+  border-bottom: 1px solid var(--line-soft);
 }
 .tbl th {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--orange);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--row-alt);
 }
 .tbl td { color: var(--muted); vertical-align: middle; }
 .tbl td:first-child { color: var(--text); font-weight: 700; white-space: nowrap; }
 .tbl tr:last-child td { border-bottom: none; }
-.tbl code { font-family: var(--font-code); font-size: 0.9em; color: #FFC466; }
+.tbl code { font-family: var(--font-code); font-size: 0.9em; color: var(--code-amber, #FFC466); }
 
 /* ============ Wrap-up ============ */
 .wrapup {
