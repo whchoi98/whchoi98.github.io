@@ -43,6 +43,14 @@
       #0F151C;
     border-bottom: 1px solid var(--line);
   }
+  /* The hero keeps its hardcoded dark backdrop in light mode (the white
+     partner logos cannot switch), so its palette is re-pinned to the dark
+     values and the light-theme overrides do not apply inside it. */
+  html[data-theme="light"] .head {
+    --text: #E8ECF1; --muted: #8B96A5; --charcoal: #C7CDD6;
+    --orange: #FF9900; --crimson: #B6002E; --line: #262F3B;
+    color: #E8ECF1;
+  }
   .brandbar { display: flex; align-items: center; justify-content: center; gap: 13px; margin-bottom: 20px; }
   .brandbar img.logo { height: 24px; width: auto; display: block; }
   .brandbar .wordmark { color: var(--text); font-size: 15.5px; font-weight: 800; letter-spacing: .18em; }
