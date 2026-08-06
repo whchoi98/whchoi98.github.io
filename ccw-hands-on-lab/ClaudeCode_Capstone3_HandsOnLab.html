@@ -1,5 +1,4 @@
 <!DOCTYPE html>
-<!-- saved from url=(0079)https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html -->
 <html lang="ko"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -107,7 +106,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: var(--bg-sticky);
+  background: rgba(12, 17, 23, 0.92);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -280,7 +279,7 @@ code.inline {
   font-family: var(--font-code);
   font-size: 0.88em;
   background: var(--bg-inline);
-  color: var(--code-amber, #FFC466);
+  color: #FFC466;
   padding: 2px 7px;
   border-radius: 4px;
   white-space: nowrap;
@@ -310,7 +309,7 @@ kbd {
   justify-content: space-between;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  background: var(--code-head-bg, rgba(255,255,255,.02));
+  background: rgba(255, 255, 255, 0.02);
 }
 .code-label {
   font-size: 11px;
@@ -343,10 +342,10 @@ kbd {
   font-size: 13.5px;
   line-height: 1.7;
 }
-.code-wrap code { font-family: inherit; color: var(--code-text, #D8DEE9); }
+.code-wrap code { font-family: inherit; color: #D8DEE9; }
 .code-wrap.output pre { color: var(--dim); }
-.code-wrap .cmt { color: var(--code-cmt, #5E6B7E); }
-.code-wrap .hl { color: var(--code-amber, #FFC466); }
+.code-wrap .cmt { color: #5E6B7E; }
+.code-wrap .hl { color: #FFC466; }
 .code-wrap .ok { color: var(--green); }
 
 /* ============ Callouts ============ */
@@ -370,7 +369,7 @@ kbd {
   margin-bottom: 5px;
 }
 
-.callout.warn .co-title { color: var(--red); }
+.callout.warn .co-title { color: #FF5C85; }
 
 /* ============ Checkpoint ============ */
 .checkpoint {
@@ -443,19 +442,19 @@ kbd {
 .tbl th, .tbl td {
   text-align: left;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid #FFFFFF14;
 }
 .tbl th {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--orange);
-  background: var(--row-alt);
+  background: rgba(255, 255, 255, 0.03);
 }
 .tbl td { color: var(--muted); vertical-align: middle; }
 .tbl td:first-child { color: var(--text); font-weight: 700; white-space: nowrap; }
 .tbl tr:last-child td { border-bottom: none; }
-.tbl code { font-family: var(--font-code); font-size: 0.9em; color: var(--code-amber, #FFC466); }
+.tbl code { font-family: var(--font-code); font-size: 0.9em; color: #FFC466; }
 
 /* ============ Wrap-up ============ */
 .wrapup {
@@ -508,18 +507,18 @@ footer .mail { color: var(--orange); }
 
 /* ===== Chapter 4 additions: Super Lab ===== */
 .part-divider { margin: 72px 0 12px; padding: 30px 34px; border-radius: 14px;
-  background: linear-gradient(135deg, var(--pd-bg-a) 0%, var(--pd-bg-b) 65%); border: 1px solid var(--pd-line); }
+  background: linear-gradient(135deg, #1d1433 0%, #12181F 65%); border: 1px solid #45306b; }
 .part-divider .pd-eyebrow { display: inline-block; background: #7a3ff2; color: #fff;
   font-size: 11px; font-weight: 800; letter-spacing: .14em; padding: 4px 12px; border-radius: 4px; }
 .part-divider h2 { margin: 14px 0 8px; font-size: 26px; color: var(--text); }
 .part-divider p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; max-width: 860px; }
 .part-divider .rules { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 10px; }
-.part-divider .rules span { background: var(--pd-chip); border: 1px solid var(--pd-line); color: var(--lavender);
+.part-divider .rules span { background: #241a3d; border: 1px solid #45306b; color: #d9c9ff;
   font-size: 12.5px; padding: 6px 12px; border-radius: 999px; }
-.task.mission .task-num { color: var(--lavender); }
-.task.mission { border-color: var(--task-line); }
-.checkpoint.dod { border-color: #7a3ff2; background: var(--pd-chip); }
-.checkpoint.dod .cp-title { color: var(--lavender); }
+.task.mission .task-num { color: #c9a2ff; }
+.task.mission { border-color: #3a2a57; }
+.checkpoint.dod { border-color: #7a3ff2; background: rgba(122, 63, 242, .06); }
+.checkpoint.dod .cp-title { color: #c9a2ff; }
 details.solution { margin: 18px 0; border: 1px dashed #FF9900; border-radius: 10px; background: rgba(255,153,0,.04); }
 details.solution summary { cursor: pointer; padding: 12px 16px; color: var(--accent); font-weight: 700; font-size: 13.5px; list-style: none; }
 details.solution summary::before { content: "▸ "; }
@@ -570,8 +569,36 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
   box-shadow: 18px 0 0 #FEBC2E, 36px 0 0 #28C840;
 }
 </style>
-<script id="fortidlp-file-access-api" src="chrome-extension://gbojkjpincgojijodbnliimgeggnomai/upload_fileaccessapi.js"></script><script id="fortidlp-input-element-creation" src="chrome-extension://gbojkjpincgojijodbnliimgeggnomai/upload_element_creation.js"></script><link rel="stylesheet" href="theme.css">
-<script src="theme.js"></script>
+<script id="fortidlp-file-access-api" src="chrome-extension://gbojkjpincgojijodbnliimgeggnomai/upload_fileaccessapi.js"></script><script id="fortidlp-input-element-creation" src="chrome-extension://gbojkjpincgojijodbnliimgeggnomai/upload_element_creation.js"></script><style id="hol-theme">
+html[data-theme="light"]{
+  --bg:#F3F4F7; --bg-card:#FFFFFF; --bg-code:#EEF1F5; --bg-inline:#E4E9EF; --line:#D7DDE5;
+  --orange:#B45309; --orange-dim:rgba(180,83,9,.12);
+  --green:#1F883D; --green-dim:rgba(31,136,61,.12);
+  --text:#1B2430; --muted:#5B6472; --dim:#75808F;
+  background:#F3F4F7;
+}
+html[data-theme="light"] [style*="#c9a2ff"]{color:#6b46c1 !important}
+html[data-theme="light"] [style*="#A6ABBE"]{color:#5B6472 !important}
+#themeToggle{position:fixed;right:16px;bottom:16px;z-index:9999;
+background:var(--bg-card,var(--card,#1B242E));color:var(--orange,#FF9900);
+border:1px solid var(--line,#2A3542);border-radius:999px;padding:9px 16px;
+font:600 13px/1 sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#themeToggle:hover{border-color:var(--orange,#FF9900)}
+html[data-theme="light"] .code-wrap code{color:#2A3542}
+html[data-theme="light"] .code-wrap.output code{color:#57606E}
+html[data-theme="light"] code{color:#B45309;background:#E4E9EF}
+html[data-theme="light"] .code-wrap code, html[data-theme="light"] pre code{background:transparent}
+html[data-theme="light"] .k.s{background:#DCEEDC}
+html[data-theme="light"] .k.w{background:#E9E2F7}
+html[data-theme="light"] code.inline, html[data-theme="light"] .inline{color:#B45309;background:#E4E9EF;border-color:#D7DDE5}
+html[data-theme="light"] .code-wrap .hl{color:#B45309}
+html[data-theme="light"] .code-wrap .cmt{color:#6E7B8C}
+html[data-theme="light"] .head{--text:#E8ECF1;--muted:#8B96A5;--charcoal:#C7CDD6;--orange:#FF9900;--lavender:#c9a2ff;--line:#262F3B}
+html[data-theme="light"] .head, html[data-theme="light"] .head h1{color:#F2F4F8}
+html[data-theme="light"] .head .when{color:#FF9900}
+html[data-theme="light"] .head .where, html[data-theme="light"] .head .facts span{color:#C7CDD6}
+@media print{#themeToggle{display:none}}
+</style>
 </head>
 <body>
 
@@ -613,16 +640,18 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
 
 <aside class="sidenav" aria-label="미션 목차">
   <div class="nav-title">MISSIONS / 120분</div>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#brief" data-nav="brief" class=""><span class="dot"></span>브리핑<span class="nav-time"></span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m0" data-nav="m0" class="active"><span class="dot"></span>M0 사전 준비<span class="nav-time">10분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m1" data-nav="m1" class=""><span class="dot"></span>M1 설계<span class="nav-time">15분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m2" data-nav="m2" class=""><span class="dot"></span>M2 첫 픽셀<span class="nav-time">25분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m3" data-nav="m3" class=""><span class="dot"></span>M3 계약의 탄생<span class="nav-time">30분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m4" data-nav="m4" class=""><span class="dot"></span>M4 전시관 개장<span class="nav-time">20분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#m5" data-nav="m5" class=""><span class="dot"></span>M5 배포와 개장<span class="nav-time">20분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#opt-h" data-nav="opt-h" class=""><span class="dot"></span>OPT 하네스 엔지니어링<span class="nav-time">+15분</span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#cut" data-nav="cut" class=""><span class="dot"></span>컷라인과 트러블슈팅<span class="nav-time"></span></a>
-  <a href="https://comeddy.github.io/ccw-hands-on-lab/ClaudeCode_CapstoneF_HandsOnLab.html#wrapup" data-nav="wrapup" class=""><span class="dot"></span>마무리<span class="nav-time"></span></a>
+  <a href="#brief" data-nav="brief" class=""><span class="dot"></span>브리핑<span class="nav-time"></span></a>
+  <a href="#blueprint" data-nav="blueprint"><span class="dot"></span>구현 청사진<span class="nav-time">참고</span></a>
+  <a href="#m0" data-nav="m0" class="active"><span class="dot"></span>M0 사전 준비<span class="nav-time">10분</span></a>
+  <a href="#m1" data-nav="m1" class=""><span class="dot"></span>M1 설계<span class="nav-time">15분</span></a>
+  <a href="#m2" data-nav="m2" class=""><span class="dot"></span>M2 첫 픽셀<span class="nav-time">25분</span></a>
+  <a href="#m3" data-nav="m3" class=""><span class="dot"></span>M3 계약의 탄생<span class="nav-time">30분</span></a>
+  <a href="#m4" data-nav="m4" class=""><span class="dot"></span>M4 전시관 개장<span class="nav-time">20분</span></a>
+  <a href="#m5" data-nav="m5" class=""><span class="dot"></span>M5 배포와 개장<span class="nav-time">20분</span></a>
+  <a href="#gq" data-nav="gq"><span class="dot"></span>BONUS 퀄리티 강화<span class="nav-time">+α</span></a>
+  <a href="#opt-h" data-nav="opt-h" class=""><span class="dot"></span>OPT 하네스 엔지니어링<span class="nav-time">+15분</span></a>
+  <a href="#cut" data-nav="cut" class=""><span class="dot"></span>컷라인과 트러블슈팅<span class="nav-time"></span></a>
+  <a href="#wrapup" data-nav="wrapup" class=""><span class="dot"></span>마무리<span class="nav-time"></span></a>
 </aside>
 
 <main>
@@ -678,7 +707,76 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
     ① 파일을 손으로 짜지 말고 Claude에게 시켜서 만든다 ② 각 Phase의 DoD를 통과해야 다음으로
     ③ 막히면 "막힐 때 열어보기"의 힌트를 쓴다. 구현 경로는 자유입니다.
   </div>
+
+  <div class="step-title"><span class="step-no">L</span>학습 목표, Level 200</div>
+  <p class="body">이 캡스톤을 마치면 다음 네 가지를 <strong>설명할 수 있고, 다시 만들 수 있습니다</strong>.</p>
+  <table class="tbl">
+    <tr><th>목표</th><th>검증되는 순간</th></tr>
+    <tr><td>"선 구체, 후 추상"의 리팩터 감각</td><td>M3에서 중복 두 벌을 눈으로 본 뒤 계약을 뽑는데, 화면은 전과 똑같을 때</td></tr>
+    <tr><td>공통 엔진 위의 인터페이스(Piece) 설계</td><td>코드 모양이 정반대인 두 작품이 같은 계약으로 한 전시에서 돌 때</td></tr>
+    <tr><td>데이터 주도 확장 구조</td><td>작품 추가가 "data.js 한 항목 + 파일 하나"로 끝날 때 (강화 카드 A에서 체감)</td></tr>
+    <tr><td>기계 검증을 배포 게이트로 세우는 법</td><td>M5에서 verify.mjs가 전부 PASS한 뒤에만 전시가 열릴 때</td></tr>
+  </table>
+
+  <div class="step-title"><span class="step-no">R</span>챕터 연결 지도, 배운 내용이 재등장하는 곳</div>
+  <p class="body">이 캡스톤은 새 기술을 가르치지 않습니다. <strong>Ch1~6에서 배운 것을 실전 배치</strong>합니다.</p>
+  <table class="tbl">
+    <tr><th>챕터</th><th>이 캡스톤에서 재등장하는 곳</th></tr>
+    <tr><td><a href="ClaudeCode_Ch1_HandsOnLab.html" style="color:#c9a2ff">Ch1 설치부터 Headless까지</a></td><td>M0~전체: 세션 운용, 지시 → 실행 → 검증 루프</td></tr>
+    <tr><td><a href="ClaudeCode_Ch2_HandsOnLab.html" style="color:#c9a2ff">Ch2 Subagents</a></td><td>M3~M4: 계약 추출 리팩터의 diff 리뷰를 code-reviewer에게, 전시 구조와 작품 다듬기 병행</td></tr>
+    <tr><td><a href="ClaudeCode_Ch3_HandsOnLab.html" style="color:#c9a2ff">Ch3 Admin Setup</a></td><td>배치 결정의 배경: 이 캡스톤은 Bedrock을 쓰지 않아 모델 통제선 밖에서도 완주됩니다, "AI가 필요 없는 곳엔 안 쓴다"도 설계입니다</td></tr>
+    <tr><td><a href="ClaudeCode_Ch4_HandsOnLab.html" style="color:#c9a2ff">Ch4 Settings, 훅과 스킬</a></td><td>OPT: 하네스 성숙화, 훅과 스킬을 프로젝트 자산으로 승격하는 마무리 의식</td></tr>
+    <tr><td><a href="ClaudeCode_Ch5_HandsOnLab.html" style="color:#c9a2ff">Ch5 CLI Reference</a></td><td>확장 방향: verify.mjs를 헤드리스 파이프라인의 게이트로, "PASS 없이는 배포 없음"의 자동화</td></tr>
+    <tr><td><a href="ClaudeCode_Ch6_HandsOnLab.html" style="color:#c9a2ff">Ch6 Agent SDK</a></td><td>확장 방향: 작품 생성기, query 한 번이 새 Piece 파일과 data.js 항목을 만드는 다음 단계</td></tr>
+  </table>
+
 </section>
+<section class="task" id="blueprint">
+  <div class="task-head"><span class="task-num">BLUEPRINT</span><h2>구현 청사진, 전시의 뼈대</h2><span class="time-badge">참고</span></div>
+  <p class="task-goal">
+    M1 설계가 이 구조로 수렴하도록 방향을 잡아 주는 <strong>구현 지도</strong>입니다. 계획이 이상하게 흐르면
+    여기로 돌아와 대조하세요.
+  </p>
+
+  <div class="step-title"><span class="step-no">0</span>세 개의 경로 한 눈에</div>
+  <div class="code-wrap output">
+    <div class="code-head"><span class="code-label">프레임 루프, 관람 경로, 출고 경로</span></div>
+    <pre><code>[프레임 루프]  requestAnimationFrame, 매 프레임
+engine.js: 리사이즈/DPR ──> dt/t 시계 ──> piece.update(dt) ──> piece.draw(ctx)
+                                              │
+              전시실 전환 시: 이전 piece.dispose() ──> 새 Piece 생성   (누수 없이, 속도 그대로)
+
+[관람 경로]  방문자의 동선
+아트리움(랜딩) ──> 갤러리(data.js 카탈로그 → 카드 그리드) ──> 전시실(#work-NN 해시 딥링크)
+
+[출고 경로]  단 한 번, 열기 전에
+verify.mjs(카탈로그 무결 + Piece 계약 검사) ── 전부 PASS ──> cdk deploy ──> S3(비공개) + CloudFront(OAC)</code></pre>
+  </div>
+  <p class="body">Level 200의 핵심 구분입니다: 매 프레임 도는 <strong>루프</strong>, 데이터가 이끄는 <strong>동선</strong>,
+  기계가 지키는 <strong>게이트</strong>. 작품은 그리기에만 집중하고 나머지는 엔진과 카탈로그와 검사기가 맡습니다.</p>
+
+  <div class="step-title"><span class="step-no">1</span>구조 지도</div>
+  <table class="tbl">
+    <tr><th>구성</th><th>파일</th><th>핵심 계약</th></tr>
+    <tr><td>엔진</td><td>site/js/engine.js</td><td>캔버스 리사이즈, DPR, RAF 루프, dt/t 시계를 공통 제공, 작품은 그리기만</td></tr>
+    <tr><td>작품 01</td><td>site/js/pieces/01-currents.js</td><td>벡터장 흐름결, 마우스를 끌면 결이 휘어진다</td></tr>
+    <tr><td>작품 02</td><td>site/js/pieces/02-morphogenesis.js</td><td>길게 누르면 소용돌이가 자라고 놓으면 방출, 01과 코드 모양이 정반대인 짝</td></tr>
+    <tr><td>계약</td><td>Piece 기반 클래스</td><td>두 작품이 상속하는 공통 인터페이스, M3에서 중복을 보고 나서야 추출한다</td></tr>
+    <tr><td>카탈로그</td><td>site/js/data.js</td><td>순수 데이터, 작품 추가 = 항목 하나 + 파일 하나</td></tr>
+    <tr><td>전시</td><td>site/index.html + main.js</td><td>아트리움 → 갤러리 → 전시실 3단, #work-NN 해시 라우팅</td></tr>
+    <tr><td>검증과 인프라</td><td>verify.mjs + CDK 스택</td><td>카탈로그/계약 검사가 배포 게이트, S3 비공개 + CloudFront OAC</td></tr>
+  </table>
+
+  <div class="step-title"><span class="step-no">2</span>기술 선택 4</div>
+  <table class="tbl">
+    <tr><th>선택</th><th>이유</th></tr>
+    <tr><td>빌드 도구 없는 정적 사이트</td><td>작품 파일 하나를 브라우저로 열면 바로 도는 즉시성, 전시는 가벼워야 한다</td></tr>
+    <tr><td>선 구체, 후 추상</td><td>중복을 눈으로 보기 전의 추상은 추측이다, 두 벌을 만들고 나서 계약을 뽑는다</td></tr>
+    <tr><td>데이터 주도 카탈로그</td><td>구조(코드)와 내용(데이터)의 분리, 전시 확장이 편집이 된다</td></tr>
+    <tr><td>verify.mjs 게이트</td><td>렌더 루프의 단위 테스트 대신, 계약과 카탈로그의 무결을 기계가 지킨다</td></tr>
+  </table>
+</section>
+
 
 <!-- ============================ M0 ============================ -->
 <section class="task" id="m0">
@@ -727,8 +825,8 @@ git add -A &amp;&amp; git commit -m "chore: scaffold" 2&gt;/dev/null || true</co
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m0"><span>스캐폴드 완료, 미리보기 통로(또는 대안)를 확보했다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="m0hud"><span>claude-hud 상태줄이 세션에 표시된다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m0"><span>스캐폴드가 완료되었고, 미리보기 통로(또는 대안)를 확보했습니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m0hud"><span>claude-hud 상태줄이 세션에 표시됩니다</span></label>
   </div>
 </section>
 
@@ -736,6 +834,7 @@ git add -A &amp;&amp; git commit -m "chore: scaffold" 2&gt;/dev/null || true</co
 <section class="task" id="m1">
   <div class="task-head"><span class="task-num">MISSION 01</span><h2>설계, 브레인스토밍</h2><span class="time-badge">15분</span></div>
   <p class="task-goal">요구사항 7개 조항을 superpowers에 넘겨 <strong>설계와 Phase 계획</strong>을 뽑습니다. 두 작품의 알고리즘 상수가 프롬프트에 들어 있습니다.</p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch1_HandsOnLab.html" style="color:#c9a2ff">Ch1</a>의 세션 운용과 Capstone Setup의 superpowers 워크플로.</p>
 
   <div class="code-wrap">
     <div class="code-head"><span class="code-label">Terminal (~/capstone/media-art)</span><button class="copy-btn" type="button">복사</button></div>
@@ -792,7 +891,7 @@ git add -A &amp;&amp; git commit -m "chore: scaffold" 2&gt;/dev/null || true</co
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m1"><span>Phase 4개 계획이 승인되었고, Phase 1에 추상이 없다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m1"><span>Phase 4개 계획이 승인되었고, Phase 1에 추상이 없습니다</span></label>
   </div>
 </section>
 
@@ -800,6 +899,7 @@ git add -A &amp;&amp; git commit -m "chore: scaffold" 2&gt;/dev/null || true</co
 <section class="task" id="m2">
   <div class="task-head"><span class="task-num">MISSION 02</span><h2>Phase 1, 첫 픽셀</h2><span class="time-badge">25분</span></div>
   <p class="task-goal">추상 없이 <strong>한 파일</strong>로 작품 01을 완주합니다. 20분 안에 화면이 살아 있어야 합니다.</p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch1_HandsOnLab.html" style="color:#c9a2ff">Ch1</a>의 지시 → 실행 → 검증 루프. "추상 금지"는 게으름이 아니라 M3를 위한 포석입니다.</p>
 
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
@@ -830,8 +930,8 @@ ctx.fillRect(0, 0, w, h);</code></pre>
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m2a"><span>브라우저에 흐름이 보이고, 마우스를 끌면 결이 휘어진다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="m2b"><span>한곳을 길게 누르면 소용돌이가 자라고, 놓으면 방출되어 서서히 풀린다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m2a"><span>브라우저에 흐름이 보이고, 마우스를 끌면 결이 휘어집니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m2b"><span>한곳을 길게 누르면 소용돌이가 자라고, 놓으면 방출되어 서서히 풀립니다</span></label>
   </div>
 </section>
 
@@ -839,6 +939,7 @@ ctx.fillRect(0, 0, w, h);</code></pre>
 <section class="task" id="m3">
   <div class="task-head"><span class="task-num">MISSION 03</span><h2>Phase 2, 두 번째 작품과 계약의 탄생</h2><span class="time-badge">30분</span></div>
   <p class="task-goal">이 랩의 정점입니다. 두 번째 작품을 <strong>일부러 통째로 베껴 쓴 다음</strong>, 그 중복을 보고 나서 계약을 뽑아냅니다.</p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch2_HandsOnLab.html" style="color:#c9a2ff">Ch2</a>의 code-reviewer 서브에이전트, 계약 추출 리팩터의 diff 리뷰를 맡기기 딱 좋은 순간입니다.</p>
 
   <div class="step-title"><span class="step-no">1</span>중복을 만든다</div>
   <div class="code-wrap prompt">
@@ -909,10 +1010,18 @@ Piece가 소유할 것: 캔버스 리사이즈와 DPR 스케일(DPR은 2로 상�
     </div>
   </details>
 
+  
+  <div class="callout tip">
+    <span class="co-title">개념 짚기 (Level 200), 선 구체 후 추상</span>
+    중복을 눈으로 보기 전에 만든 추상은 추측이고, 추측으로 만든 계약은 대개 틀립니다.
+    작품 02를 <strong>일부러 통째로 베껴 쓰는</strong> 이유가 그것입니다: 두 벌이 나란히 있어야
+    "무엇이 같고 무엇이 다른가"가 사실이 되고, 그 사실에서 뽑은 Piece 계약만이 세 번째 작품도 받아냅니다.
+    리팩터의 합격 기준은 단순합니다, 화면이 전과 똑같을 것.
+  </div>
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m3a"><span>두 작품이 같은 Piece 계약 위에서 돌고, 리팩터 전과 똑같이 보인다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="m3b"><span>작품 01 → 02 → 01 로 세 번 오간 뒤에도 움직임의 속도가 처음과 같다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m3a"><span>두 작품이 같은 Piece 계약 위에서 돌고, 리팩터 전과 똑같이 보입니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m3b"><span>작품 01 → 02 → 01 로 세 번 오간 뒤에도 움직임의 속도가 처음과 같습니다</span></label>
   </div>
 
   <div class="callout tip">
@@ -927,6 +1036,7 @@ Piece가 소유할 것: 캔버스 리사이즈와 DPR 스케일(DPR은 2로 상�
 <section class="task" id="m4">
   <div class="task-head"><span class="task-num">MISSION 04</span><h2>Phase 3, 전시관 개장</h2><span class="time-badge">20분</span></div>
   <p class="task-goal">작품 두 점을 <strong>전시</strong>로 만듭니다. 아트리움, 갤러리, 전시실 3단과 카탈로그를 세웁니다.</p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch2_HandsOnLab.html" style="color:#c9a2ff">Ch2</a>의 병렬 감각. 전시 구조를 세우는 동안 작품 플래카드 문구를 서브에이전트로 병행할 수 있습니다.</p>
 
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
@@ -955,10 +1065,18 @@ Piece가 소유할 것: 캔버스 리사이즈와 DPR 스케일(DPR은 2로 상�
     이 랩이 두 점으로 끝나도 구조는 예순 점을 견딥니다.
   </div>
 
+  
+  <div class="callout tip">
+    <span class="co-title">개념 짚기 (Level 200), 데이터 주도 전시와 해시 딥링크</span>
+    갤러리가 data.js를 읽어 카드를 그리는 순간, 전시 확장은 코딩이 아니라 <strong>편집</strong>이 됩니다.
+    그리고 <code class="inline">#work-02</code> 해시 라우팅은 "지금 어느 전시실인가"라는 상태를 URL에 싣는 것,
+    새로고침에도 살아남고 링크로 공유되는 가장 가벼운 라우터입니다. 전환 시 이전 작품의 dispose를
+    부르는 규율이 있어야 세 번 오가도 처음 속도가 유지됩니다(누수 없음).
+  </div>
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m4a"><span>갤러리에 전시관 2개, Open 카드 2장과 Soon 카드 2장이 보인다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="m4b"><span>주소 끝에 #work-02를 붙여 새로고침하면 그 작품의 전시실로 바로 들어간다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m4a"><span>갤러리에 전시관 2개, Open 카드 2장과 Soon 카드 2장이 보입니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m4b"><span>주소 끝에 #work-02를 붙여 새로고침하면 그 작품의 전시실로 바로 들어갑니다</span></label>
   </div>
 </section>
 
@@ -966,6 +1084,7 @@ Piece가 소유할 것: 캔버스 리사이즈와 DPR 스케일(DPR은 2로 상�
 <section class="task" id="m5">
   <div class="task-head"><span class="task-num">MISSION 05</span><h2>Phase 4, 배포와 개장</h2><span class="time-badge">20분</span></div>
   <p class="task-goal">계약을 <strong>기계가 검사</strong>하게 만든 다음, S3 + CloudFront로 전시를 엽니다.</p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch1_HandsOnLab.html" style="color:#c9a2ff">Ch1</a>의 검증 루프가 기계 게이트로 승격됩니다. 자동화가 궁금하면 <a href="ClaudeCode_Ch5_HandsOnLab.html" style="color:#c9a2ff">Ch5</a>의 헤드리스 패턴이 다음입니다.</p>
 
   <div class="step-title"><span class="step-no">1</span>계약 검사기를 만든다</div>
   <p class="body">렌더 루프에 단위 테스트를 붙이는 건 값이 없습니다. 하지만 카탈로그 계약이 깨지면
@@ -1040,14 +1159,88 @@ HTTP/2 200</code></pre>
     위 스모크 테스트의 두 번째 줄이 그것만을 확인합니다.
   </div>
 
+  
+  <div class="callout tip">
+    <span class="co-title">개념 짚기 (Level 200), 검증이 게이트다</span>
+    렌더 루프의 단위 테스트는 비용 대비 효용이 낮습니다. 대신 verify.mjs가 <strong>계약과 카탈로그의 무결</strong>
+    (모든 작품이 Piece를 상속하는가, data.js 항목과 파일이 일치하는가)을 검사하고, 전부 PASS일 때만 배포합니다.
+    사람 눈 대신 기계가 지키는 게이트, 이것이 CI의 가장 작은 형태입니다. 다음 단계는 이 스크립트를
+    파이프라인에 앉히는 것뿐입니다.
+  </div>
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="m5a"><span>node verify.mjs가 전부 PASS로 끝난다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="m5b"><span>CloudFront URL에서 두 작품이 열리고 인터랙션이 동작한다. 링크를 공유했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m5a"><span>node verify.mjs가 전부 PASS로 끝납니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="m5b"><span>CloudFront URL에서 두 작품이 열리고 인터랙션이 동작합니다. 링크를 공유했습니다</span></label>
   </div>
 </section>
 
 <!-- ============================ OPTION: HARNESS ============================ -->
+
+<section class="task" id="gq">
+  <div class="task-head"><span class="task-num">BONUS</span><h2>전시 퀄리티 강화 라운드, 몰입을 올려라</h2><span class="time-badge">+α 자유</span></div>
+  <p class="task-goal">
+    전시가 열렸다면 이제 <strong>전시를 내 것으로 만드는 시간</strong>입니다. 강화 카드 중 끌리는 것을 골라
+    하나씩 주문하세요. 요령은 같습니다: 한 번에 하나, 작품으로 확인하고, 마음에 들면 커밋.
+  </p>
+
+  <div class="step-title"><span class="step-no">A</span>강화 카드 1, 세 번째 작품</div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>작품 03을 추가하자. 공통 Piece 계약을 그대로 구현하는 세 번째 알고리즘:
+수백 개의 파티클이 보이지 않는 인력점 몇 개를 공전하다, 마우스가 다가가면 흩어지고
+멀어지면 서서히 궤도로 복귀하는 "중력 정원". 색은 궤도 반지름에 따라 그라디언트,
+갤러리의 Soon 카드 하나를 Open으로 승격하고 #work-03 딥링크까지.</code></pre>
+  </div>
+
+  <div class="step-title"><span class="step-no">B</span>강화 카드 2, 도슨트 캡션</div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>각 전시실에 도슨트 캡션을 달자. 작품 하단에 얇은 캡션 바: 작품 번호, 제목,
+"이 작품이 쓰는 규칙" 한 문장(예: 벡터장의 각도는 노이즈에서 온다), 그리고 조작 힌트.
+캡션은 입장 3초 후 스르륵 나타나고 마우스가 움직이면 잠시 숨어 작품을 방해하지 않는다.</code></pre>
+  </div>
+
+  <div class="step-title"><span class="step-no">C</span>강화 카드 3, 관람 모드</div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>자동 관람 모드를 추가하자. 갤러리에서 P 키(또는 Play 버튼) → 열린 작품들을
+30초씩 자동 순회, 작품 전환은 부드러운 페이드, 어떤 입력이든 들어오면 관람 모드 해제.
+전시장 키오스크처럼 손을 대지 않아도 살아 있는 전시가 되게.</code></pre>
+  </div>
+
+  <div class="step-title"><span class="step-no">D</span>강화 카드 4, 개장 연출</div>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>갤러리 입장 연출을 다듬자. 첫 로드에 타이틀이 어둠 속에서 떠오르고,
+Open 카드들이 시차를 두고 하나씩 켜진다(stagger). 카드 호버 시 해당 작품의
+미니 프리뷰가 은은하게 움직이면 최고. 연출은 2초 안에 끝나고 재방문(세션 내)에는 생략.</code></pre>
+  </div>
+
+  <div class="step-title"><span class="step-no">E</span>강화 카드 5, 나만의 작품으로</div>
+  <p class="body">여기부터는 정해진 카드가 없습니다. <strong>당신이 작가입니다</strong>. 좋아하는 시각적 현상 하나를 골라,
+  위 카드들처럼 직접 요구사항을 써서 주문하세요. 아이디어가 필요하면: 리사주 곡선, 반응 확산 무늬,
+  별이 흐르는 은하, 잉크 번짐, 만화경 대칭, 픽셀 비.</p>
+  <div class="code-wrap prompt">
+    <div class="code-head"><span class="code-label">Claude 세션 입력, 빈칸을 내 아이디어로</span><button class="copy-btn" type="button">복사</button></div>
+    <pre><code>내 전시에 [내가 원하는 작품/연출]을 추가하자. 규칙:
+1) 규칙: [무엇이 무엇을 따라 움직이는지, 알고리즘을 한두 문장으로]
+2) 인터랙션: [마우스/키보드에 어떻게 반응하는지]
+3) 분위기: [색, 속도, 밀도처럼 느낌을 좌우하는 요소]
+4) 공통 Piece 계약과 기존 작품의 성능은 깨지 않는다
+구현 전에 이 규칙을 네 계획으로 다시 말해주고, 승인하면 진행해.</code></pre>
+  </div>
+
+  <div class="callout tip">
+    <span class="co-title">강화 라운드의 요령</span>
+    ① 카드 하나 = 커밋 하나, 되돌아갈 지점을 만들며 갑니다. ② 작품은 <strong>느낌을 말로</strong> 다듬으세요,
+    "소용돌이가 너무 빨리 풀린다"처럼. ③ 마지막엔 재배포로 전시 URL을 최신으로.
+  </div>
+  <div class="checkpoint dod">
+    <div class="cp-title">BONUS DONE, 진행률 미집계</div>
+    <label class="cp-item"><input type="checkbox" data-cp="gq1"><span>강화 카드 하나 이상을 적용해 전시에서 확인하고 커밋했습니다</span></label>
+  </div>
+</section>
+
 <section class="task" id="opt-h">
   <div class="task-head">
     <span class="task-num">OPTION</span>
@@ -1061,6 +1254,7 @@ HTTP/2 200</code></pre>
     채점받는(harness-eval) 단계입니다. superpowers의 3단(brainstorm, write-plan, execute-plan) 뒤에
     <strong>4단 성숙화와 5단 평가</strong>를 붙이는 셈입니다. 캡스톤 공통의 마무리 의식입니다.
   </p>
+  <p class="body" style="color:#A6ABBE">이 미션의 바탕 학습: <a href="ClaudeCode_Ch4_HandsOnLab.html" style="color:#c9a2ff">Ch4</a>의 훅과 스킬을 팀 자산으로 승격하는 감각, 그리고 <a href="ClaudeCode_Reference3_Plugins.html" style="color:#c9a2ff">Reference 3</a>의 플러그인 생태계.</p>
 
   <div class="step-title"><span class="step-no">1</span>플러그인 2종 설치</div>
   <div class="code-wrap">
@@ -1073,7 +1267,7 @@ claude plugin list</code></pre>
   </div>
   <p class="body">설치 후 새 Claude 세션을 시작하세요, superpowers 때와 같은 규칙입니다.</p>
 
-  <div class="step-title"><span class="step-no">2</span>성숙화, /init-project와 /sync-docs</div>
+  <div class="step-title"><span class="step-no">2</span>성숙화, /project-init:init-project와 /project-init:sync-docs</div>
   <div class="code-wrap prompt">
     <div class="code-head"><span class="code-label">Claude 세션 입력</span><button class="copy-btn" type="button">복사</button></div>
     <pre><code>/project-init:init-project 이 저장소는 빌드 도구 없는 정적 제너러티브 아트 전시(site/)와
@@ -1092,7 +1286,7 @@ CDK 배포 스택(bin/, lib/)으로 이루어져 있다. 다음을 하네스에 
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="opth"><span>하네스를 성숙화하고 등급을 받았다 (옵션)</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="opth"><span>하네스를 성숙화하고 등급을 받았습니다 (옵션)</span></label>
   </div>
 </section>
 
@@ -1153,7 +1347,7 @@ CDK 배포 스택(bin/, lib/)으로 이루어져 있다. 다음을 하네스에 
     <tr><td>조용히 깨지는 것만 기계에게 검사시킨다</td><td>렌더 루프는 눈으로, 카탈로그 계약은 CI로</td></tr>
     <tr><td>Ch2 서브에이전트</td><td>Phase 2의 리팩터에서 두 작품을 병렬로 옮길 때</td></tr>
     <tr><td>Ch4 settings와 hooks</td><td><code class="inline">site/js/**</code> 저장 시 <code class="inline">verify.mjs</code>를 자동 실행</td></tr>
-    <tr><td>같은 배포 패턴</td><td>S3 + CloudFront + BucketDeployment는 A, C, D, E와 동일한 근육. 이제 눈 감고도</td></tr>
+    <tr><td>같은 배포 패턴</td><td>S3 + CloudFront + BucketDeployment는 정적 배포의 표준 패턴. 이제 눈 감고도</td></tr>
   </tbody></table>
 
   <div class="callout tip">
@@ -1175,7 +1369,7 @@ CDK 배포 스택(bin/, lib/)으로 이루어져 있다. 다음을 하네스에 
     <div>
       <div class="nx-label">NEXT</div>
       <h3>포털로</h3>
-      <p>다른 캡스톤(1 Press Start, 2 Market Desk on TUI)도 같은 리듬입니다. <a href="https://comeddy.github.io/ccw-hands-on-lab/index.html" style="color:#c9a2ff">워크샵 포털</a>에서 다음 미션을 고르세요.</p>
+      <p>다른 캡스톤(1 Press Start, 2 Market Desk on Web)도 같은 리듬입니다. <a href="index.html" style="color:#c9a2ff">워크샵 포털</a>에서 다음 미션을 고르세요.</p>
     </div>
   </div>
 </section>
@@ -1257,4 +1451,21 @@ CDK 배포 스택(bin/, lib/)으로 이루어져 있다. 다음을 하네스에 
 </script>
 
 
+<button id="themeToggle" type="button" aria-label="테마 전환">라이트 모드</button>
+<script>
+(function(){
+  var KEY='hol-theme', root=document.documentElement, btn=document.getElementById('themeToggle');
+  function label(){ btn.textContent = root.getAttribute('data-theme')==='light' ? '다크 모드' : '라이트 모드'; }
+  var saved=null; try{saved=localStorage.getItem(KEY);}catch(e){}
+  if(saved==='light'){ root.setAttribute('data-theme','light'); }
+  else if(saved==='dark'){ root.removeAttribute('data-theme'); }
+  label();
+  btn.addEventListener('click',function(){
+    var light = root.getAttribute('data-theme')==='light';
+    if(light){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme','light'); }
+    try{ localStorage.setItem(KEY, light ? 'dark' : 'light'); }catch(e){}
+    label();
+  });
+})();
+</script>
 </body></html>

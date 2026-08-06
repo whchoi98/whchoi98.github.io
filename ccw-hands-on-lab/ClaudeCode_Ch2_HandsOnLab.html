@@ -107,7 +107,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: var(--bg-sticky);
+  background: rgba(12, 17, 23, 0.92);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -280,7 +280,7 @@ code.inline {
   font-family: var(--font-code);
   font-size: 0.88em;
   background: var(--bg-inline);
-  color: var(--code-amber, #FFC466);
+  color: #FFC466;
   padding: 2px 7px;
   border-radius: 4px;
   white-space: nowrap;
@@ -310,7 +310,7 @@ kbd {
   justify-content: space-between;
   padding: 8px 14px;
   border-bottom: 1px solid var(--line);
-  background: var(--code-head-bg, rgba(255,255,255,.02));
+  background: rgba(255, 255, 255, 0.02);
 }
 .code-label {
   font-size: 11px;
@@ -343,10 +343,10 @@ kbd {
   font-size: 13.5px;
   line-height: 1.7;
 }
-.code-wrap code { font-family: inherit; color: var(--code-text, #D8DEE9); }
+.code-wrap code { font-family: inherit; color: #D8DEE9; }
 .code-wrap.output pre { color: var(--dim); }
-.code-wrap .cmt { color: var(--code-cmt, #5E6B7E); }
-.code-wrap .hl { color: var(--code-amber, #FFC466); }
+.code-wrap .cmt { color: #5E6B7E; }
+.code-wrap .hl { color: #FFC466; }
 .code-wrap .ok { color: var(--green); }
 
 /* ============ Callouts ============ */
@@ -370,7 +370,7 @@ kbd {
   margin-bottom: 5px;
 }
 
-.callout.warn .co-title { color: var(--red); }
+.callout.warn .co-title { color: #FF5C85; }
 
 /* ============ Checkpoint ============ */
 .checkpoint {
@@ -443,19 +443,19 @@ kbd {
 .tbl th, .tbl td {
   text-align: left;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--line-soft);
+  border-bottom: 1px solid #FFFFFF14;
 }
 .tbl th {
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.08em;
   color: var(--orange);
-  background: var(--row-alt);
+  background: rgba(255, 255, 255, 0.03);
 }
 .tbl td { color: var(--muted); vertical-align: middle; }
 .tbl td:first-child { color: var(--text); font-weight: 700; white-space: nowrap; }
 .tbl tr:last-child td { border-bottom: none; }
-.tbl code { font-family: var(--font-code); font-size: 0.9em; color: var(--code-amber, #FFC466); }
+.tbl code { font-family: var(--font-code); font-size: 0.9em; color: #FFC466; }
 
 /* ============ Wrap-up ============ */
 .wrapup {
@@ -550,8 +550,36 @@ code.inline { white-space: normal; overflow-wrap: anywhere; }
   box-shadow: 18px 0 0 #FEBC2E, 36px 0 0 #28C840;
 }
 </style>
-<link rel="stylesheet" href="theme.css">
-<script src="theme.js"></script>
+<style id="hol-theme">
+html[data-theme="light"]{
+  --bg:#F3F4F7; --bg-card:#FFFFFF; --bg-code:#EEF1F5; --bg-inline:#E4E9EF; --line:#D7DDE5;
+  --orange:#B45309; --orange-dim:rgba(180,83,9,.12);
+  --green:#1F883D; --green-dim:rgba(31,136,61,.12);
+  --text:#1B2430; --muted:#5B6472; --dim:#75808F;
+  background:#F3F4F7;
+}
+html[data-theme="light"] [style*="#c9a2ff"]{color:#6b46c1 !important}
+html[data-theme="light"] [style*="#A6ABBE"]{color:#5B6472 !important}
+#themeToggle{position:fixed;right:16px;bottom:16px;z-index:9999;
+background:var(--bg-card,var(--card,#1B242E));color:var(--orange,#FF9900);
+border:1px solid var(--line,#2A3542);border-radius:999px;padding:9px 16px;
+font:600 13px/1 sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#themeToggle:hover{border-color:var(--orange,#FF9900)}
+html[data-theme="light"] .code-wrap code{color:#2A3542}
+html[data-theme="light"] .code-wrap.output code{color:#57606E}
+html[data-theme="light"] code{color:#B45309;background:#E4E9EF}
+html[data-theme="light"] .code-wrap code, html[data-theme="light"] pre code{background:transparent}
+html[data-theme="light"] .k.s{background:#DCEEDC}
+html[data-theme="light"] .k.w{background:#E9E2F7}
+html[data-theme="light"] code.inline, html[data-theme="light"] .inline{color:#B45309;background:#E4E9EF;border-color:#D7DDE5}
+html[data-theme="light"] .code-wrap .hl{color:#B45309}
+html[data-theme="light"] .code-wrap .cmt{color:#6E7B8C}
+html[data-theme="light"] .head{--text:#E8ECF1;--muted:#8B96A5;--charcoal:#C7CDD6;--orange:#FF9900;--lavender:#c9a2ff;--line:#262F3B}
+html[data-theme="light"] .head, html[data-theme="light"] .head h1{color:#F2F4F8}
+html[data-theme="light"] .head .when{color:#FF9900}
+html[data-theme="light"] .head .where, html[data-theme="light"] .head .facts span{color:#C7CDD6}
+@media print{#themeToggle{display:none}}
+</style>
 </head>
 <body>
 
@@ -720,8 +748,8 @@ npm test &amp;&amp; git log --oneline</code></pre>
 
 <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t0"><span>npm test 3개 PASS, git log에 커밋 2개 이상이 보인다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="t0jq"><span>jq --version이 버전을 출력한다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t0"><span>npm test 3개 PASS, git log에 커밋 2개 이상이 보입니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t0jq"><span>jq --version이 버전을 출력합니다</span></label>
   </div>
 </section>
 
@@ -834,8 +862,8 @@ EOF</code></pre>
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t1a"><span>@ typeahead 또는 Claude 응답에서 code-reviewer 등록을 확인했다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="t1b"><span>Severity 형식을 따르는 리뷰 결과를 받았다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t1a"><span>@ typeahead 또는 Claude 응답에서 code-reviewer 등록을 확인했습니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t1b"><span>Severity 형식을 따르는 리뷰 결과를 받았습니다</span></label>
   </div>
 </section>
 
@@ -944,8 +972,8 @@ rm -f .claude/agents/dangerous-test.md .claude/agents/dangerous-test.md.bak</cod
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t2a"><span>Edit 권한이 없을 때 수정이 거부되는 것을 관찰했다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="t2b"><span>tools에 Edit 추가 + /exit 재진입 후 재시도에서 수정이 진행되는 차이를 확인했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t2a"><span>Edit 권한이 없을 때 수정이 거부되는 것을 관찰했습니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t2b"><span>tools에 Edit 추가 + /exit 재진입 후 재시도에서 수정이 진행되는 차이를 확인했습니다</span></label>
   </div>
 </section>
 <!-- ================= Task 3 ================= -->
@@ -1046,7 +1074,7 @@ ls .claude/agents/</code></pre>
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t3"><span>@ typeahead 또는 Claude 응답에서 code-reviewer, test-writer, docs-writer 3종을 확인했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t3"><span>@ typeahead 또는 Claude 응답에서 code-reviewer, test-writer, docs-writer 3종을 확인했습니다</span></label>
   </div>
 </section>
 
@@ -1138,8 +1166,8 @@ Breakdown:
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t4a"><span>자동 / 명시 / 병렬 3가지 패턴의 호출 차이를 관찰했다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="t4b"><span>/cost(/usage)에서 세션 사용량과 서브에이전트별 소비를 확인했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t4a"><span>자동 / 명시 / 병렬 3가지 패턴의 호출 차이를 관찰했습니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t4b"><span>/cost(/usage)에서 세션 사용량과 서브에이전트별 소비를 확인했습니다</span></label>
   </div>
 </section>
 
@@ -1225,8 +1253,8 @@ jobs:
 
   <div class="checkpoint">
     <div class="cp-title">CHECKPOINT</div>
-    <label class="cp-item"><input type="checkbox" data-cp="t5a"><span>review-result.json이 생성되었다</span></label>
-    <label class="cp-item"><input type="checkbox" data-cp="t5b"><span>jq 또는 python3로 JSON 필드를 추출했다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t5a"><span>review-result.json이 생성되었습니다</span></label>
+    <label class="cp-item"><input type="checkbox" data-cp="t5b"><span>jq 또는 python3로 JSON 필드를 추출했습니다</span></label>
   </div>
 </section>
 
@@ -1354,6 +1382,23 @@ jobs:
     }, { rootMargin: "-20% 0px -65% 0px" });
     sections.forEach(function (s) { io.observe(s); });
   }
+})();
+</script>
+<button id="themeToggle" type="button" aria-label="테마 전환">라이트 모드</button>
+<script>
+(function(){
+  var KEY='hol-theme', root=document.documentElement, btn=document.getElementById('themeToggle');
+  function label(){ btn.textContent = root.getAttribute('data-theme')==='light' ? '다크 모드' : '라이트 모드'; }
+  var saved=null; try{saved=localStorage.getItem(KEY);}catch(e){}
+  if(saved==='light'){ root.setAttribute('data-theme','light'); }
+  else if(saved==='dark'){ root.removeAttribute('data-theme'); }
+  label();
+  btn.addEventListener('click',function(){
+    var light = root.getAttribute('data-theme')==='light';
+    if(light){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme','light'); }
+    try{ localStorage.setItem(KEY, light ? 'dark' : 'light'); }catch(e){}
+    label();
+  });
 })();
 </script>
 </body>

@@ -2,13 +2,13 @@
 title: Claude Code Deep Dive Workshop
 parent: Workshop
 nav_order: 3
-last_modified_date: "2026-07-26"
+last_modified_date: "2026-08-06"
 ---
 
 # Claude Code Deep Dive Workshop
 {: .no_toc }
 
-Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, Enterprise 배포, 설정 계층, CLI 파이프라인, Agent SDK, 그리고 3개의 캡스톤 미션과 3개의 참조 문서까지.
+Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, Enterprise 배포, 설정 계층, CLI 파이프라인, Agent SDK, 그리고 4개의 캡스톤 미션과 3개의 참조 문서까지.
 {: .fs-6 .fw-300 }
 
 [랩 포털 열기](/ccw-hands-on-lab/index.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
@@ -38,7 +38,7 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 
 ## 캡스톤 미션 (Capstone Missions)
 
-설치 가이드로 환경을 갖춘 뒤, 세 가지 미션 중 선택해 진행합니다.
+설치 가이드로 환경을 갖춘 뒤, 네 가지 미션 중 선택해 진행합니다.
 
 | Mission | 주제 | 구성 |
 |:--------|:-----|:-----|
@@ -46,6 +46,7 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 | [MISSION 1 — Press Start: Clawd Jump, 에이전틱 게임 개발](/ccw-hands-on-lab/ClaudeCode_Capstone1_HandsOnLab.html) | Clawd 마스코트의 슈퍼마리오풍 플랫포머를 superpowers로 만들어 CloudFront로 개장. Bedrock 미사용, API 키 불필요 | 135분 |
 | [MISSION 2 — Market Desk: 터미널 주식 시황 데스크](/ccw-hands-on-lab/ClaudeCode_Capstone2_HandsOnLab.html) | Textual + yfinance + pykrx + Bedrock으로 지표 바, 골든크로스 차트, 호가창, 뉴스 AI 분석까지 풀스펙 빌드 | 135분 / 미션 5 + DoD |
 | [MISSION 3 — Frame It: Generative Hours, 코드로 그린 전시](/ccw-hands-on-lab/ClaudeCode_Capstone3_HandsOnLab.html) | 제너러티브 아트 두 점으로 여는 인터랙티브 미디어 아트 전시 — 추상이 태어나는 순간을 직접 경험. Bedrock 미사용 | 120분 / 미션 6 + DoD |
+| [MISSION 4 — Trend Radar: 유튜브 급상승 30 트렌드 레이더](/ccw-hands-on-lab/ClaudeCode_Capstone4_HandsOnLab.html) | 급상승 30을 주기 수집해 스냅샷으로 쌓고 순위 변동·NEW·카테고리 점유율의 흐름을 분석 — Bedrock을 SDK 없이 REST로 직접 호출 | 135분 / 미션 5 + DoD |
 
 ## 참조 문서 (Reference)
 

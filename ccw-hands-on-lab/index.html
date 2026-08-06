@@ -22,7 +22,7 @@
   a { color: inherit; text-decoration: none; }
   code.inline {
     font-family: "D2Coding", "JetBrains Mono", ui-monospace, monospace; font-size: 0.86em;
-    background: var(--bg-inline, #232D38); color: var(--code-amber, #FFC466); padding: 2px 7px; border-radius: 4px;
+    background: #232D38; color: #FFC466; padding: 2px 7px; border-radius: 4px;
     white-space: normal; overflow-wrap: anywhere;
   }
 
@@ -129,8 +129,35 @@
     .row .side .time { display: inline; margin-right: 10px; }
   }
 </style>
-<link rel="stylesheet" href="theme.css">
-<script src="theme.js"></script>
+<style id="hol-theme">
+html[data-theme="light"]{
+  --bg:#F3F4F7; --card:#FFFFFF; --code:#EEF1F5; --line:#D7DDE5;
+  --text:#1B2430; --muted:#5B6472; --charcoal:#3A4453;
+  --orange:#B45309; --green:#1F883D; --purple:#6D28D9; --lavender:#6b46c1;
+  background:#F3F4F7;
+}
+html[data-theme="light"] [style*="#c9a2ff"]{color:#6b46c1 !important}
+html[data-theme="light"] [style*="#A6ABBE"]{color:#5B6472 !important}
+#themeToggle{position:fixed;right:16px;bottom:16px;z-index:9999;
+background:var(--bg-card,var(--card,#1B242E));color:var(--orange,#FF9900);
+border:1px solid var(--line,#2A3542);border-radius:999px;padding:9px 16px;
+font:600 13px/1 sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#themeToggle:hover{border-color:var(--orange,#FF9900)}
+html[data-theme="light"] .code-wrap code{color:#2A3542}
+html[data-theme="light"] .code-wrap.output code{color:#57606E}
+html[data-theme="light"] code{color:#B45309;background:#E4E9EF}
+html[data-theme="light"] .code-wrap code, html[data-theme="light"] pre code{background:transparent}
+html[data-theme="light"] .k.s{background:#DCEEDC}
+html[data-theme="light"] .k.w{background:#E9E2F7}
+html[data-theme="light"] code.inline, html[data-theme="light"] .inline{color:#B45309;background:#E4E9EF;border-color:#D7DDE5}
+html[data-theme="light"] .code-wrap .hl{color:#B45309}
+html[data-theme="light"] .code-wrap .cmt{color:#6E7B8C}
+html[data-theme="light"] .head{--text:#E8ECF1;--muted:#8B96A5;--charcoal:#C7CDD6;--orange:#FF9900;--lavender:#c9a2ff;--line:#262F3B}
+html[data-theme="light"] .head, html[data-theme="light"] .head h1{color:#F2F4F8}
+html[data-theme="light"] .head .when{color:#FF9900}
+html[data-theme="light"] .head .where, html[data-theme="light"] .head .facts span{color:#C7CDD6}
+@media print{#themeToggle{display:none}}
+</style>
 </head>
 <body>
 
@@ -144,7 +171,7 @@
     캡스톤은 네 가지 미션 중 <strong>하나를 선택</strong>해 완주하며, 별도 인프라 없이 혼자서도 처음부터 끝까지 수행할 수 있습니다.
   </p>
   <div class="hero-meta">
-    <span>구성 <strong>준비 2 + Chapter 랩 6 + Capstone 3 + Reference 3</strong></span>
+    <span>구성 <strong>준비 2 + Chapter 랩 6 + Capstone 4 + Reference 3</strong></span>
     <span>환경 <strong>Claude Code on EC2 + Admin 계정</strong></span>
     <span>리전 <strong>ap-northeast-2</strong></span>
     <span>모델 <strong>Opus 4.8, Sonnet 5.0, Sonnet 4.6 (Global CRIS)</strong></span>
@@ -156,16 +183,16 @@
   <div class="flow-inner">
     <span class="day">DAY 1</span>
     <span class="chip">시작 전 확인</span><span class="arrow">→</span>
-    <span class="chip">Ch1 설치와 자동화</span><span class="arrow">→</span>
+    <span class="chip">Ch1 설치와 Headless</span><span class="arrow">→</span>
     <span class="chip">Ch2 Subagents</span><span class="arrow">→</span>
-    <span class="chip">Ch3 Admin Setup</span>
+    <span class="chip">Ch3 Admin 브리핑</span><span class="arrow">→</span>
+    <span class="chip">Capstone R1, 게임/미술관</span>
     <span class="day" style="margin-left:14px">DAY 2</span>
     <span class="chip">Ch4 Settings 슈퍼랩</span><span class="arrow">→</span>
-    <span class="chip">Ch5 CLI Reference</span><span class="arrow">→</span>
-    <span class="chip">Ch6 Agent SDK</span><span class="arrow">→</span>
-    <span class="chip">Setup</span><span class="arrow">→</span>
-    <span class="chip">Capstone 택 1</span>
-    <span class="opt">+ OPTION 하네스 엔지니어링 15분</span>
+    <span class="chip">Ch5 CLI 핵심</span><span class="arrow">→</span>
+    <span class="chip">Anthropic 특별 세션</span><span class="arrow">→</span>
+    <span class="chip">Capstone R2, 증시/유튜브</span><span class="arrow">→</span>
+    <span class="chip">모델 라우팅과 메터링</span>
   </div>
 </nav>
 
@@ -244,10 +271,11 @@
 </section>
 
 <section class="wrap" id="capstones">
-  <div class="sec-title"><h2>Capstone Missions</h2><span class="tag">택 1 / 135분 목표, 150분 상한</span></div>
+  <div class="sec-title"><h2>Capstone Missions</h2><span class="tag">이틀 2라운드 / Day 1 택 1 + Day 2 택 1</span></div>
   <p class="sec-desc">
-    다섯 챕터의 근육을 전부 소환해 공개 URL 서비스를 배포합니다. 네 미션은 난이도가 아니라 정체성이 다릅니다,
-    관심사에 맞춰 고르세요. 전부 superpowers의 brainstorm → plan → execute 워크플로로 진행합니다.
+    이틀 동안 두 번 완결합니다. Day 1 라운드 1은 Bedrock 없이 완주하는 <b>게임</b>과 <b>미술관</b> 중 택 1,
+    Day 2 라운드 2는 Bedrock 분석이 살아 있는 <b>증시</b>와 <b>유튜브</b> 중 택 1입니다.
+    난이도가 아니라 정체성이 다르니 관심사에 맞춰 고르세요. 전부 superpowers의 brainstorm → plan → execute 워크플로로 진행합니다.
   </p>
   <div class="rows" style="margin-bottom:14px">
     <a class="row" href="ClaudeCode_Capstone_Setup.html">
@@ -266,7 +294,7 @@
       <span class="mnum">MISSION 1</span>
       <span class="identity">Press Start</span>
       <h3>Clawd Jump, 에이전틱 게임 개발</h3>
-      <p class="desc">Claude Code 마스코트 Clawd의 슈퍼마리오풍 플랫포머. 엔진, 물리, 타일 레벨, 코인과 깃발까지
+      <p class="desc"><b>Day 1, 라운드 1.</b> Claude Code 마스코트 Clawd의 슈퍼마리오풍 플랫포머. 엔진, 물리, 타일 레벨, 코인과 깃발까지
       전부 superpowers로 시켜서 만들고 CloudFront로 개장합니다. Bedrock 미사용, API 키 불필요.</p>
       <p class="finale">피날레: <b>내가 만든 게임 URL을 Slack에 공유, 서로 플레이</b></p>
       <span class="foot"><span>135분 / 미션 5 + DoD</span><span class="go">시작 →</span></span>
@@ -275,10 +303,10 @@
     <a class="card" href="ClaudeCode_Capstone2_HandsOnLab.html">
       <span class="mnum">MISSION 2</span>
       <span class="identity">Market Desk</span>
-      <h3>터미널 주식 시황 데스크</h3>
-      <p class="desc">Textual + yfinance + pykrx + Bedrock으로 지표 바, 지수 카드, 시장 요약, 종목 테이블,
-      골든크로스 차트, 호가창, 뉴스 AI 분석까지 빈 폴더에서 풀스펙으로 빌드합니다. 터미널이 곧 데스크.</p>
-      <p class="finale">피날레: <b>터미널에서 뛰는 내 데스크 스크린샷을 Slack에</b></p>
+      <h3>웹 시황 대시보드</h3>
+      <p class="desc"><b>Day 2, 라운드 2.</b> FastAPI + React + lightweight-charts로 지표 바, 지수 카드, 종목 테이블, 캔들 차트를 짓고,
+      Bedrock 종목 분석이 SSE로 타자기처럼 흐릅니다. 캐시는 single-flight, 실행은 make run 하나. 원작 stock-monitoring 축소판.</p>
+      <p class="finale">피날레: <b>브라우저에서 뛰는 내 데스크 스크린샷을 Slack에</b></p>
       <span class="foot"><span>135분 / 미션 5 + DoD</span><span class="go">시작 →</span></span>
     </a>
 
@@ -286,10 +314,20 @@
       <span class="mnum">MISSION 3</span>
       <span class="identity">Frame It</span>
       <h3>Generative Hours, 코드로 그린 전시를 개장하라</h3>
-      <p class="desc">제너러티브 아트 두 점으로 여는 인터랙티브 미디어 아트 전시. 첫 작품을 추상 없이 끝까지 밀고,
+      <p class="desc"><b>Day 1, 라운드 1.</b> 제너러티브 아트 두 점으로 여는 인터랙티브 미디어 아트 전시. 첫 작품을 추상 없이 끝까지 밀고,
       두 번째 작품이 도착하는 순간 공통 계약을 추출합니다. 추상이 태어나는 순간을 손으로 겪는 랩. Bedrock 미사용, API 키 불필요.</p>
       <p class="finale">피날레: <b>내 전시 URL을 Slack에 공유, 서로 관람</b></p>
       <span class="foot"><span>120분 / 미션 6 + DoD</span><span class="go">시작 →</span></span>
+    </a>
+
+    <a class="card" href="ClaudeCode_Capstone4_HandsOnLab.html">
+      <span class="mnum">MISSION 4</span>
+      <span class="identity">Trend Radar</span>
+      <h3>유튜브 급상승 30, 트렌드 레이더</h3>
+      <p class="desc"><b>Day 2, 라운드 2.</b> 급상승 30을 주기 수집해 스냅샷으로 쌓고, 순위 변동(▲▼)과 NEW, 카테고리 점유율의 흐름을 읽습니다.
+      브리핑은 Bedrock을 SDK 없이 REST로 직접 호출, now/daily 두 모드. 원작 youtube-trend 축소판.</p>
+      <p class="finale">피날레: <b>흐름이 읽히는 레이더 스크린샷을 Slack에</b></p>
+      <span class="foot"><span>135분 / 미션 5 + DoD</span><span class="go">시작 →</span></span>
     </a>
   </div>
 </section>
@@ -327,15 +365,6 @@
       <span class="side"><span class="time">찾아보기</span><span class="go">열기 →</span></span>
     </a>
 
-
-    <a class="row" href="eDM.html">
-      <span class="ch" style="color:var(--green)">INTRO</span>
-      <span class="body">
-        <h3>세션 소개</h3>
-        <p>교육 환경 안내와 워크샵 전체 여정 — 개인 환경에서 조직 표준으로, 자동화와 측정, 자율 실습까지.</p>
-      </span>
-      <span class="side"><span class="time">한눈에</span><span class="go">열기 →</span></span>
-    </a>
 
     <a class="row" href="https://github.com/whchoi98/claude-code-workshop/tree/main/20260703">
       <span class="ch" style="color:var(--green)">REPO</span>
@@ -377,5 +406,22 @@
   <div>기준: Claude Code 2.1.x, 2026.07</div>
 </footer>
 
+<button id="themeToggle" type="button" aria-label="테마 전환">라이트 모드</button>
+<script>
+(function(){
+  var KEY='hol-theme', root=document.documentElement, btn=document.getElementById('themeToggle');
+  function label(){ btn.textContent = root.getAttribute('data-theme')==='light' ? '다크 모드' : '라이트 모드'; }
+  var saved=null; try{saved=localStorage.getItem(KEY);}catch(e){}
+  if(saved==='light'){ root.setAttribute('data-theme','light'); }
+  else if(saved==='dark'){ root.removeAttribute('data-theme'); }
+  label();
+  btn.addEventListener('click',function(){
+    var light = root.getAttribute('data-theme')==='light';
+    if(light){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme','light'); }
+    try{ localStorage.setItem(KEY, light ? 'dark' : 'light'); }catch(e){}
+    label();
+  });
+})();
+</script>
 </body>
 </html>

@@ -14,7 +14,7 @@
     font-family: "NanumSquareOTF", "나눔스퀘어OTF", "NanumSquare", "나눔스퀘어", "Pretendard", "Noto Sans KR", system-ui, -apple-system, sans-serif; }
   a { color:var(--orange); text-decoration:none; }
   code, code.inline { font-family: "D2Coding", "JetBrains Mono",ui-monospace,monospace; font-size:.86em;
-    background:var(--bg-inline, #232D38); color:var(--code-amber, #FFC466); padding:2px 7px; border-radius:4px; white-space:normal; overflow-wrap:anywhere; }
+    background:#232D38; color:#FFC466; padding:2px 7px; border-radius:4px; white-space:normal; overflow-wrap:anywhere; }
   .hero { position:relative; max-width:1160px; margin:0 auto; padding:44px 28px 30px; overflow:hidden; }
   .hero::after { content:""; position:absolute; top:-150px; right:-170px; width:440px; height:440px;
     background:radial-gradient(circle, rgba(182,0,46,.28), transparent 62%); pointer-events:none; }
@@ -29,7 +29,7 @@
   table.tbl { width:100%; border-collapse:collapse; font-size:13.5px; display:block; overflow-x:auto; max-width:100%; }
   .tbl th { text-align:left; color:var(--dim); font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
     padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
-  .tbl td { padding:9px 12px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  .tbl td { padding:9px 12px; border-bottom:1px solid #202A35; vertical-align:top; }
   .tbl tr:last-child td { border-bottom:0; }
   .tbl td:first-child { white-space:nowrap; }
   .badge { display:inline-block; font-size:11px; font-weight:700; color:var(--bg); background:var(--lavender);
@@ -39,20 +39,47 @@
   .co-title { display:block; font-size:12px; font-weight:800; letter-spacing:.1em; margin-bottom:5px; color:var(--orange); }
   .code-wrap { background:var(--code); border:1px solid var(--line); border-radius:10px; margin:14px 0 20px; overflow:hidden; }
   .code-head { display:flex; align-items:center; justify-content:space-between; padding:8px 14px 8px 76px;
-    border-bottom:1px solid var(--line); background:var(--code-head-bg, rgba(255,255,255,.02)); position:relative; }
+    border-bottom:1px solid var(--line); background:rgba(255,255,255,.02); position:relative; }
   .code-head::before { content:""; position:absolute; left:16px; top:50%; transform:translateY(-50%);
     width:11px; height:11px; border-radius:50%; background:#FF5F57; box-shadow:18px 0 0 #FEBC2E, 36px 0 0 #28C840; }
   .code-label { font-size:11px; font-weight:700; letter-spacing:.1em; color:var(--dim); text-transform:uppercase; }
   .code-wrap pre { margin:0; padding:14px 16px; overflow-x:auto; }
-  .code-wrap pre code { background:none; color:var(--code-text, #D6DEE8); padding:0; font-size:13px; line-height:1.75; white-space:pre; }
-  .cmt { color:var(--dim); }
+  .code-wrap pre code { background:none; color:#D6DEE8; padding:0; font-size:13px; line-height:1.75; white-space:pre; }
+  .cmt { color:#5A6676; }
   footer { max-width:1160px; margin:36px auto 0; padding:20px 28px 44px; border-top:1px solid var(--line);
     color:var(--muted); font-size:12.5px; line-height:1.9; }
   footer .who { color:var(--charcoal); font-weight:700; }
   @media (max-width:620px){ .hero{padding:26px 16px 22px} .wrap,footer{padding-left:16px;padding-right:16px} }
 </style>
-<link rel="stylesheet" href="theme.css">
-<script src="theme.js"></script>
+<style id="hol-theme">
+html[data-theme="light"]{
+  --bg:#F3F4F7; --card:#FFFFFF; --code:#EEF1F5; --line:#D7DDE5;
+  --text:#1B2430; --muted:#5B6472; --charcoal:#3A4453;
+  --orange:#B45309; --green:#1F883D; --purple:#6D28D9; --lavender:#6b46c1;
+  background:#F3F4F7;
+}
+html[data-theme="light"] [style*="#c9a2ff"]{color:#6b46c1 !important}
+html[data-theme="light"] [style*="#A6ABBE"]{color:#5B6472 !important}
+#themeToggle{position:fixed;right:16px;bottom:16px;z-index:9999;
+background:var(--bg-card,var(--card,#1B242E));color:var(--orange,#FF9900);
+border:1px solid var(--line,#2A3542);border-radius:999px;padding:9px 16px;
+font:600 13px/1 sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+#themeToggle:hover{border-color:var(--orange,#FF9900)}
+html[data-theme="light"] .code-wrap code{color:#2A3542}
+html[data-theme="light"] .code-wrap.output code{color:#57606E}
+html[data-theme="light"] code{color:#B45309;background:#E4E9EF}
+html[data-theme="light"] .code-wrap code, html[data-theme="light"] pre code{background:transparent}
+html[data-theme="light"] .k.s{background:#DCEEDC}
+html[data-theme="light"] .k.w{background:#E9E2F7}
+html[data-theme="light"] code.inline, html[data-theme="light"] .inline{color:#B45309;background:#E4E9EF;border-color:#D7DDE5}
+html[data-theme="light"] .code-wrap .hl{color:#B45309}
+html[data-theme="light"] .code-wrap .cmt{color:#6E7B8C}
+html[data-theme="light"] .head{--text:#E8ECF1;--muted:#8B96A5;--charcoal:#C7CDD6;--orange:#FF9900;--lavender:#c9a2ff;--line:#262F3B}
+html[data-theme="light"] .head, html[data-theme="light"] .head h1{color:#F2F4F8}
+html[data-theme="light"] .head .when{color:#FF9900}
+html[data-theme="light"] .head .where, html[data-theme="light"] .head .facts span{color:#C7CDD6}
+@media print{#themeToggle{display:none}}
+</style>
 </head>
 <body>
 <header class="hero">
@@ -83,7 +110,7 @@ claude plugin install &lt;플러그인&gt;@&lt;마켓&gt;                  <span
         <td><span class="badge ch">캡스톤 M0</span></td></tr>
     <tr><td><code>project-init@project-init</code><br><span style="color:#5A6676;font-size:12px">github.com/whchoi98/project-init</span></td>
         <td>하네스 스캐폴딩 자동화. 기존 프로젝트 감지 모드로 CLAUDE.md, 훅, 스킬, 테스트 골격 중 없는 것만 생성하고 문서 품질을 0-100 점수로 동기화</td>
-        <td>/init-project, /sync-docs, /health-check, /add-adr, /add-runbook</td>
+        <td>/project-init:init-project, /project-init:sync-docs, /health-check, /add-adr, /add-runbook</td>
         <td><span class="badge">OPTION 하네스</span></td></tr>
     <tr><td><code>harness-eval@harness-eval</code><br><span style="color:#5A6676;font-size:12px">github.com/whchoi98/harness-eval</span></td>
         <td>하네스 품질을 6개 차원(정확성, 안전성, 완전성, 실행 가능성, 일관성, 검증 가능성)에서 A+~F로 채점. quick 30초, standard 2~3분, full 5~10분</td>
@@ -132,5 +159,22 @@ claude plugin install &lt;플러그인&gt;@&lt;마켓&gt;                  <span
   <div class="who">Claude Code Deep Dive Workshop, Reference 3, 플러그인</div>
   <div>기준: Claude Code 2.1.x, 2026.07 / 플러그인 문서: code.claude.com/docs/en/plugins</div>
 </footer>
+<button id="themeToggle" type="button" aria-label="테마 전환">라이트 모드</button>
+<script>
+(function(){
+  var KEY='hol-theme', root=document.documentElement, btn=document.getElementById('themeToggle');
+  function label(){ btn.textContent = root.getAttribute('data-theme')==='light' ? '다크 모드' : '라이트 모드'; }
+  var saved=null; try{saved=localStorage.getItem(KEY);}catch(e){}
+  if(saved==='light'){ root.setAttribute('data-theme','light'); }
+  else if(saved==='dark'){ root.removeAttribute('data-theme'); }
+  label();
+  btn.addEventListener('click',function(){
+    var light = root.getAttribute('data-theme')==='light';
+    if(light){ root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme','light'); }
+    try{ localStorage.setItem(KEY, light ? 'dark' : 'light'); }catch(e){}
+    label();
+  });
+})();
+</script>
 </body>
 </html>
