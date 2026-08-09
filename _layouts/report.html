@@ -2,28 +2,20 @@
 layout: default
 ---
 {% assign posts = site.pages | where_exp: "p", "p.layout == 'post' or p.layout == 'report'" | sort: "date" | reverse %}
+{% assign cat = site.blog_categories | where: "name", page.category | first %}
 
-<header class="site-header">
+<header class="site-header slim">
   <div class="wrap">
     {% include topbar.html %}
-    <div class="post-hero">
-      <div class="crumb">
-        <a href="/">홈</a> / <a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>
-      </div>
-      <h1 class="post-hero-title">{{ page.title }}</h1>
-      <div class="post-hero-meta">
-        <span class="meta-light">{{ page.date | date: "%Y.%m.%d" }} · {{ page.minutes }}분 · {{ site.author }}</span>
-        {% for t in page.tags %}<span class="chip chip-dark">{{ t }}</span>{% endfor %}
-      </div>
+    <div class="crumb crumb-bar">
+      <a href="/">홈</a> /
+      {% if cat %}<a href="{{ cat.url }}">{{ page.category }}</a>{% else %}<a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>{% endif %} /
+      <span>{{ page.title }}</span>
     </div>
   </div>
 </header>
 
 <main class="report-main">
-  {% assign intro_size = content | strip | size %}
-  {% if intro_size > 0 %}
-  <div class="report-intro">{{ content }}</div>
-  {% endif %}
   <a href="#after-report" class="skip-link">임베드 문서 건너뛰고 하단으로 이동</a>
   <iframe id="report-frame" src="{{ page.report_src }}" title="{{ page.title }}" loading="eager"></iframe>
   <noscript>
