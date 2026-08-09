@@ -545,6 +545,33 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   h2, h3, h4 { break-after: avoid; }
   section.sec { margin-top: 36px; }
 }
+
+/* ---------- Mac terminal codeblock ---------- */
+.codeblock { border-radius: 10px; }
+.code-caption { display: flex; align-items: center; gap: 10px; }
+.mac-dots { display: inline-flex; gap: 6px; flex-shrink: 0; }
+.mac-dots i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.mac-dots i:nth-child(1) { background: #ff5f57; }
+.mac-dots i:nth-child(2) { background: #febc2e; }
+.mac-dots i:nth-child(3) { background: #28c840; }
+.code-caption-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.code-copy {
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 5px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.code-copy:hover { color: var(--navy); border-color: var(--muted); }
+.code-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-copy.copied { color: var(--accent); border-color: var(--accent); }
+@media print { .code-copy, .mac-dots { display: none; } }
 </style>
 </head>
 <body>
@@ -1481,55 +1508,7 @@ except Exception:
 })();
 </script>
 
-<script type="module">
-const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
-if (blocks.length) {
-  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
-  const reveal = () => document.documentElement.classList.add("mermaid-ready");
 
-  try {
-    const { default: mermaid } = await import(
-      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
-    );
-
-    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
-    const render = async () => {
-      const s = getComputedStyle(document.documentElement);
-      const t = (name) => s.getPropertyValue(name).trim();
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "strict",
-        theme: "base",
-        fontFamily: t("--sans"),
-        themeVariables: {
-          background: t("--paper"),
-          primaryColor: t("--paper-2"),
-          primaryTextColor: t("--ink"),
-          primaryBorderColor: t("--line-strong"),
-          secondaryColor: t("--note-bg"),
-          tertiaryColor: t("--code-bg"),
-          lineColor: t("--muted"),
-          textColor: t("--ink"),
-          fontSize: "14px"
-        }
-      });
-      blocks.forEach((el) => {
-        el.removeAttribute("data-processed");
-        el.textContent = el.dataset.src;
-      });
-      await mermaid.run({ nodes: blocks });
-    };
-
-    await render();
-    reveal();
-    document.addEventListener("themechange", () => { render().catch(() => {}); });
-  } catch (e) {
-    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
-    blocks.forEach((el) => el.classList.add("failed"));
-    reveal();
-  }
-}
-</script>
 
 
 <!-- techblogs-codecopy: 코드블록 복사 버튼 (아이콘 전용, execCommand 폴백 포함) -->
@@ -1579,6 +1558,111 @@ if (blocks.length) {
     });
   });
 })();
+</script>
+
+<script>
+/* Mac 터미널 코드블록: 신호등 도트 + 복사 버튼. JS 미지원 환경에서는 기존 캡션 바 그대로. */
+(function () {
+  function decorate(block) {
+    var cap = block.querySelector(".code-caption");
+    var code = block.querySelector("pre code") || block.querySelector("pre");
+    if (!cap || !code || cap.querySelector(".mac-dots")) return;
+    var enPage = null;
+    try { enPage = cap.closest('.page[data-lang="en"]'); } catch (e) {}
+    var en = !!enPage;
+    var text = document.createElement("span");
+    text.className = "code-caption-text";
+    while (cap.firstChild) text.appendChild(cap.firstChild);
+    var dots = document.createElement("span");
+    dots.className = "mac-dots";
+    dots.setAttribute("aria-hidden", "true");
+    dots.innerHTML = "<i></i><i></i><i></i>";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy";
+    btn.textContent = en ? "Copy" : "복사";
+    btn.setAttribute("aria-label", en ? "Copy code" : "코드 복사");
+    btn.addEventListener("click", function () {
+      var t = code.textContent;
+      function done() {
+        btn.textContent = en ? "Copied" : "복사됨";
+        btn.classList.add("copied");
+        setTimeout(function () {
+          btn.textContent = en ? "Copy" : "복사";
+          btn.classList.remove("copied");
+        }, 1600);
+      }
+      function fallback() {
+        var ta = document.createElement("textarea");
+        ta.value = t;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand("copy"); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(done).catch(fallback);
+      } else {
+        fallback();
+      }
+    });
+    cap.appendChild(dots);
+    cap.appendChild(text);
+    cap.appendChild(btn);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".codeblock"), decorate);
+})();
+</script>
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
 </script>
 
 </body>

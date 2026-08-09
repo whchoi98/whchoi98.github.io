@@ -124,6 +124,54 @@
     });
   }
 
+  /* ---------- Mac 터미널 코드블록 (article 내 pre 장식 + 복사) ---------- */
+  Array.prototype.forEach.call(document.querySelectorAll(".article pre"), function (pre) {
+    if (pre.closest(".term-box")) return;
+    var code = pre.querySelector("code") || pre;
+    var box = document.createElement("div");
+    box.className = "term-box";
+    var head = document.createElement("div");
+    head.className = "term-head";
+    var dots = document.createElement("span");
+    dots.className = "mac-dots";
+    dots.setAttribute("aria-hidden", "true");
+    for (var di = 0; di < 3; di++) dots.appendChild(document.createElement("i"));
+    var spacer = document.createElement("span");
+    spacer.className = "term-spacer";
+    head.appendChild(dots);
+    head.appendChild(spacer);
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "term-copy";
+    function label(base) {
+      var en = document.documentElement.classList.contains("lang-en");
+      return en ? (base === "idle" ? "Copy" : "Copied") : (base === "idle" ? "복사" : "복사됨");
+    }
+    btn.textContent = label("idle");
+    document.addEventListener("langchange", function () { if (!btn.classList.contains("copied")) btn.textContent = label("idle"); });
+    btn.addEventListener("click", function () {
+      var t = code.textContent;
+      function done() {
+        btn.textContent = label("done");
+        btn.classList.add("copied");
+        setTimeout(function () { btn.textContent = label("idle"); btn.classList.remove("copied"); }, 1600);
+      }
+      function fallback() {
+        var ta = document.createElement("textarea");
+        ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(fallback);
+      else fallback();
+    });
+    head.appendChild(btn);
+    pre.parentNode.insertBefore(box, pre);
+    box.appendChild(head);
+    box.appendChild(pre);
+  });
+
   /* ---------- 글 목차 (h2 스크롤 스파이) ---------- */
   var article = document.getElementById("article");
   var tocAside = document.getElementById("toc-aside");
