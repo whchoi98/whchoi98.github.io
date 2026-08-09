@@ -15,3 +15,9 @@ Thumbs.db
 
 # Superpowers brainstorm
 .superpowers/
+vendor/bundle
+
+# Local bundler/build
+.bundle/
+Gemfile.lock
+*.zip

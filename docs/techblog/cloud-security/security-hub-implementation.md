@@ -1,21 +1,14 @@
 ---
-title: AWS Security Hub Implementation
-parent: Cloud Security
-grand_parent: Tech Blog
-nav_order: 1
-last_modified_date: "2026-03-19"
+title: "AWS Security Hub Implementation"
+date: 2026-03-19
+category: Cloud Security
+tags: [Security Hub, Security]
+icon: vpc
+minutes: 4
+excerpt: "Implementing AWS Security Hub for cloud security posture management - standards, findings aggregation, and automated response."
 ---
 
 # Implementing AWS Security Hub for Cloud Security Posture
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 ## Overview
 

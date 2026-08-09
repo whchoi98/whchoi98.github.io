@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+{% seo %}
+<link rel="alternate" type="application/rss+xml" href="{{ '/feed.xml' | absolute_url }}">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="/assets/css/main.css">
+<script>
+/* 첫 페인트 전에 테마 확정 - 깜빡임 방지 */
+(function () {
+  var q = null;
+  try { q = new URLSearchParams(location.search).get("theme"); } catch (e) {}
+  var saved = null;
+  try { saved = localStorage.getItem("whchoi98-blog-theme"); } catch (e) {}
+  var pick = q || saved;
+  var dark = pick ? pick === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  if (dark) document.documentElement.classList.add("dark");
+})();
+</script>
+</head>
+<body class="layout-{{ page.layout | default: 'default' }}">
+{{ content }}
+<footer class="site-footer">
+  <div class="wrap footer-row">
+    <span class="footer-copy">© 2026 whchoi98 · Built on GitHub Pages</span>
+    <div class="footer-spacer"></div>
+    <a href="https://github.com/whchoi98" target="_blank" rel="noopener">GitHub</a>
+    <a href="/feed.xml">RSS</a>
+  </div>
+</footer>
+<script src="/assets/js/main.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+---
+layout: default
+---
+{% assign posts = site.pages | where: "layout", "post" | sort: "date" | reverse %}
+
+<header class="site-header">
+  <div class="wrap">
+    {% include topbar.html %}
+    <div class="page-hero">
+      <h1 class="page-hero-title">태그</h1>
+      <p class="page-hero-sub" id="tag-heading">전체 {{ posts | size }}편</p>
+    </div>
+  </div>
+</header>
+
+<main class="wrap tags-main">
+  <div class="chip-row" id="tag-chips"></div>
+  <div id="tag-list" class="post-list">
+    {% for p in posts %}
+    <div class="card post-card" data-tags="{{ p.tags | join: '|' }}{% if p.category %}|{{ p.category }}{% endif %}">
+      <img src="/assets/icons/{{ p.icon | default: 'bedrock' }}.svg" alt="" class="post-card-icon">
+      <div class="post-card-body">
+        <a href="{{ p.url }}" class="post-card-title">{{ p.title }}</a>
+        <span class="post-card-excerpt">{{ p.excerpt }}</span>
+        <div class="meta-row">
+          {% for t in p.tags %}<button type="button" class="chip chip-btn" data-tag="{{ t }}">{{ t }}</button>{% endfor %}
+          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}분</span>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {{ content }}
+</main>

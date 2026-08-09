@@ -1,21 +1,14 @@
 ---
-title: Building RAG with Amazon Bedrock
-parent: AIML
-grand_parent: Tech Blog
-nav_order: 1
-last_modified_date: "2026-03-19"
+title: "Building RAG with Amazon Bedrock"
+date: 2026-03-19
+category: AIML
+tags: [Bedrock, RAG]
+icon: bedrock
+minutes: 5
+excerpt: "Retrieval-Augmented Generation architecture with Amazon Bedrock - Knowledge Base, embeddings, and chunking strategy."
 ---
 
 # Building RAG Architecture with Amazon Bedrock
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 ## Introduction
 

@@ -1,12 +1,6 @@
 ---
 title: AIML
-parent: Tech Blog
-nav_order: 1
-has_children: true
-last_modified_date: "2026-03-19"
+layout: listing
+list_category: AIML
+description: "인공지능/머신러닝 - Amazon Bedrock, 생성형 AI, Claude Code"
 ---
-
-# AIML
-{: .no_toc }
-
-인공지능/머신러닝(AI/ML) 기술 블로그 - Amazon Bedrock, SageMaker, 생성형 AI(Generative AI) 심층 분석 및 아키텍처 가이드.

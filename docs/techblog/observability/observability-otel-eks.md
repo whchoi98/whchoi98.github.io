@@ -1,21 +1,14 @@
 ---
-title: Observability with OpenTelemetry on EKS
-parent: Observability
-grand_parent: Tech Blog
-nav_order: 1
-last_modified_date: "2026-03-19"
+title: "Observability with OpenTelemetry on EKS"
+date: 2026-03-19
+category: Observability
+tags: [OpenTelemetry, EKS, CloudWatch]
+icon: cloudwatch
+minutes: 5
+excerpt: "End-to-end observability on EKS with OpenTelemetry - collector deployment, traces, metrics, and CloudWatch integration."
 ---
 
 # End-to-End Observability with OpenTelemetry on EKS
-{: .no_toc }
-
-## Table of contents
-{: .no_toc .text-delta }
-
-1. TOC
-{:toc}
-
----
 
 ## Introduction
 

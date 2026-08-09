@@ -1,0 +1,17 @@
+<div class="topbar">
+  <a href="/" class="brand"><span class="brand-name">whchoi98</span><span class="brand-tld">.github.io</span></a>
+  <nav class="topnav" aria-label="주 메뉴">
+    <a href="/" {% if page.layout == 'home' %}class="active"{% endif %}>홈</a>
+    <a href="/tags/" {% if page.layout == 'tags' %}class="active"{% endif %}>태그</a>
+    <a href="/docs/workshop/" {% if page.section == 'workshop' %}class="active"{% endif %}>Workshop</a>
+    <a href="/about/" {% if page.url == '/about/' %}class="active"{% endif %}>About</a>
+  </nav>
+  <div class="topbar-spacer"></div>
+  {% if page.layout == 'home' %}
+  <input id="home-search" type="search" placeholder="검색 - 제목, 태그" aria-label="글 검색" autocomplete="off">
+  {% endif %}
+  <div class="theme-seg" role="group" aria-label="테마 선택">
+    <button type="button" class="seg seg-light" data-theme-pick="light">라이트</button>
+    <button type="button" class="seg seg-dark" data-theme-pick="dark">다크</button>
+  </div>
+</div>

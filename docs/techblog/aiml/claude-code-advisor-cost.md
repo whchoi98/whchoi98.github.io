@@ -1,13 +1,15 @@
 ---
 title: "Claude Code Advisor 구성 비용 분석"
-parent: AIML
-grand_parent: Tech Blog
-nav_order: 3
-last_modified_date: "2026-08-08"
+date: 2026-08-08
+category: AIML
+tags: [Claude Code, Advisor, FinOps]
+icon: bedrock
+minutes: 7
+featured: true
+excerpt: "Sonnet 5 + Opus 5 advisor vs Opus 5 고정 - 같은 과제를 실측한 토큰 비용 비교와 손익분기 분석. advisor 비용의 본체는 응답이 아니라 uncached input입니다."
 ---
 
 # Claude Code advisor 구성 비용 분석 - Sonnet 5 + Opus 5 advisor vs Opus 5 고정
-{: .no_toc }
 
 같은 과제를 **Sonnet 5 + Opus 5 advisor** 구성과 **Opus 5 고정** 구성으로 각각 실행해 실측한 토큰 비용 비교입니다. 과제 규모에 따라 어느 구성이 저렴한지, 그 손익분기가 어디서 갈리는지를 다룹니다.
 

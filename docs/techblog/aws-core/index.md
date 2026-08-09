@@ -1,12 +1,6 @@
 ---
 title: AWS Core
-parent: Tech Blog
-nav_order: 2
-has_children: true
-last_modified_date: "2026-03-19"
+layout: listing
+list_category: AWS Core
+description: "AWS 핵심 서비스 - VPC, EC2, Lambda, S3"
 ---
-
-# AWS Core
-{: .no_toc }
-
-AWS 핵심 서비스(Core Services) 기술 블로그 - VPC, EC2, Lambda, S3, CloudFormation 아키텍처 패턴 및 모범 사례(Best Practices).
