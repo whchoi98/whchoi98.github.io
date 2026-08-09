@@ -1,0 +1,1518 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Claude Sonnet 5 한글 출력 무결성 조사</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/hangul-integrity-sonnet5/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 파라미터가 localStorage 보다 우선한다. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Language toggle ---------- */
+.theme-bar { gap: 8px; }
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+</head>
+<body>
+<div class="page" data-lang="ko">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Investigation Report</p>
+  <h1>Claude Sonnet 5 한글 출력 무결성 조사</h1>
+  <p class="subtitle">
+    Claude Code와 Amazon Bedrock 경로에서 관찰된 한글 음절 치환 증상을 6개 데이터셋, 1,200여 런의 통제 실험으로 추적해 근본 원인을 확정한 조사 기록입니다. LLM 출력 품질을 검증해야 하는 엔지니어를 위한 방법론 문서를 겸합니다.
+  </p>
+
+  <div class="stat" role="img" aria-label="출력 형식에 따른 손상률 대비: 이스케이프 표기 런 100%, 리터럴 작성 런 1.7%">
+    <div class="stat-item old">
+      <span class="stat-num">100<span class="unit">%</span></span>
+      <span class="stat-sub">이스케이프 표기 런 45/45 (2개 계정 합산)</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">1.7<span class="unit">%</span></span>
+      <span class="stat-sub">리터럴 작성 지시 런 1/60 (잔존 1건은 별도 클래스)</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-09입니다.</p>
+    <p>조사 기간은 2026-07-28 ~ 2026-08-01이며, 6개 데이터셋에서 총 1,200여 런을 실행했습니다.</p>
+    <p>대상 모델은 <span class="mono">claude-sonnet-5</span>(1P), <span class="mono">global.anthropic.claude-sonnet-5</span>와 <span class="mono">us.anthropic.claude-sonnet-5</span>(Amazon Bedrock)입니다.</p>
+    <p>주 출처는 로컬 저장소에 보존된 내부 종합 보고서(2026-08-01)와 원시 실행 데이터입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>Claude Code에서 관찰되던 "다았 단계"류 한글 음절 치환의 근본 원인은 <strong>모델이 툴 JSON의 한글을 <span class="mono">\uXXXX</span> 이스케이프로 표기하다 hex를 오기하는 클래스 A(escape-miscoding)</strong>로 확정되었습니다. 이스케이프 표기 런은 45/45(100%), 리터럴 작성 런은 1/60(1.7%)이 손상되었습니다.</li>
+    <li>음절당 hex 4자리를 받아쓰는 과정에서 한 자리 오기가 유효한 인접 음절로 렌더됩니다(새벽 &rarr; 새벅). 리터럴로 작성하면 이 오기 기회 자체가 사라집니다.</li>
+    <li>"컨텍스트 점유율 50% 이상에서 빈발" 가설은 기각되었습니다. 실측 점유 0.1~78% 스윕 2회에서 손상률 곡선은 전 구간 평탄해 fill 가설은 기각되었습니다. 클래스 A는 두 AWS 계정(…6239, …5884)에서 동일하게 재현되어 서빙 계층이 아닌 모델 출력 행동으로 판정되었습니다.</li>
+    <li>"툴 파라미터 한글은 리터럴 UTF-8로 작성" 출력 형식 지시로 클래스 A는 차단됩니다. 저빈도 토큰 치환(클래스 B)은 지시로 차단되지 않으며, 재현 식별자를 포함한 증거 패키지를 AWS에 전달해 서버측 상관 분석을 요청했습니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">관찰과 가설</a></li>
+    <li><span class="no">02</span><a href="#s2">시험 설계</a></li>
+    <li><span class="no">03</span><a href="#s3">검증 방법론</a></li>
+    <li><span class="no">04</span><a href="#s4">결과</a></li>
+    <li><span class="no">05</span><a href="#s5">방법론적 교훈과 완화</a></li>
+    <li><span class="no">06</span><a href="#s6">한계</a></li>
+    <li><span class="no">07</span><a href="#s7">결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>관찰과 가설</h2>
+  <p>
+    발단은 현장 관찰이었습니다. Claude Code(Bedrock 백엔드)의 TodoWrite, AskUserQuestion 표면에서 "☐ 다았 단계"처럼 한글 음절이 다른 음절로 치환되는 증상이 반복 보고되었고, 보고자의 체감은 <strong>"컨텍스트 점유율 50% 이상부터 빈발한다"</strong>였습니다. 세션이 길어질수록 잦아진다는 인상이었기 때문에, 처음에는 long-context 서빙 결함이 유력해 보였습니다.
+  </p>
+  <p>
+    체감을 그대로 결론으로 옮기지 않고, 검증 가능한 세 가지 가설로 분해했습니다. 세 가설은 상호 배타적이지 않으며, 각각 독립적인 실험 설계로 판정했습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 검증 대상 가설과 최종 판정</caption>
+      <thead>
+        <tr><th scope="col">가설</th><th scope="col">내용</th><th scope="col">가려내려는 것</th><th scope="col">최종 판정</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">H-fill</th><td>손상률이 컨텍스트 점유율에 비례한다(50% 이상에서 상승)</td><td>서빙 경로의 long-context 결함 여부</td><td>기각</td></tr>
+        <tr><th scope="row">H-path</th><td>손상률이 1P(Claude 구독) 대 3P(Bedrock) 경로에 의존한다</td><td>Bedrock 서빙 / 변환 계층 결함 여부</td><td>유의차 미검출</td></tr>
+        <tr><th scope="row">H2 (escape)</th><td>손상이 raw 툴 JSON 내 <span class="mono">\uXXXX</span> 이스케이프 오기에서 기원한다</td><td>모델 출력 행동 여부</td><td>확정 (클래스 A)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    탐지 하니스(<span class="mono">cjk_integrity_probe</span> 계열 스크립트)는 H2를 사전에 대비한 탐지 클래스로 설계되어 있었습니다. raw 스트림에서 한글 <span class="mono">\uXXXX</span> 이스케이프를 별도 계수하도록 만들어 둔 것이 이후 근본 원인 확정의 발판이 되었습니다.
+  </p>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>시험 설계</h2>
+  <p>
+    비교 경로는 1P(Claude Enterprise 구독, Claude Code CLI)와 3P(Amazon Bedrock) 5개 셀로 구성했습니다. Bedrock 쪽은 Claude Code 백엔드 전환, ConverseStream 직접 호출, InvokeModelWithResponseStream 직접 호출, 리전 / 추론 프로파일 변형을 포괄합니다. 클라이언트는 양 백엔드에서 동일한 Claude Code CLI 2.1.220 바이너리와 boto3 1.42.86을 사용해 클라이언트 변인을 고정했습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 데이터셋 6종 개요 (실행 2026-07-28 ~ 07-31, UTC)</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">데이터셋</th><th scope="col">설계</th><th scope="col">핵심 결과</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">D1</th><td>Baseline A/B</td><td>n=30 x 5셀 x 2시나리오 = 300콜</td><td>원플래그 25건 &rarr; 검증 1건(믄고)</td></tr>
+        <tr><th scope="row">D2</th><td>스모크</td><td>8콜 (배선과 fill 주입 검증)</td><td>8/8 정상, 1M 창 실동작 확인</td></tr>
+        <tr><th scope="row">D3</th><td>Fill 스윕 1차</td><td>n=20 x 3셀 x fill 4레벨</td><td>곡선 평탄, F* 부재, 새벅 1건(fill 0)</td></tr>
+        <tr><th scope="row">D4</th><td>Fill 스윕 2차 (교정 fill, 심야 KST)</td><td>실측 0 / 30.7 / 51.0 / 71.4%</td><td>평탄 재현, F* 부재, U+FFFD 1건(1P, fill 0)</td></tr>
+        <tr><th scope="row">D5</th><td>A/B 재현 (심야 KST)</td><td>300콜</td><td>검증 1건(사오오) + borderline 1건(반박됨)</td></tr>
+        <tr><th scope="row">D6</th><td>Escape A/B (계정 2개)</td><td>E(이스케이프 유도) 대 L(리터럴 지시), 계정당 arm별 n=30</td><td>escape 런 45/45 손상 대 리터럴 1/60</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    실행 중 두 가지 교정이 있었습니다. 첫째, us-east-1의 <span class="mono">anthropic.claude-sonnet-5</span>는 on-demand 호출이 불가한 추론 프로파일 전용임을 실측으로 확인하고 해당 셀을 <span class="mono">us.anthropic.claude-sonnet-5</span>로 교정했습니다. 둘째, 필러 캘리브레이션에서 스크립트 가정(토큰당 1.5자)과 실측(약 1.03자)의 차이로 1차 스윕의 최고 레벨이 컨텍스트 창을 초과해 무효가 되었고, 2차 스윕에서 fill 레벨을 재교정해 실측 0 / 30.7 / 51.0 / 71.4%를 달성했습니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 1M 창 교정과 샘플링 동일성</span>
+    <p>fill 스윕의 분모인 WINDOW 값은 지시서 기본값 200,000토큰이 아니라, Sonnet 5 모델 카드(컨텍스트 1,000,000토큰, 출력 128,000토큰, Bedrock 1M GA)를 근거로 <strong>1,000,000토큰</strong>으로 교정해 사용했습니다. 또한 Sonnet 5는 temperature / top_p 파라미터를 받지 않으므로, 경로 간 샘플링 동일성이 구조적으로 보장됩니다.</p>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>검증 방법론</h2>
+  <p>
+    이 조사의 판정 파이프라인은 3단 구성입니다. 자동 탐지와 LLM judge가 후보를 넓게 수집하고, 적대적 반박 패널이 진성 여부를 판정하며, 바이트 포렌식이 기원(모델 대 파이프라인)을 판별합니다. 어느 한 단계의 출력도 단독으로는 사실로 승격되지 않습니다.
+  </p>
+
+  <h3>3.1 자동 탐지와 LLM judge</h3>
+  <p>
+    자동 탐지 하니스는 U+FFFD, KS X 1001 외 희귀 음절(euc-kr 인코딩 길이를 이용한 판별), raw 툴 JSON 내 한글 <span class="mono">\uXXXX</span> 이스케이프, 외국 문자 혼입의 4개 클래스를 검사합니다. 고정밀이지만 재현율이 낮아, 흔한 음절 사이의 치환(로그인 &rarr; 로까잉류)은 놓칩니다. 이 갭을 LLM judge(claude-haiku-4-5, 1P 경로)로 보강했습니다. 다만 judge 원플래그의 96%가 오탐으로 판명되어(5절), 원플래그는 후보 수집 용도로만 사용했습니다.
+  </p>
+
+  <h3>3.2 적대적 3-lens 반박 패널</h3>
+  <p>
+    플래그된 런마다 언어학(오탐 클래스 대조), 인코딩 / 파이프라인(바이트 분석, 실증 테스트 포함), 재현 클래스 / 통계의 세 lens를 각각 독립 에이전트가 맡아 "이것은 손상이 아니다"라는 반박을 시도합니다. <strong>세 lens의 반박을 모두 견디고 만장일치로 생존한 플래그만 진성으로 판정</strong>했습니다. 실제로 일본어 혼입 1건(手戻り)은 이 패널에서 3/3으로 반박되어 정합적 코드스위칭으로 분류되었습니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  RAW["원시 런 스트림 (raw delta)"] --> H["휴리스틱 프로브 (고정밀)"]
+  RAW --> J["LLM judge (고재현)"]
+  H --> FLAGS["원플래그 풀"]
+  J --> FLAGS
+  FLAGS --> P["적대적 3-lens 반박 패널"]
+  RAW --> F["백슬래시 삼분법 포렌식"]
+  F --> P
+  P --> G["진성 판정 5건"]
+  P --> FP["오탐 / borderline 기각"]
+    </div>
+    <figcaption>
+      그림 1. 검증 파이프라인. 탐지기 플래그는 반박 패널을 통과해야 진성으로 승격되고, 바이트 포렌식이 이스케이프 기원 여부를 판별합니다.
+    </figcaption>
+  </figure>
+
+  <h3>3.3 바이트 포렌식 - 백슬래시 삼분법</h3>
+  <p>
+    손상이 모델의 이스케이프 표기에서 왔는지는 검증 지점의 raw 기록에서 백슬래시 겹 수로 판별할 수 있습니다. JSON으로 저장된 raw 파일 기준으로 세 가지 경우가 갈립니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">raw 스트림 판별 기준 - 백슬래시 삼분법 ("잡"의 코드포인트는 U+C7A1)</div>
+    <pre><code>"잡"         <span class="cm"># 리터럴 UTF-8 = 모델이 리터럴로 작성</span>
+"\uc7a1"    <span class="cm"># 백슬래시 1겹 = 로거의 ensure_ascii 개입 (모델 무죄)</span>
+"\\uc7a1"    <span class="cm"># 백슬래시 2겹 = 모델이 이스케이프를 직접 작성 (결정적 유죄 지문)</span></code></pre>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - Invocation Log의 toolUse.input은 무죄 증거가 아닙니다</span>
+    <p>Bedrock Invocation Log의 <span class="mono">toolUse.input</span>은 파싱된 객체로 저장되어 이스케이프 지문이 소멸합니다. 여기에 리터럴 한글이 보인다고 해서 모델이 리터럴로 작성했다는 증거가 되지 않습니다. 지문이 보존되는 소스는 <span class="mono">stream-json</span> 출력의 <span class="mono">partial_json</span>(본 조사 하니스가 사용) 또는 프록시 와이어 캡처뿐입니다.</p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>결과</h2>
+
+  <h3>4.1 용량-반응 곡선 - H-fill 기각</h3>
+  <p>
+    실측 점유 0.1~78% 구간을 훑는 fill 스윕을 교정 재현을 포함해 2회 수행한 결과, 손상률 곡선은 전 구간 평탄했습니다. baseline 대비 |z|&gt;1.96이 되는 최초 fill 지점(F*)은 두 번 모두 존재하지 않았고, 전체 최대 |z|는 1.01에 그쳤습니다. 고점유(30~78%) 구간을 병합해도 <strong>0/300</strong>으로 손상이 없었으며, 오히려 검증된 손상 이벤트 5건은 전부 fill이 0에 가까운 조건에서 발생했습니다. 손상 런의 입력 크기도 980토큰에서 52,000토큰까지 산재해, 비율형 임계도 절대형 임계도 성립하지 않았습니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - "50% 이상 빈발" 체감의 재해석</span>
+    <p>점유율 자체는 원인이 아니었습니다. 긴 대화형 세션일수록 모델이 클래스 A의 이스케이프 표기 모드로 진입할 확률이 높아지는 상관으로 체감을 설명할 수 있습니다. 원인 변수(출력 표기 방식)와 상관 변수(세션 길이)가 달랐던 사례입니다.</p>
+  </div>
+
+  <h3>4.2 경로 A/B - H-path 유의차 미검출</h3>
+  <p>
+    D1의 judge 원플래그는 특정 셀에서 33.3%(z=+2.58)까지 치솟았지만, 적대적 재검 후 전원 오탐으로 소멸했습니다. 검증 기준으로 치환 클래스 합계는 Bedrock 4건 대 1P 0건입니다. 방향은 일관되지만 Fisher exact 검정 p는 약 0.6으로 <strong>통계적으로 유의하지 않아 경로 의존성은 결론 불가</strong>입니다. 1P 경로에서 별도 클래스(U+FFFD) 1건이 검증된 점까지 고려하면 경로 특이성 주장은 더 약해집니다. Converse 대 Invoke, global 대 us-geo, 스트리밍 여부, tool 대 prose 어느 축에서도 검증 기준 유의 신호는 없었습니다.
+  </p>
+
+  <h3>4.3 근본 원인 확정 - 클래스 A: escape-miscoding</h3>
+  <p>
+    결정적 단서는 운영 중 발견되었습니다. 모델이 AskUserQuestion 등의 툴 파라미터에서 한글을 <span class="mono">\uXXXX</span> 이스케이프로 직접 표기하는 사례가 관찰되었고, "이스케이프 금지, 리터럴 작성" 메모리 지시 후 증상이 소멸했습니다. 이를 D6 통제 실험으로 확증했습니다. 이스케이프를 유도한 E arm과 리터럴을 지시한 L arm을 두 AWS 계정에서 교차 실행한 결과는 다음과 같습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. Escape A/B 결과 (D6, 2026-07-31, 계정별 arm당 n=30)</caption>
+      <thead>
+        <tr><th scope="col">arm</th><th scope="col">계정 …6239</th><th scope="col">계정 …5884</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">E (escape 사용 런)</th><td>23/23 손상 (100%, 95% CI 85.7~100)</td><td>22/22 손상 (100%, 95% CI 85.1~100), JSON 파싱 실패 1건 별도</td></tr>
+        <tr><th scope="row">L (리터럴 지시 런)</th><td>1/30 (3.3%, 해당 1건은 클래스 B)</td><td>0/30 (0%)</td></tr>
+        <tr><th scope="row">z (E 대 L)</th><td>+7.01</td><td>+7.21</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    조건부 분해 결과, 손상을 가른 것은 지시 문구가 아니라 <strong>런이 실제로 이스케이프를 사용했는지 여부</strong>였습니다. 이스케이프를 6개만 쓴 부분 진입 런에서도 손상(메택, 대시보네)이 나왔습니다. 메커니즘은 음절당 hex 4자리를 받아쓰는 과정의 한 자리 오기가 유효한 인접 음절로 렌더되는 것입니다. 새벽의 "벽"에서 한 자리가 어긋나면 "벅"이 되어 "새벅"이 됩니다. 진입 런에서 손상 밀도는 음절의 3~5%(희귀 음절만 계수한 하한)였고, 형태는 고객 증상과 동일했습니다: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+  </p>
+  <p>
+    두 계정에서 동일하게 재현되었으므로 이 현상은 특정 계정이나 서빙 풀의 결함이 아니라 <strong>모델의 출력 행동</strong>입니다. 그리고 리터럴로 작성하면 오기 기회 자체가 사라지므로, 출력 형식 지시만으로 이 클래스는 차단됩니다.
+  </p>
+
+  <h3>4.4 클래스 B - 잔존하는 저빈도 토큰 치환</h3>
+  <p>
+    클래스 A를 제거하고 남는 별도 결함이 클래스 B입니다. 검증 4건(믄고, 새벅, 사오오, 쪼르)은 raw delta와 AWS Invocation Log 실측에서 전부 리터럴 UTF-8로 도착했고 이스케이프는 0건이었습니다. 단일 부위 치환으로 비단어가 되고, 문맥상 의도어가 명백하며, 서브워드 토큰 오선택 시그니처(쪽 &rarr; 쪼+르)를 보입니다. L arm에서 1건이 발생한 데서 보듯 <strong>출력 형식 지시로는 차단되지 않습니다</strong>. 기저율은 런당 약 0.3~0.4%(음절 기준 약 70,000+개당 1건)입니다. 발생층(모델 자체 대 서빙 디토크나이즈)의 국소화에는 서버측 텔레메트리가 필요해, Bedrock RequestId 3건을 포함한 증거 패키지를 AWS에 전달했습니다.
+  </p>
+  <p>
+    포렌식 전수 검사도 같은 방향을 가리켰습니다. 하니스가 기록한 1,071런의 raw delta 전체에서 모델 작성 이스케이프는 0건이었고(프로브가 잡은 손상은 전부 클래스 B), CloudWatch Insights로 주간 26,427개 레코드를 스윕한 결과 텍스트 필드에서 <span class="mono">\\u</span> 매치는 0건이었습니다.
+  </p>
+
+  <h3>4.5 1P 경로의 U+FFFD - 별도 디코드 클래스</h3>
+  <p>
+    1P 경로(cc-1p-enterprise)의 TodoWrite JSON에서 "레이아�트에"처럼 실제 콘텐츠가 손실된 U+FFFD 이벤트 1건이 검증되었습니다. 패널의 Node 실증에서 CLI의 청크 분할이 원인이라면 대체 문자가 2~3개 나와야 하지만 관측은 단일 대체 문자와 온전한 후속 텍스트였으므로, 클라이언트는 배제되고 상류(서빙 디토크나이즈 또는 모델의 대체 문자 토큰 방출)로 국소화되었습니다. 고객 증상과는 다른 클래스이며, 1P 경로에도 별도 결함이 존재함을 보여 경로 특이성 주장을 추가로 약화시킵니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. 검증된 손상 이벤트 전체 (진성 5건 + borderline 1건, 패널 3-lens 판정)</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">관측 형태</th><th scope="col">클래스</th><th scope="col">경로</th><th scope="col">시나리오</th><th scope="col">일시 (UTC)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>믄고 (의도어: 믿고)</td><td>B</td><td>Claude Code CLI &rarr; Bedrock</td><td>prose</td><td>07-28 11:11</td></tr>
+        <tr><td>2</td><td>새벅 (의도어: 새벽)</td><td>B</td><td>Bedrock ConverseStream 직접 호출</td><td>tool JSON</td><td>07-28 12:01</td></tr>
+        <tr><td>3</td><td>사오오 (의도어: 오백)</td><td>B</td><td>Bedrock ConverseStream 직접 호출</td><td>prose</td><td>07-28 16:15</td></tr>
+        <tr><td>4</td><td>레이아�트에 (U+FFFD)</td><td>디코드</td><td>1P Enterprise (Claude Code CLI)</td><td>tool JSON</td><td>07-28 16:16</td></tr>
+        <tr><td>5</td><td>쪼르 (의도어: 쪽)</td><td>B</td><td>Bedrock ConverseStream 직접 호출 (D6 L arm)</td><td>tool JSON</td><td>07-31 18:13</td></tr>
+        <tr><td>-</td><td>手戻り 일본어 혼입</td><td>borderline</td><td>Bedrock InvokeModel 직접 호출</td><td>tool JSON</td><td>07-28 15:01 (패널 3/3 반박, 손상 아님)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>방법론적 교훈과 완화</h2>
+
+  <h3>5.1 LLM judge 원플래그는 손상률이 아닙니다</h3>
+  <p>
+    두 A/B 런의 judge 원플래그 74건 중 71건(96%)이 오탐이었습니다. 대표 오탐은 조사 결합 오판으로, "서비스 메시나 인그레스"(메시 또는 인그레스)를 비단어 "메시나"로 판정한 사례가 D1 25건 중 21건을 차지했습니다. 언어베일러블(unavailable), 리브니스(liveness) 같은 음역 변이도 오탐원이었습니다. 오탐이 셀 간 균일하지 않아(출력 문체 빈도 차) 원플래그 기반 z-검정은 신뢰할 수 없었고, 실제로 D1의 z=+2.58 신호가 재검 후 소멸했습니다.
+  </p>
+  <p>
+    역방향 갭도 있었습니다. 흔한 음절로 착지한 비단어(쪼르)는 희귀 음절 휴리스틱을 통과하므로 <strong>judge 없이는 검출되지 않습니다</strong>. 결국 휴리스틱(정밀), judge(재현), 적대적 재검(정확)의 3단 구성이 모두 필요하다는 것이 이 조사의 방법론적 결론입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - judge 플래그 비율을 손상률로 읽지 마세요</span>
+    <p>적대적 재검 없이 LLM judge의 플래그 비율을 손상률로 읽으면, 이 조사에서는 실제보다 최대 25배 부풀려진 수치를 보고하게 됩니다. 셀 간 비교(z-검정)도 오탐 분포가 균일하다는 가정이 깨지므로 함께 무효가 됩니다.</p>
+  </div>
+
+  <h3>5.2 완화 지시 배포</h3>
+  <p>
+    클래스 A는 출력 형식 지시 한 줄로 차단됩니다. 개인은 Claude 메모리와 <span class="mono">~/.claude/CLAUDE.md</span>에, 팀은 각 저장소의 <span class="mono">CLAUDE.md</span>에, 조직은 Enterprise 관리형 설정으로 강제 배포하는 3계층 적용을 권고합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">CLAUDE.md - 완화 지시 문안</div>
+    <pre><code>툴 호출 파라미터(JSON)의 한글 등 비ASCII 문자열은 항상 리터럴 UTF-8로 작성하고,
+\uXXXX 유니코드 이스케이프로 표기하지 않는다.</code></pre>
+  </div>
+
+  <p>
+    업스트림 보고도 완료했습니다. 클래스 A는 E arm raw 기록을 재현 증거로 첨부해 Anthropic에 공개 이슈(anthropics/claude-code#83033)로 보고했고, 클래스 B는 Bedrock RequestId 3건의 서빙 텔레메트리 상관 분석을 요청하는 증거 패키지로 AWS에 전달했습니다.
+  </p>
+
+  <h3>5.3 재발 캡처 표준</h3>
+  <p>
+    재발 시 화면 캡처나 세션 파일은 증거 능력이 없습니다. 지문이 보존되는 소스로 캡처한 뒤 백슬래시 삼분법(3.3절)으로 판별해야 합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">지문 보존 캡처 - Claude Code CLI</div>
+    <pre><code>claude -p --output-format stream-json --include-partial-messages   <span class="cm"># partial_json에 지문 보존</span></code></pre>
+  </div>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>한계</h2>
+  <p>
+    이 조사가 확정하지 못한 것과, 결과 해석 시 유의할 지점입니다.
+  </p>
+  <ol class="plain">
+    <li>클래스 B의 발생층(모델 자체 대 서빙 디토크나이즈)은 국소화되지 않았습니다. 관측된 Bedrock 4건 대 1P 0건은 시사적이지만 비유의이며, 판정에는 RequestId 상관 분석 또는 셀당 수천 런 규모가 필요합니다.</li>
+    <li>통계 검정력이 제한적입니다. 조건당 n=20~30이므로 0/20 관측은 상한 16.1%만 보장하고, 클래스 B 기저율 추정(0.3~0.4%)의 신뢰구간도 넓습니다.</li>
+    <li>Claude Code 셀의 usage 지표는 세션 누적치(요청당의 약 2배)라 요청당 환산이 필요하며, 조사 호스트의 기본 부하는 요청당 약 52,000토큰이었습니다.</li>
+    <li>fill 스윕은 단일 턴에 필러를 주입하는 구조입니다. 실제 장시간 대화형 세션에서 escape 모드 진입이 잦아지는 동학은 직접 측정하지 않았고, D6의 조건부 분해로 간접 확증했습니다.</li>
+    <li>judge는 자연스러운 오타 / 신조어 경계에서 잔여 불확실성이 있습니다. 모든 진성 판정을 3-lens 패널로 이중화해 완화했습니다.</li>
+  </ol>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>결론</h2>
+  <p>
+    체감이 가리킨 곳과 실제 원인은 달랐습니다. "컨텍스트 50% 이상에서 빈발"이라는 관찰은 long-context 서빙 결함을 시사했지만, 통제 실험의 결론은 점유율 무관, 경로 유의차 없음, 그리고 <strong>모델이 툴 JSON의 한글을 이스케이프로 받아쓰다 hex를 오기하는 출력 행동(클래스 A)</strong>이었습니다. 이 클래스는 리터럴 작성 지시로 차단되며, 지시로 차단되지 않는 저빈도 토큰 치환(클래스 B)과 1P 경로의 U+FFFD 디코드 손상이 별도 클래스로 잔존합니다.
+  </p>
+  <p class="lead-def">
+    <b>원칙:</b> 체감 가설은 통제 실험으로 분해하고, 탐지기의 플래그는 적대적 반박을 통과한 뒤에만 사실로 승격합니다.
+  </p>
+  <p>
+    운영 조치는 세 가지로 정리됩니다. 첫째, 완화 지시 문안을 개인 / 팀 / 조직 3계층에 배포해 클래스 A를 차단합니다. 둘째, 클래스 B는 저빈도 잔존 결함으로 취급해 모니터링을 유지하고, 서버측 상관 분석 결과를 기다립니다. 셋째, 재발 시에는 지문 보존 소스로 캡처해 백슬래시 삼분법으로 기원을 판별한 뒤 해당 채널(Anthropic 또는 AWS)로 보고합니다.
+  </p>
+</section>
+
+<figure class="flow">
+    <a href="hangul-integrity-sonnet5-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="hangul-integrity-sonnet5-archmap.png" alt="인터랙티브 아키텍처 맵 전체 이미지 - 조사 파이프라인의 단계와 흐름을 한 화면으로 보여줍니다"></a>
+    <figcaption>그림 2. 인터랙티브 아키텍처 맵 전체 보기. 이미지를 클릭하면 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 <a href="hangul-integrity-sonnet5-archmap.html" target="_blank" rel="noopener">인터랙티브 버전 ↗</a>이 열립니다.</figcaption>
+  </figure>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      내부 종합 보고서 "Claude Sonnet 5 한글 출력 무결성 조사"와 원시 실행 데이터(runs / summary / verification-panel 파일, escalation 증거 패키지) - 로컬 저장소 <span class="mono">cconbedrock-test</span> (2026-08-01). 본 문서의 모든 수치가 여기에서 나왔습니다.
+    </li>
+    <li>
+      <a href="https://github.com/anthropics/claude-code/issues/83033">anthropics/claude-code#83033</a>
+      - 클래스 A(escape-miscoding) 재현 증거를 첨부한 업스트림 보고 이슈, GitHub (2026-08-01)
+      <span class="url">https://github.com/anthropics/claude-code/issues/83033</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://docs.anthropic.com/en/docs/about-claude/models/overview">Models overview</a>
+      - Anthropic (컨텍스트 창, 출력 한도 등 모델 카드)
+      <span class="url">https://docs.anthropic.com/en/docs/about-claude/models/overview</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html">Anthropic Claude Messages API</a>
+      - Amazon Bedrock User Guide
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html">ConverseStream</a>
+      - Amazon Bedrock API Reference
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html">InvokeModelWithResponseStream</a>
+      - Amazon Bedrock API Reference
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html">Model invocation logging</a>
+      - Amazon Bedrock User Guide (Invocation Log 포렌식의 근거 문서)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html">Supported cross-region inference profiles</a>
+      - Amazon Bedrock User Guide (us. / global. 추론 프로파일)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html</span>
+    </li>
+  </ul>
+
+  <h3>외부 자료</h3>
+  <ul>
+    <li>
+      <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259 - The JavaScript Object Notation (JSON) Data Interchange Format</a>
+      - IETF (2017-12), 7절의 <span class="mono">\uXXXX</span> 이스케이프 규정
+      <span class="url">https://www.rfc-editor.org/rfc/rfc8259</span>
+    </li>
+    <li>
+      <a href="https://www.unicode.org/faq/utf_bom.html">UTF-8, UTF-16, UTF-32 &amp; BOM FAQ</a>
+      - Unicode Consortium (U+FFFD 대체 문자의 의미)
+      <span class="url">https://www.unicode.org/faq/utf_bom.html</span>
+    </li>
+    <li>
+      <a href="https://www.unicode.org/charts/PDF/UAC00.pdf">Hangul Syllables (U+AC00~U+D7AF) 코드 차트</a>
+      - Unicode Consortium (hex 한 자리 오기가 유효 음절로 착지하는 코드 공간)
+      <span class="url">https://www.unicode.org/charts/PDF/UAC00.pdf</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-09.
+    본 문서는 2026-07-28 ~ 2026-08-01에 수행한 내부 조사(로컬 저장소 보존 보고서와 원시 데이터)를 기반으로 작성한 기술 분석 자료입니다.
+    수치와 모델 동작은 작성 시점 기준이며, 모델 스펙과 API의 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<!-- ===================== EN page ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Investigation Report</p>
+  <h1>Claude Sonnet 5 Korean Output Integrity Investigation</h1>
+  <p class="subtitle">
+    An investigation record that traced the Hangul syllable-substitution symptom observed on Claude Code and Amazon Bedrock paths through a controlled experiment of roughly 1,200 runs across 6 datasets, and pinned down the root cause. It doubles as a methodology document for engineers who need to verify LLM output quality.
+  </p>
+
+  <div class="stat" role="img" aria-label="Corruption rate by output format: escape-notation runs 100%, literal-writing runs 1.7%">
+    <div class="stat-item old">
+      <span class="stat-num">100<span class="unit">%</span></span>
+      <span class="stat-sub">Escape-notation runs 45/45 (2 accounts combined)</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">1.7<span class="unit">%</span></span>
+      <span class="stat-sub">Literal-writing instructed runs 1/60 (the 1 residual is a separate class)</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The investigation ran 2026-07-28 through 2026-08-01, executing roughly 1,200 runs across 6 datasets.</p>
+    <p>Target models are <span class="mono">claude-sonnet-5</span> (1P), and <span class="mono">global.anthropic.claude-sonnet-5</span> and <span class="mono">us.anthropic.claude-sonnet-5</span> (Amazon Bedrock).</p>
+    <p>The primary source is the internal comprehensive report (2026-08-01) and the raw run data preserved in a local repository.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>The root cause of the "다았 단계"-style Hangul syllable substitution observed in Claude Code was confirmed as <strong>Class A (escape-miscoding): the model writes Korean in tool JSON as <span class="mono">\uXXXX</span> escapes and miswrites the hex</strong>. Escape-notation runs were corrupted 45/45 (100%); literal-writing runs 1/60 (1.7%).</li>
+    <li>While transcribing 4 hex digits per syllable, a single-digit slip renders as a valid neighboring syllable (새벽 &rarr; 새벅). Writing literals removes the opportunity for that slip entirely.</li>
+    <li>The "frequent above 50% context fill" hypothesis was rejected. Across two sweeps covering measured fill of 0.1–78%, the corruption-rate curve was flat over the whole range, so the fill hypothesis was rejected. Class A reproduced identically in two AWS accounts (…6239, …5884), so it was ruled a model output behavior, not a serving-layer defect.</li>
+    <li>An output-format instruction — "write Korean tool parameters as literal UTF-8" — blocks Class A. Low-frequency token substitution (Class B) is not blocked by instruction; an evidence package with reproduction identifiers was handed to AWS with a request for server-side correlation analysis.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Observation and Hypotheses</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Experiment Design</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Verification Methodology</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Results</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Methodological Lessons and Mitigation</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Limitations</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Observation and Hypotheses</h2>
+  <p>
+    It started with a field observation. On the TodoWrite and AskUserQuestion surfaces of Claude Code (Bedrock backend), Hangul syllables were repeatedly reported being substituted with other syllables — e.g. "☐ 다았 단계" — and the reporter's impression was that <strong>"it becomes frequent above 50% context fill."</strong> Because it seemed to happen more often as sessions grew longer, a long-context serving defect initially looked most plausible.
+  </p>
+  <p>
+    Rather than carrying the impression straight into a conclusion, we decomposed it into three testable hypotheses. The three are not mutually exclusive, and each was judged with an independent experiment design.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Hypotheses under test and final verdicts</caption>
+      <thead>
+        <tr><th scope="col">Hypothesis</th><th scope="col">Statement</th><th scope="col">What it discriminates</th><th scope="col">Final verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">H-fill</th><td>Corruption rate scales with context fill (rises above 50%)</td><td>Whether the serving path has a long-context defect</td><td>Rejected</td></tr>
+        <tr><th scope="row">H-path</th><td>Corruption rate depends on the 1P (Claude subscription) vs 3P (Bedrock) path</td><td>Whether the Bedrock serving / translation layer is defective</td><td>No significant difference detected</td></tr>
+        <tr><th scope="row">H2 (escape)</th><td>Corruption originates from miswritten <span class="mono">\uXXXX</span> escapes inside raw tool JSON</td><td>Whether it is model output behavior</td><td>Confirmed (Class A)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The detection harness (the <span class="mono">cjk_integrity_probe</span> family of scripts) had been designed with a detection class anticipating H2. Having built it to count Hangul <span class="mono">\uXXXX</span> escapes in the raw stream separately became the stepping stone for later confirming the root cause.
+  </p>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Experiment Design</h2>
+  <p>
+    The comparison paths comprised 5 cells: 1P (Claude Enterprise subscription, Claude Code CLI) and 3P (Amazon Bedrock). The Bedrock side covers switching the Claude Code backend, direct ConverseStream calls, direct InvokeModelWithResponseStream calls, and region / inference-profile variants. The client was held constant across both backends: the same Claude Code CLI 2.1.220 binary and boto3 1.42.86.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Overview of the 6 datasets (executed 2026-07-28 ~ 07-31, UTC)</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Dataset</th><th scope="col">Design</th><th scope="col">Key result</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">D1</th><td>Baseline A/B</td><td>n=30 x 5 cells x 2 scenarios = 300 calls</td><td>25 raw flags &rarr; 1 verified (믄고)</td></tr>
+        <tr><th scope="row">D2</th><td>Smoke</td><td>8 calls (verify wiring and fill injection)</td><td>8/8 clean, 1M window confirmed live</td></tr>
+        <tr><th scope="row">D3</th><td>Fill sweep #1</td><td>n=20 x 3 cells x 4 fill levels</td><td>Flat curve, no F*, 1 새벅 event (fill 0)</td></tr>
+        <tr><th scope="row">D4</th><td>Fill sweep #2 (corrected fill, late-night KST)</td><td>Measured 0 / 30.7 / 51.0 / 71.4%</td><td>Flatness reproduced, no F*, 1 U+FFFD event (1P, fill 0)</td></tr>
+        <tr><th scope="row">D5</th><td>A/B replication (late-night KST)</td><td>300 calls</td><td>1 verified (사오오) + 1 borderline (refuted)</td></tr>
+        <tr><th scope="row">D6</th><td>Escape A/B (2 accounts)</td><td>E (escape-induced) vs L (literal-instructed), n=30 per arm per account</td><td>Escape runs 45/45 corrupted vs literal 1/60</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Two corrections happened mid-run. First, we confirmed empirically that <span class="mono">anthropic.claude-sonnet-5</span> in us-east-1 is inference-profile-only with no on-demand invocation, and corrected that cell to <span class="mono">us.anthropic.claude-sonnet-5</span>. Second, in filler calibration, the gap between the script's assumption (1.5 chars per token) and the measurement (about 1.03 chars) pushed the top level of sweep #1 past the context window, voiding it; sweep #2 recalibrated the fill levels and achieved measured 0 / 30.7 / 51.0 / 71.4%.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - 1M window correction and sampling parity</span>
+    <p>The WINDOW value in the fill sweep's denominator was not the instruction default of 200,000 tokens; it was corrected to <strong>1,000,000 tokens</strong> based on the Sonnet 5 model card (context 1,000,000 tokens, output 128,000 tokens, Bedrock 1M GA). Also, Sonnet 5 accepts no temperature / top_p parameters, so sampling parity across paths is structurally guaranteed.</p>
+  </div>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Verification Methodology</h2>
+  <p>
+    The verdict pipeline of this investigation has three stages. Automated detection and an LLM judge collect candidates broadly, an adversarial rebuttal panel decides whether each is genuine, and byte forensics determines origin (model vs pipeline). No single stage's output is promoted to fact on its own.
+  </p>
+
+  <h3>3.1 Automated detection and the LLM judge</h3>
+  <p>
+    The automated detection harness checks 4 classes: U+FFFD, rare syllables outside KS X 1001 (discriminated via euc-kr encoding length), Hangul <span class="mono">\uXXXX</span> escapes inside raw tool JSON, and foreign-character intrusion. It is high-precision but low-recall, missing substitutions between common syllables (the 로그인 &rarr; 로까잉 kind). That gap was covered with an LLM judge (claude-haiku-4-5, 1P path). However, 96% of the judge's raw flags turned out to be false positives (Section 5), so raw flags were used only for candidate collection.
+  </p>
+
+  <h3>3.2 Adversarial 3-lens rebuttal panel</h3>
+  <p>
+    For every flagged run, three lenses — linguistics (checking against false-positive classes), encoding / pipeline (byte analysis, including empirical tests), and reproduction class / statistics — are each assigned to an independent agent that attempts the rebuttal "this is not corruption." <strong>Only flags that withstood all three lenses' rebuttals and survived unanimously were judged genuine.</strong> In practice, one Japanese-intrusion event (手戻り) was refuted 3/3 by this panel and classified as coherent code-switching.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  RAW["Raw run stream (raw delta)"] --> H["Heuristic probe (high precision)"]
+  RAW --> J["LLM judge (high recall)"]
+  H --> FLAGS["Raw-flag pool"]
+  J --> FLAGS
+  FLAGS --> P["Adversarial 3-lens rebuttal panel"]
+  RAW --> F["Backslash trichotomy forensics"]
+  F --> P
+  P --> G["5 verified genuine events"]
+  P --> FP["False positives / borderline rejected"]
+    </div>
+    <figcaption>
+      Figure 1. Verification pipeline. Detector flags must pass the rebuttal panel to be promoted to genuine, and byte forensics determines whether the origin is an escape.
+    </figcaption>
+  </figure>
+
+  <h3>3.3 Byte forensics - the backslash trichotomy</h3>
+  <p>
+    Whether corruption came from the model's escape notation can be determined by the number of backslash layers in the raw record at the verification point. For a raw file stored as JSON, three cases diverge.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Raw stream discrimination - backslash trichotomy (the code point of "잡" is U+C7A1)</div>
+    <pre><code>"잡"         <span class="cm"># literal UTF-8 = the model wrote a literal</span>
+"\uc7a1"    <span class="cm"># 1 backslash layer = the logger's ensure_ascii intervened (model innocent)</span>
+"\\uc7a1"    <span class="cm"># 2 backslash layers = the model wrote the escape itself (decisive guilty fingerprint)</span></code></pre>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - toolUse.input in the Invocation Log is not exculpatory evidence</span>
+    <p><span class="mono">toolUse.input</span> in the Bedrock Invocation Log is stored as a parsed object, so the escape fingerprint is destroyed. Seeing literal Korean there is no evidence that the model wrote literals. The only fingerprint-preserving sources are <span class="mono">partial_json</span> in <span class="mono">stream-json</span> output (used by this investigation's harness) or a proxy wire capture.</p>
+  </div>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Results</h2>
+
+  <h3>4.1 Dose-response curve - H-fill rejected</h3>
+  <p>
+    Running the fill sweep twice — including a corrected replication — over measured fill of 0.1–78%, the corruption-rate curve was flat across the whole range. The first fill point where |z|&gt;1.96 versus baseline (F*) did not exist in either sweep, and the overall maximum |z| was just 1.01. Merging the high-fill (30–78%) range still yielded <strong>0/300</strong> with no corruption; on the contrary, all 5 verified corruption events occurred under near-zero fill. Input sizes of corrupted runs were also scattered from 980 tokens to 52,000 tokens, so neither a proportional nor an absolute threshold held.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - reinterpreting the "frequent above 50%" impression</span>
+    <p>Fill itself was not the cause. The impression can be explained by a correlation: the longer a conversational session, the higher the probability the model enters Class A's escape-notation mode. It was a case where the causal variable (output notation mode) and the correlated variable (session length) differed.</p>
+  </div>
+
+  <h3>4.2 Path A/B - no significant difference for H-path</h3>
+  <p>
+    D1's judge raw flags spiked to 33.3% (z=+2.58) in one cell, but all evaporated as false positives after adversarial recheck. On verified counts, the substitution classes total Bedrock 4 vs 1P 0. The direction is consistent, but Fisher's exact test gives p of about 0.6 — <strong>not statistically significant, so path dependence cannot be concluded</strong>. Considering that a separate class (U+FFFD) was verified once on the 1P path, the path-specificity claim weakens further. No verified-level significant signal appeared on any axis: Converse vs Invoke, global vs us-geo, streaming or not, tool vs prose.
+  </p>
+
+  <h3>4.3 Root cause confirmed - Class A: escape-miscoding</h3>
+  <p>
+    The decisive clue emerged during operations. Cases were observed where the model wrote Korean in tool parameters such as AskUserQuestion directly as <span class="mono">\uXXXX</span> escapes, and the symptom vanished after a "no escapes, write literals" memory instruction. This was confirmed with the controlled D6 experiment. Running an escape-induced E arm and a literal-instructed L arm across two AWS accounts produced the following.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. Escape A/B results (D6, 2026-07-31, n=30 per arm per account)</caption>
+      <thead>
+        <tr><th scope="col">arm</th><th scope="col">Account …6239</th><th scope="col">Account …5884</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">E (escape-using runs)</th><td>23/23 corrupted (100%, 95% CI 85.7~100)</td><td>22/22 corrupted (100%, 95% CI 85.1~100), plus 1 separate JSON parse failure</td></tr>
+        <tr><th scope="row">L (literal-instructed runs)</th><td>1/30 (3.3%, that 1 event is Class B)</td><td>0/30 (0%)</td></tr>
+        <tr><th scope="row">z (E vs L)</th><td>+7.01</td><td>+7.21</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Conditional decomposition showed that what separated corruption was not the instruction wording but <strong>whether the run actually used escapes</strong>. Even a partial-entry run that used only 6 escapes produced corruption (메택, 대시보네). The mechanism is a single-digit slip while transcribing 4 hex digits per syllable, rendering as a valid neighboring syllable. If one digit in the "벽" of 새벽 slips, it becomes "벅", yielding "새벅". In entered runs, corruption density was 3–5% of syllables (a lower bound counting only rare syllables), and the shapes matched the customer symptom: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+  </p>
+  <p>
+    Since it reproduced identically in two accounts, this phenomenon is not a defect of a particular account or serving pool but <strong>the model's output behavior</strong>. And because writing literals removes the miswriting opportunity itself, an output-format instruction alone blocks this class.
+  </p>
+
+  <h3>4.4 Class B - residual low-frequency token substitution</h3>
+  <p>
+    Class B is the separate defect that remains after removing Class A. The 4 verified events (믄고, 새벅, 사오오, 쪼르) all arrived as literal UTF-8 in both raw deltas and AWS Invocation Log measurements, with zero escapes. They are single-site substitutions producing non-words, the intended word is obvious from context, and they show a subword token misselection signature (쪽 &rarr; 쪼+르). As the 1 event in the L arm shows, <strong>output-format instructions do not block it</strong>. The base rate is roughly 0.3–0.4% per run (about 1 per 70,000+ syllables). Localizing the originating layer (model itself vs serving detokenize) requires server-side telemetry, so an evidence package including 3 Bedrock RequestIds was handed to AWS.
+  </p>
+  <p>
+    Exhaustive forensics pointed the same way. Across all 1,071 runs' raw deltas recorded by the harness, model-written escapes were 0 (every corruption the probe caught was Class B), and a CloudWatch Insights sweep of 26,427 records for the week found 0 <span class="mono">\\u</span> matches in text fields.
+  </p>
+
+  <h3>4.5 U+FFFD on the 1P path - a separate decode class</h3>
+  <p>
+    One U+FFFD event with real content loss — like "레이아�트에" — was verified in TodoWrite JSON on the 1P path (cc-1p-enterprise). In the panel's Node empirical test, if the CLI's chunk splitting were the cause there should be 2–3 replacement characters, but the observation was a single replacement character followed by intact text; the client was therefore excluded and the event localized upstream (serving detokenize or the model emitting a replacement-character token). It is a different class from the customer symptom, and by showing the 1P path also has its own defect, it further weakens the path-specificity claim.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. All verified corruption events (5 genuine + 1 borderline, panel 3-lens verdicts)</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Observed form</th><th scope="col">Class</th><th scope="col">Path</th><th scope="col">Scenario</th><th scope="col">Time (UTC)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>믄고 (intended: 믿고)</td><td>B</td><td>Claude Code CLI &rarr; Bedrock</td><td>prose</td><td>07-28 11:11</td></tr>
+        <tr><td>2</td><td>새벅 (intended: 새벽)</td><td>B</td><td>Direct Bedrock ConverseStream call</td><td>tool JSON</td><td>07-28 12:01</td></tr>
+        <tr><td>3</td><td>사오오 (intended: 오백)</td><td>B</td><td>Direct Bedrock ConverseStream call</td><td>prose</td><td>07-28 16:15</td></tr>
+        <tr><td>4</td><td>레이아�트에 (U+FFFD)</td><td>decode</td><td>1P Enterprise (Claude Code CLI)</td><td>tool JSON</td><td>07-28 16:16</td></tr>
+        <tr><td>5</td><td>쪼르 (intended: 쪽)</td><td>B</td><td>Direct Bedrock ConverseStream call (D6 L arm)</td><td>tool JSON</td><td>07-31 18:13</td></tr>
+        <tr><td>-</td><td>手戻り Japanese intrusion</td><td>borderline</td><td>Direct Bedrock InvokeModel call</td><td>tool JSON</td><td>07-28 15:01 (panel refuted 3/3, not corruption)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Methodological Lessons and Mitigation</h2>
+
+  <h3>5.1 LLM judge raw flags are not corruption rates</h3>
+  <p>
+    Of the 74 judge raw flags across the two A/B runs, 71 (96%) were false positives. The representative false positive was particle-boundary misjudgment: reading "서비스 메시나 인그레스" (mesh-or-ingress) as the non-word "메시나" accounted for 21 of D1's 25 flags. Transliteration variants like 언어베일러블 (unavailable) and 리브니스 (liveness) were also false-positive sources. Because false positives were not uniform across cells (output style frequency differs), z-tests on raw flags were unreliable — and indeed D1's z=+2.58 signal evaporated after recheck.
+  </p>
+  <p>
+    There was a reverse gap, too. A non-word landing on common syllables (쪼르) passes the rare-syllable heuristic, so <strong>it cannot be detected without the judge</strong>. The methodological conclusion of this investigation is that all three tiers are needed: heuristics (precision), judge (recall), and adversarial recheck (accuracy).
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - do not read judge flag rates as corruption rates</span>
+    <p>Reading an LLM judge's flag rate as a corruption rate without adversarial recheck would, in this investigation, report figures inflated up to 25x. Cross-cell comparisons (z-tests) are invalidated along with it, since the assumption of uniform false-positive distribution breaks.</p>
+  </div>
+
+  <h3>5.2 Deploying the mitigation instruction</h3>
+  <p>
+    Class A is blocked by a single line of output-format instruction. We recommend three-tier deployment: individuals in Claude memory and <span class="mono">~/.claude/CLAUDE.md</span>, teams in each repository's <span class="mono">CLAUDE.md</span>, and organizations via Enterprise managed settings.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">CLAUDE.md - mitigation instruction wording</div>
+    <pre><code>Always write Korean and other non-ASCII strings in tool call parameters (JSON)
+as literal UTF-8; never use \uXXXX Unicode escapes.</code></pre>
+  </div>
+
+  <p>
+    Upstream reporting is also complete. Class A was reported to Anthropic as a public issue (anthropics/claude-code#83033) with E-arm raw records attached as reproduction evidence, and Class B was handed to AWS as an evidence package requesting serving-telemetry correlation analysis on 3 Bedrock RequestIds.
+  </p>
+
+  <h3>5.3 Recurrence capture standard</h3>
+  <p>
+    On recurrence, screen captures and session files have no evidentiary power. Capture from a fingerprint-preserving source, then discriminate with the backslash trichotomy (Section 3.3).
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Fingerprint-preserving capture - Claude Code CLI</div>
+    <pre><code>claude -p --output-format stream-json --include-partial-messages   <span class="cm"># fingerprint preserved in partial_json</span></code></pre>
+  </div>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Limitations</h2>
+  <p>
+    What this investigation could not confirm, and points to keep in mind when interpreting the results.
+  </p>
+  <ol class="plain">
+    <li>The originating layer of Class B (model itself vs serving detokenize) was not localized. The observed Bedrock 4 vs 1P 0 is suggestive but non-significant; a verdict needs RequestId correlation analysis or thousands of runs per cell.</li>
+    <li>Statistical power is limited. With n=20–30 per condition, an observed 0/20 guarantees only an upper bound of 16.1%, and the confidence interval on the Class B base-rate estimate (0.3–0.4%) is also wide.</li>
+    <li>The Claude Code cells' usage metric is a session-cumulative figure (about 2x the per-request value) requiring per-request conversion, and the investigation host's baseline load was about 52,000 tokens per request.</li>
+    <li>The fill sweep injects filler into a single turn. The dynamics by which escape-mode entry becomes more frequent in real long conversational sessions were not measured directly; they were confirmed indirectly via D6's conditional decomposition.</li>
+    <li>The judge retains residual uncertainty at the boundary of natural typos / neologisms. This was mitigated by double-checking every genuine verdict with the 3-lens panel.</li>
+  </ol>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Conclusion</h2>
+  <p>
+    Where the impression pointed and the actual cause differed. The observation "frequent above 50% context" suggested a long-context serving defect, but the controlled experiments concluded: fill-independent, no significant path difference, and <strong>an output behavior in which the model transcribes Korean in tool JSON as escapes and miswrites the hex (Class A)</strong>. This class is blocked by a literal-writing instruction, while low-frequency token substitution (Class B), which instructions do not block, and the 1P path's U+FFFD decode corruption remain as separate classes.
+  </p>
+  <p class="lead-def">
+    <b>Principle:</b> decompose impression-based hypotheses into controlled experiments, and promote detector flags to fact only after they survive adversarial rebuttal.
+  </p>
+  <p>
+    Operational actions come down to three. First, deploy the mitigation wording across the three tiers — individual / team / organization — to block Class A. Second, treat Class B as a low-frequency residual defect, keep monitoring, and await the server-side correlation results. Third, on recurrence, capture from a fingerprint-preserving source, discriminate origin with the backslash trichotomy, and report to the corresponding channel (Anthropic or AWS).
+  </p>
+</section>
+
+<figure class="flow">
+    <a href="hangul-integrity-sonnet5-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="hangul-integrity-sonnet5-archmap.png" alt="Full image of the interactive architecture map showing the stages and flow of the investigation pipeline in one view"></a>
+    <figcaption>Figure 2. Full view of the interactive architecture map. Click the image to open the <a href="hangul-integrity-sonnet5-archmap.html" target="_blank" rel="noopener">interactive version ↗</a> with node search, route tracing, and dark/light themes.</figcaption>
+  </figure>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      Internal comprehensive report "Claude Sonnet 5 Korean Output Integrity Investigation" and raw run data (runs / summary / verification-panel files, escalation evidence package) - local repository <span class="mono">cconbedrock-test</span> (2026-08-01). Every figure in this document comes from here.
+    </li>
+    <li>
+      <a href="https://github.com/anthropics/claude-code/issues/83033">anthropics/claude-code#83033</a>
+      - Upstream report issue with Class A (escape-miscoding) reproduction evidence attached, GitHub (2026-08-01)
+      <span class="url">https://github.com/anthropics/claude-code/issues/83033</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.anthropic.com/en/docs/about-claude/models/overview">Models overview</a>
+      - Anthropic (model card: context window, output limits, etc.)
+      <span class="url">https://docs.anthropic.com/en/docs/about-claude/models/overview</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html">Anthropic Claude Messages API</a>
+      - Amazon Bedrock User Guide
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html">ConverseStream</a>
+      - Amazon Bedrock API Reference
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html">InvokeModelWithResponseStream</a>
+      - Amazon Bedrock API Reference
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html">Model invocation logging</a>
+      - Amazon Bedrock User Guide (basis document for the Invocation Log forensics)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/model-invocation-logging.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html">Supported cross-region inference profiles</a>
+      - Amazon Bedrock User Guide (us. / global. inference profiles)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html</span>
+    </li>
+  </ul>
+
+  <h3>External resources</h3>
+  <ul>
+    <li>
+      <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259 - The JavaScript Object Notation (JSON) Data Interchange Format</a>
+      - IETF (2017-12), the <span class="mono">\uXXXX</span> escape rules in Section 7
+      <span class="url">https://www.rfc-editor.org/rfc/rfc8259</span>
+    </li>
+    <li>
+      <a href="https://www.unicode.org/faq/utf_bom.html">UTF-8, UTF-16, UTF-32 &amp; BOM FAQ</a>
+      - Unicode Consortium (the meaning of the U+FFFD replacement character)
+      <span class="url">https://www.unicode.org/faq/utf_bom.html</span>
+    </li>
+    <li>
+      <a href="https://www.unicode.org/charts/PDF/UAC00.pdf">Hangul Syllables (U+AC00~U+D7AF) code chart</a>
+      - Unicode Consortium (the code space in which a one-digit hex slip lands on a valid syllable)
+      <span class="url">https://www.unicode.org/charts/PDF/UAC00.pdf</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of: 2026-08-09.
+    This document is a technical analysis based on an internal investigation conducted 2026-07-28 ~ 2026-08-01 (report and raw data preserved in a local repository).
+    Figures and model behavior are as of the time of writing; check the official documentation above for the latest model specs and API values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== /EN page ===================== -->
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO/EN 페이지에 버튼이 하나씩 있으므로 lang-toggle 을 제외한 전부를 묶는다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
+  }
+  sync();
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 을 전환하고 저장한 뒤 langchange 를 알린다.
+   Mermaid 재렌더는 themechange 리스너에 걸려 있으므로 함께 dispatch 한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { lang: next } }));
+    });
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>
