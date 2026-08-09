@@ -1,0 +1,1112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>project-init 플러그인 분석 - Claude Code 하네스 엔지니어링 자동화</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/project-init/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Tool Deep Dive</p>
+  <h1>project-init 플러그인의 구조와 문서 자동 동기화 메커니즘</h1>
+  <p class="subtitle">
+    Claude Code 하네스(hooks, skills, agents, commands, CLAUDE.md)를 커맨드 한 번으로 생성하고 유지하는
+    project-init 플러그인의 동작 원리를 저장소 소스 기준으로 분석합니다.
+  </p>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-09입니다.</p>
+    <p>분석 대상은 project-init v2.2.0(2026-07-12 릴리스)입니다.</p>
+    <p>대상 저장소는 <span class="mono">github.com/whchoi98/project-init</span>입니다.</p>
+    <p>주 출처는 저장소의 README.md, docs/architecture.md, CHANGELOG.md와 커맨드 정의 파일 9개입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>project-init은 Claude Code 하네스(hooks, skills, agents, commands, CLAUDE.md)를 <strong>9개 커맨드</strong>로 생성하고 유지하는 플러그인입니다. 현재 버전은 2.2.0(2026-07-12)입니다.</li>
+    <li>핵심 메커니즘은 CLAUDE.md 품질 점수(0-100점, 6개 기준)와 <strong>4-layer 자동 동기화</strong>(Plan 모드 규칙, PostToolUse 훅, /sync-docs, commit-msg 훅)입니다. 문서가 코드를 따라가지 못하는 drift 문제를 겨냥합니다.</li>
+    <li>보안은 <strong>17개 패턴</strong>의 PreToolUse 시크릿 스캔과 위험 명령 deny 목록이 담당하고, /health-check가 설정 상태를 0-200점으로 검증합니다. 저장소 자체 테스트는 169개이며 전부 통과합니다.</li>
+    <li>결론 - 코드 구현 이후 /init-project &rarr; /sync-docs 순서로 적용할 때 자동 감지 정확도가 가장 높습니다. v2.1 이전에 초기화한 프로젝트는 settings.json을 수동 수정해야 합니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">문제 정의 - 하네스 수동 구성의 비용</a></li>
+    <li><span class="no">02</span><a href="#s2">동작 원리 - 플러그인 구조와 9개 커맨드</a></li>
+    <li><span class="no">03</span><a href="#s3">딥다이브 - 품질 점수와 4-layer 자동 동기화</a></li>
+    <li><span class="no">04</span><a href="#s4">딥다이브 - 시크릿 스캔과 health-check</a></li>
+    <li><span class="no">05</span><a href="#s5">실제 사용 흐름</a></li>
+    <li><span class="no">06</span><a href="#s6">한계</a></li>
+    <li><span class="no">07</span><a href="#s7">결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>문제 정의 - 하네스 수동 구성의 비용</h2>
+  <p>
+    Claude Code의 동작 품질은 하네스가 결정합니다. 하네스는 hooks, skills, agents, commands,
+    CLAUDE.md 파일의 조합이며, 이 중 CLAUDE.md는 프로젝트 컨텍스트를 담아 사실상 시스템 프롬프트
+    역할을 합니다. 이 조합을 갖춘 프로젝트와 그렇지 않은 프로젝트는 같은 요청에 대한 결과 품질이
+    달라집니다.
+  </p>
+  <p>
+    문제는 이 다섯 종류의 구성 요소를 전부 손으로 만들어야 한다는 점입니다. 각각 파일 위치와 문법이
+    다르고, 특히 <span class="mono">settings.json</span>의 훅 등록은 틀려도 조용히 실패합니다.
+    project-init 저장소 자체가 이를 실증합니다. v2.1 이전 버전은 존재하지 않는 훅 이벤트
+    <span class="mono">PreCommit</span>과 잘못된 deny 패턴 문법을 배포했고, 이 두 버그는 생성된
+    프로젝트의 세션 시작 시 "Invalid key in record" 에러로 나타났습니다(CHANGELOG 2.1.0의 Fixed
+    항목). <strong>플러그인 제작자조차 하네스 문법에서 실수한다</strong>는 것이 수동 구성의 첫 번째 비용입니다.
+  </p>
+  <p>
+    두 번째 비용은 문서 drift입니다. 코드는 계속 바뀌는데 CLAUDE.md는 초기 작성 시점에 멈춰 있으면,
+    Claude는 낡은 컨텍스트를 근거로 판단합니다. README는 이 생성과 동기화 과정을 "수동적이고 실수가
+    잦다"고 규정하고, 플러그인의 존재 이유를 여기에 둡니다. project-init은 생성(스캐폴딩)과
+    유지(자동 동기화, 점수화)를 모두 커맨드로 자동화하는 접근을 택했습니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 하네스라는 용어의 범위</span>
+    <p>
+      이 문서에서 하네스는 README의 Harness Engineering 섹션 정의를 따릅니다. Claude Code 실행
+      환경에서 모델의 행동을 결정하는 프로젝트 측 설정 전체, 즉 <span class="mono">.claude/</span>
+      디렉토리(hooks, skills, commands, agents, settings.json)와 루트 및 모듈별 CLAUDE.md를
+      가리킵니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>동작 원리 - 플러그인 구조와 9개 커맨드</h2>
+  <p>
+    저장소는 마켓플레이스 구조입니다. 루트의 <span class="mono">.claude-plugin/marketplace.json</span>이
+    마켓플레이스 매니페스트이고, 실제 플러그인은 <span class="mono">plugins/project-init/</span> 아래에
+    있습니다. 플러그인 패키지는 세 부분으로 구성됩니다: 커맨드 9개(<span class="mono">commands/</span>),
+    에이전트 1개(doc-sync-checker, model: opus로 실행), 스킬 1개(project-scaffolder, 참조 파일
+    13개 포함). 커맨드, 에이전트, 스킬이 전부 Markdown 파일로 정의되며, 커맨드 정의 파일 9개의 합계는
+    1,807줄입니다.
+  </p>
+  <p>
+    생성물의 원본은 project-scaffolder 스킬의 <span class="mono">references/</span> 디렉토리에 있는
+    참조 파일 13개입니다(저장소 architecture.md는 12개로 적고 있으나 실제 파일 수 기준).
+    훅 스크립트, settings.json, 스킬, 에이전트, 테스트, README, CHANGELOG 템플릿이
+    여기에 모여 있고, <span class="mono">/init-project</span>가 이를 읽어 대상 프로젝트에 맞게
+    구체화합니다. 즉 플러그인이 생성하는 하네스의 품질은 이 템플릿 파일들의 품질과 같습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 9개 커맨드와 역할 (plugins/project-init/commands/, v2.2.0)</caption>
+      <thead>
+        <tr><th scope="col">커맨드</th><th scope="col">역할</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">/init-project [path]</span></td><td>17단계 프로젝트 초기화. 기존 프로젝트를 감지해 적응합니다.</td></tr>
+        <tr><td><span class="mono">/sync-docs</span></td><td>문서 동기화. Phase 0(스타일 가이드)부터 Phase 10(리포트)까지 진행하며 품질 점수를 산정합니다.</td></tr>
+        <tr><td><span class="mono">/generate-readme</span></td><td>이중 언어(EN/KR) README.md 생성 또는 업데이트.</td></tr>
+        <tr><td><span class="mono">/generate-changelog</span></td><td>Keep a Changelog 규약의 이중 언어 CHANGELOG.md 생성.</td></tr>
+        <tr><td><span class="mono">/add-module &lt;path&gt;</span></td><td>모듈 디렉토리와 CLAUDE.md 추가, 아키텍처 문서 갱신.</td></tr>
+        <tr><td><span class="mono">/add-runbook &lt;name&gt;</span></td><td>검증, 롤백 섹션을 포함한 운영 런북 생성.</td></tr>
+        <tr><td><span class="mono">/add-adr &lt;title&gt;</span></td><td>자동 번호 부여 아키텍처 결정 기록(ADR) 생성.</td></tr>
+        <tr><td><span class="mono">/add-reference-doc &lt;layer&gt;</span></td><td>8개 계층(infrastructure, data, api 등) 중 하나의 구현 참조 문서 스켈레톤 추가.</td></tr>
+        <tr><td><span class="mono">/health-check</span></td><td>프로젝트 설정 전체를 0-200점으로 검증하고 A-F 등급을 보고.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    <span class="mono">/init-project</span>는 실행 전에 빌드 매니페스트를 읽어 프로젝트 유형을
+    감지합니다. <span class="mono">package.json</span>이면 Node.js,
+    <span class="mono">pyproject.toml</span>이면 Python, <span class="mono">go.mod</span>면 Go,
+    <span class="mono">Cargo.toml</span>이면 Rust, <span class="mono">pom.xml</span> /
+    <span class="mono">build.gradle</span>이면 Java/Kotlin으로 판단하고, 각 유형의 소스 디렉토리
+    관례와 빌드/테스트 명령을 CLAUDE.md에 미리 채웁니다. 아무 매니페스트도 없으면 새 프로젝트로 보고
+    기본 모듈(src/api, src/persistence)을 생성합니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 설치 후 커맨드 네임스페이스</span>
+    <p>
+      마켓플레이스로 설치하면 커맨드는 <span class="mono">/project-init:init-project</span>처럼
+      플러그인 이름이 접두어로 붙습니다. 이 문서 본문에서는 짧은 형태로 표기합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>딥다이브 - 품질 점수와 4-layer 자동 동기화</h2>
+  <p>
+    이 플러그인을 다른 스캐폴딩 도구와 구분 짓는 두 메커니즘입니다. 하나는 문서 상태를 수치로
+    만드는 품질 점수이고, 다른 하나는 문서가 코드를 따라가게 만드는 네 겹의 동기화 장치입니다.
+  </p>
+
+  <h3>3.1 CLAUDE.md 품질 점수 0-100</h3>
+  <p>
+    <span class="mono">/sync-docs</span>와 doc-sync-checker 에이전트는 각 CLAUDE.md를 6개 기준,
+    100점 만점으로 평가합니다. 배점이 큰 두 기준이 명령어(20점)와 아키텍처 명확성(20점)인 것이
+    설계 의도를 보여줍니다. Claude가 실제로 소비하는 정보, 즉 <strong>복사해서 바로 실행할 수 있는
+    명령과 이 파일만으로 이해되는 구조 설명</strong>에 가장 큰 가중치를 둡니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. CLAUDE.md 품질 점수 6개 기준 (README, Quality Scoring 섹션)</caption>
+      <thead>
+        <tr><th scope="col">기준</th><th scope="col">배점</th><th scope="col">평가 내용</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>명령어/워크플로우</td><td><span class="num">20</span></td><td>빌드/테스트/배포 명령어가 복사-붙여넣기 가능한 형태로 존재하는지</td></tr>
+        <tr><td>아키텍처 명확성</td><td><span class="num">20</span></td><td>이 파일만으로 코드베이스 구조를 이해할 수 있는지</td></tr>
+        <tr><td>비자명한 패턴</td><td><span class="num">15</span></td><td>주의사항, 특이점, 컨벤션이 문서화되어 있는지</td></tr>
+        <tr><td>간결성</td><td><span class="num">15</span></td><td>장황한 설명이나 자명한 정보가 없는지</td></tr>
+        <tr><td>최신성</td><td><span class="num">15</span></td><td>현재 코드베이스 상태를 반영하는지</td></tr>
+        <tr><td>실행 가능성</td><td><span class="num">15</span></td><td>지시사항이 모호하지 않고 실행 가능한지</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    등급은 A(90-100), B(70-89), C(50-69), D(30-49), F(0-29)입니다. 점수는 절대값보다 변화량으로
+    쓰입니다. <span class="mono">/sync-docs</span>는 실행마다 Before/After 표를 출력하므로,
+    동기화가 문서를 실제로 개선했는지가 매번 수치로 남습니다. README의 문제 해결 섹션이 명시하듯
+    이 점수는 문서 완성도를 재는 것이지 코드 품질과는 무관합니다.
+  </p>
+
+  <h3>3.2 4-layer 자동 동기화</h3>
+  <p>
+    문서 drift를 막는 장치는 한 겹이 아니라 네 겹입니다. 트리거 시점이 서로 다른 네 메커니즘이
+    같은 목표(문서 최신화)를 겨냥하므로, 한 겹이 무시되거나 실패해도 다음 겹이 잡습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 자동 동기화 4개 계층 (README, Auto-Sync Mechanisms 섹션)</caption>
+      <thead>
+        <tr><th scope="col">계층</th><th scope="col">트리거</th><th scope="col">유형</th><th scope="col">위치</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Auto-Sync 규칙</td><td>Plan 모드 종료</td><td>자동</td><td><span class="mono">CLAUDE.md</span></td></tr>
+        <tr><td>PostToolUse 훅</td><td>Write/Edit 직후</td><td>자동</td><td><span class="mono">.claude/settings.json</span> + <span class="mono">.claude/hooks/</span></td></tr>
+        <tr><td>/sync-docs 커맨드</td><td>사용자 호출</td><td>수동</td><td>플러그인 커맨드</td></tr>
+        <tr><td>commit-msg 훅</td><td>git commit</td><td>자동</td><td><span class="mono">.git/hooks/commit-msg</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    첫 계층은 CLAUDE.md에 심어진 규칙 텍스트로, Plan 모드에서 결정된 아키텍처 변경을 구현 시작 전에
+    문서에 반영하도록 Claude 자신에게 지시합니다. 둘째 계층은 파일 편집 직후 실행되는
+    <span class="mono">check-doc-sync.sh</span> 훅으로, 편집된 경로의 상위 디렉토리를 거슬러 올라가며
+    대응하는 CLAUDE.md가 있는지 확인합니다(저장소 테스트가 matcher <span class="mono">Write|Edit</span>를
+    검증합니다). 셋째 계층이 사용자가 호출하는 전면 동기화이고, 넷째 계층인 Git commit-msg 훅은 커밋
+    메시지의 AI Co-Authored-By 라인을 자동 제거하는 정리 역할까지 겸합니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["사용자"] --> INIT["/init-project"] --> DET["프로젝트 감지"] --> GEN["구조 생성"] --> HK["훅 설치"]
+  HK --> SYNC["4-layer 자동 동기화"]
+  SYNC --> R["CLAUDE.md 규칙 - Plan 모드"]
+  SYNC --> P["PostToolUse 훅 - Write/Edit"]
+  SYNC --> M["/sync-docs - 수동"]
+  SYNC --> C["commit-msg 훅 - git commit"]
+  R --> UP["문서 최신화"]
+  P --> UP
+  M --> UP
+  C --> UP
+    </div>
+    <figcaption>
+      그림 1. 초기화에서 동기화까지의 흐름(docs/architecture.md의 Data Flow Summary 재구성).
+      트리거 시점이 다른 네 계층이 모두 문서 최신화 한 지점으로 수렴하는 것이 핵심입니다.
+    </figcaption>
+  </figure>
+
+  <p class="lead-def">
+    <b>원칙:</b> 문서 동기화를 사람의 기억에 맡기지 않고, 시점이 다른 네 개의 트리거로 겹겹이
+    강제하는 것이 이 플러그인의 중심 설계입니다.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>딥다이브 - 시크릿 스캔과 health-check</h2>
+
+  <h3>4.1 PreToolUse 시크릿 스캔 - 17개 패턴</h3>
+  <p>
+    생성되는 <span class="mono">secret-scan.sh</span> 훅은 PreToolUse 이벤트(matcher: Bash)에서
+    커밋 전 스테이징된 파일을 검사하고, 시크릿이 발견되면 exit 1로 차단하도록 설계되어 있습니다.
+    다만 생성되는 settings.json이 이 훅을 <span class="mono">|| true</span>로 등록해 exit 코드가
+    삼켜지므로, 실제 동작은 차단이 아니라 경고 출력에 그칩니다(ADR-004의 게이트 훅 정책과
+    등록부가 불일치하는 지점으로, 6절 한계에서 함께 다룹니다). 패턴 배열에는
+    <strong>17개 패턴</strong>이 정의되어 있습니다. AWS Access Key(<span class="mono">AKIA...</span>),
+    OpenAI, Anthropic, GitHub(ghp/gho/fine-grained PAT), Slack(xoxb/xoxp), Stripe(sk_live/rk_live),
+    Google(AIza, ya29), Azure 연결 문자열, 그리고 password/secret/api-key 대입문 형태입니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">.claude/hooks/secret-scan.sh - 패턴 배열 발췌</div>
+    <pre><code>PATTERNS=(
+    'AKIA[0-9A-Z]{16}'                          <span class="cm"># AWS Access Key ID</span>
+    '(?&lt;=aws_secret_access_key\s{0,5}[=:]\s{0,5})[A-Za-z0-9/+=]{40}'
+                                                <span class="cm"># AWS Secret Key (context-aware)</span>
+    'sk-ant-[A-Za-z0-9-]{90,}'                  <span class="cm"># Anthropic API Key</span>
+    'ghp_[A-Za-z0-9]{36}'                       <span class="cm"># GitHub Personal Access Token</span>
+    'xoxb-[0-9]+-[A-Za-z0-9]+'                  <span class="cm"># Slack Bot Token</span>
+    ...                                         <span class="cm"># 총 17개 패턴</span>
+)
+SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.lock')</code></pre>
+  </div>
+
+  <p>
+    AWS Secret Key 패턴이 주목할 지점입니다. 40자 base64 문자열을 무조건 잡는 대신, lookbehind로
+    <span class="mono">aws_secret_access_key =</span> 문맥 뒤에 오는 경우만 잡습니다. v2.1
+    CHANGELOG에 따르면 이는 광범위한 base64 패턴이 만들던 거짓 양성(SHA256 해시, URL 경로 등)을
+    줄이기 위한 교체였고, 저장소 테스트에는 이 참양성/거짓양성(TP/FP) 케이스가 픽스처로 포함되어
+    있습니다. 같은 맥락에서 생성되는 settings.json의 deny 목록은 <span class="mono">rm -rf</span>,
+    <span class="mono">git push --force</span>, <span class="mono">git reset --hard</span>,
+    <span class="mono">eval</span>, <span class="mono">curl|bash</span> 류의 위험 명령을 차단합니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - Markdown 파일은 시크릿 스캔 대상이 아닙니다</span>
+    <p>
+      <span class="mono">SKIP_PATTERNS</span>에 <span class="mono">*.md</span>가 포함되어 있어
+      CLAUDE.md나 README.md에 적힌 시크릿은 이 훅이 잡지 못합니다. 문서에 예시 키를 적는 습관이
+      있다면 이 경로가 구멍이 됩니다. 보완 장치는 <span class="mono">/health-check</span>의 보안
+      단계로, CLAUDE.md와 커밋된 파일의 시크릿 존재 여부를 별도로 확인합니다.
+    </p>
+  </div>
+
+  <h3>4.2 health-check - 0-200점 건강 점수</h3>
+  <p>
+    <span class="mono">/health-check</span>는 하네스가 온전한지 7개 검사 단계로 확인합니다. 핵심
+    파일(CLAUDE.md 존재 +20점 등), 훅 설정(PostToolUse +10, PreToolUse +10, SessionStart +5,
+    commit-msg +10), 스킬 4종(각 +5), 문서 커버리지, 보안, CLAUDE.md 품질(500줄 미만, 섹션 구성 등
+    6항목 각 +5), 테스트 구조 순입니다. 훅이 등록만 되고 실행 권한이 없는 경우까지
+    <span class="mono">find ... ! -perm -u+x</span>로 잡아냅니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. health-check 등급 기준 (commands/health-check.md)</caption>
+      <thead>
+        <tr><th scope="col">점수</th><th scope="col">등급</th><th scope="col">상태</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="num">160-200</span></td><td>A</td><td>HEALTHY - 프로젝트가 잘 구성됨</td></tr>
+        <tr><td><span class="num">120-159</span></td><td>B</td><td>GOOD - 경미한 개선 권장</td></tr>
+        <tr><td><span class="num">80-119</span></td><td>C</td><td>NEEDS ATTENTION - 보완할 공백 다수</td></tr>
+        <tr><td><span class="num">40-79</span></td><td>D</td><td>POOR - 심각한 설정 문제</td></tr>
+        <tr><td><span class="num">0-39</span></td><td>F</td><td>CRITICAL - 초기화 필요</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    품질 점수(0-100)가 문서 하나하나의 내용을 재는 미시 지표라면, 건강 점수(0-200)는 하네스 전체의
+    존재와 정합성을 재는 거시 지표입니다. 두 점수는 연결되어 있습니다. health-check 리포트가
+    CLAUDE.md 품질을 XX/100 형식으로 함께 표기합니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>실제 사용 흐름</h2>
+  <p>
+    설치는 마켓플레이스 등록과 플러그인 설치 두 단계입니다. 설치 후에는 Claude Code 세션을
+    재시작해야 커맨드가 나타납니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">터미널에서 실행 - 설치</div>
+    <pre><code>claude plugin marketplace add https://github.com/whchoi98/project-init
+claude plugin install project-init@project-init
+claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
+  </div>
+
+  <p>
+    README가 권장하는 실행 순서는 반직관적입니다. <span class="mono">/init-project</span>를 코드
+    구현 전이 아니라 <strong>구현 이후에</strong> 실행하라고 안내합니다. 이유는 자동 감지의 정확도입니다.
+    코드가 없으면 CLAUDE.md는 사용자 입력 기반 추측, architecture.md는 빈 템플릿, 훅의 감시 경로는
+    불명확해집니다. 코드가 있으면 실제 디렉토리, 실제 컴포넌트, 정확한 테스트 명령이 채워집니다.
+    권장 전체 흐름은 brainstorm &rarr; plan &rarr; 구현 &rarr; /init-project &rarr; /sync-docs입니다.
+  </p>
+  <p>
+    운영 단계의 반복 루틴은 <span class="mono">/sync-docs</span>입니다. 실행하면 doc-sync-checker
+    서브에이전트의 갭 분석부터 README/CHANGELOG 동기화까지 진행하고, 마지막에 Before/After
+    리포트를 출력합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">/sync-docs 실행 결과 예시 (README, Example Output)</div>
+    <pre><code>## Sync Report
+
+### Quality Scores (Before -&gt; After)
+| File                | Before | After  | Change |
+|---------------------|--------|--------|--------|
+| ./CLAUDE.md         | B (82) | B (87) | +5     |
+| ./src/api/CLAUDE.md | C (62) | C (69) | +7     |
+| ./src/auth/CLAUDE.md| F (28) | C (58) | +30    |
+
+### Changes Made
+- Files created: 2
+- Files updated: 3
+- ADRs suggested: 1
+- Runbooks missing: deploy-production, incident-response</code></pre>
+  </div>
+
+  <p>
+    생성물의 신뢰성은 저장소 자체 테스트로 뒷받침됩니다. <span class="mono">bash tests/run-all.sh</span>를
+    직접 실행한 결과 <strong>169개 테스트가 전부 통과</strong>했습니다(훅 스크립트 검증, 시크릿 패턴 TP/FP,
+    플러그인 구조, 버전 일관성). 생성되는 프로젝트에도 같은 방식의 테스트 프레임워크(README 기준
+    114개 이상)가 함께 설치됩니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>한계</h2>
+  <p>
+    저장소를 읽으며 확인한 한계는 크게 네 갈래입니다. 문서 간 수치 불일치, 점수 산정의 비결정성,
+    시크릿 스캔 게이트의 등록부 불일치, 그리고 마이그레이션 공백입니다.
+  </p>
+  <p>
+    첫째, 문서 간 수치가 어긋나는 지점이 있습니다. health-check의 명목 만점은 200점이지만, 커맨드
+    정의 파일의 가점 항목을 전부 더하면 195점이고, README의 카테고리별 배점 합계는 160점입니다.
+    또 README의 커맨드 상세는 /sync-docs를 "9-phase"로 소개하지만 실제 커맨드 파일은 Phase 0부터
+    Phase 10까지 정의되어 있습니다(CHANGELOG 2.1.0은 11개 phase로 확장했다고 기록). 동작에는 영향이
+    없지만, 점수를 근거로 팀 정책을 세울 때는 커맨드 정의 파일을 기준으로 삼아야 합니다.
+  </p>
+  <p>
+    둘째, 품질 점수와 건강 점수의 산정 주체가 스크립트가 아니라 Claude 자신입니다. 커맨드 파일은
+    평가 기준과 배점을 지시하는 Markdown 프롬프트이므로, 같은 문서라도 실행마다 점수가 조금씩 다를
+    수 있다고 유추할 수 있습니다. 이는 저장소가 명시한 내용이 아니라 커맨드 구조에서 나오는
+    추론입니다. Before/After 변화량 중심으로 읽으면 이 변동성의 영향이 줄어듭니다.
+  </p>
+  <p>
+    셋째, 시크릿 스캔의 게이트가 실제로는 닫히지 않습니다. <span class="mono">secret-scan.sh</span>
+    자체는 시크릿 발견 시 exit 1을 반환하지만, 저장소와 생성 템플릿의 settings.json이 훅을
+    <span class="mono">bash .claude/hooks/secret-scan.sh 2&gt;/dev/null || true</span>로 등록해
+    exit 코드가 항상 0으로 바뀝니다. 게이트 훅은 엄격해야 한다는 ADR-004의 결정과 등록부가
+    불일치하는 지점이며, 현재 동작은 차단이 아니라 경고입니다. 차단이 필요하면
+    <span class="mono">|| true</span>를 제거해야 합니다.
+  </p>
+  <p>
+    넷째, 운영상 공백 두 가지입니다. doc-sync-checker는 model: opus로 실행되어 소스 디렉토리가
+    50개 이상인 프로젝트에서는 타임아웃이 날 수 있고(README 문제 해결 섹션), 플러그인 업데이트 시
+    <span class="mono">settings.json</span>은 자동으로 덮어쓰지 않으므로 v2.1 이전에 초기화한
+    프로젝트는 수동 마이그레이션이 필요합니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - v2.1 이전에 초기화한 프로젝트의 settings.json</span>
+    <p>
+      세션 시작 시 "Invalid key in record" 에러가 보이면 v2.1에서 수정된 두 버그가 원인입니다.
+      <span class="mono">PreCommit</span> 이벤트를 <span class="mono">PreToolUse</span>(matcher:
+      Bash)로, deny 패턴 <span class="mono">Bash(python3 -c:*import os*)</span>를
+      <span class="mono">Bash(python3 -c*import os*)</span>로 직접 고쳐야 합니다. 플러그인을
+      업데이트해도 이 파일은 자동 수정되지 않습니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>결론</h2>
+  <p>
+    project-init의 기여는 하네스 엔지니어링을 개인의 노하우에서 커맨드로 실행 가능한 절차로 바꾼
+    데 있습니다. 생성(17단계 스캐폴딩)만 자동화한 것이 아니라 유지(4-layer 동기화)와 측정(0-100
+    품질 점수, 0-200 건강 점수)까지 한 플러그인 안에 묶었고, 시크릿 스캔과 deny 목록으로 생성물의
+    보안 기본값을 강제합니다.
+  </p>
+  <p>
+    도입 권고는 세 가지입니다. 첫째, <span class="mono">/init-project</span>는 코드가 어느 정도
+    자리 잡은 뒤 "프로젝트 성숙화" 단계로 실행합니다. 둘째, <span class="mono">/sync-docs</span>의
+    점수는 절대값 비교보다 Before/After 변화량으로 읽습니다. 셋째, 기존 프로젝트에 도입할 때는
+    <span class="mono">/health-check</span>를 먼저 실행해 현재 하네스 상태를 파악하고, v2.1 이전
+    구조가 남아 있다면 settings.json부터 수정합니다.
+  </p>
+  <p class="lead-def">
+    <b>한 줄 평가:</b> CLAUDE.md를 잘 쓰는 방법을 아는 것과 그 상태를 유지하는 것은 다른 문제이고,
+    이 플러그인은 후자를 자동화 대상으로 삼은 도구입니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/project-init">project-init - GitHub 저장소</a>
+      - whchoi98, v2.2.0 (2026-07-12). 본문 수치는 README.md, CHANGELOG.md, docs/architecture.md,
+      plugins/project-init/commands/의 정의 파일에서 확인했습니다.
+      <span class="url">https://github.com/whchoi98/project-init</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/plugins">Claude Code - Plugins</a>
+      <span class="url">https://code.claude.com/docs/en/plugins</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/hooks">Claude Code - Hooks reference</a>
+      <span class="url">https://code.claude.com/docs/en/hooks</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-09.
+    본 문서는 project-init 저장소(v2.2.0)의 README.md, CHANGELOG.md, docs/architecture.md와
+    커맨드 정의 파일을 기반으로 작성한 기술 분석 자료입니다. 테스트 결과(169개 통과)는 작성 시점에
+    저장소에서 직접 실행해 확인했습니다.
+    커맨드 수, 점수 체계, 패턴 수는 작성 시점 기준이며, 최신 값은 위 저장소와 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  }
+  sync();
+
+  btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>
