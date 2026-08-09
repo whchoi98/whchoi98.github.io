@@ -1,0 +1,17 @@
+# False positive samples - none of these may trigger secret-scan patterns.
+
+# Base64 that starts with letters, not an AWS key
+dGhpcyBpcyBhIHRlc3Q=
+
+# Short AKIA prefix (not 16 chars of key body)
+AKIA123
+
+# Empty / placeholder assignments
+password = ""
+password = "xxx"
+api_key = ""
+
+# Documentation mentions of token formats without values
+the token format is xoxb-NUMBER
+GitHub PATs start with ghp_ followed by 36 characters
+Anthropic keys start with the sk-ant- prefix

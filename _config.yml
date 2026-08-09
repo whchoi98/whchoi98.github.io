@@ -26,6 +26,20 @@ exclude:
   - node_modules/
   - _design/
   - "*.zip"
+  # 내부 문서/도구 - 공개 사이트 빌드에서 제외 (project-init)
+  - "CLAUDE.md"
+  - "assets/CLAUDE.md"
+  - "docs/CLAUDE.md"
+  - "docs/decisions"
+  - "docs/runbooks"
+  - "docs/reference"
+  - "docs/architecture.md"
+  - "docs/onboarding.md"
+  - "scripts"
+  - "tests"
+  - "tools"
+  - ".editorconfig"
+  - ".env.example"
 
 # 카테고리 메타: 이름 → 아이콘 / 설명 / 인덱스 경로
 blog_categories:

@@ -21,3 +21,7 @@ vendor/bundle
 .bundle/
 Gemfile.lock
 *.zip
+
+# Secrets / local-only settings (project-init)
+.env
+.claude/settings.local.json
