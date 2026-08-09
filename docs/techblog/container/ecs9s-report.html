@@ -23,6 +23,16 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 이 저장값보다 우선하며, 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -64,6 +74,11 @@ html[data-theme="dark"] {
   --code-bg: #10161e;
   --link: #6cb8e6;
 }
+
+/* ---------- Language switch ----------
+   KO/EN 두 페이지가 나란히 존재하고, html[data-lang] 이 보이는 쪽을 고른다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -402,7 +417,7 @@ tbody th {
 }
 
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -526,7 +541,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +564,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -1056,6 +1072,8 @@ theme: dark    <span class="cm"># dark | light | blue</span></code></pre>
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="ecs9s-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -1106,27 +1124,675 @@ theme: dark    <span class="cm"># dark | light | blue</span></code></pre>
 
 </div>
 
+<!-- ===================================================== -->
+<!-- ===================== EN page ======================= -->
+<!-- ===================================================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">Container / Tool Deep Dive</p>
+  <h1>ecs9s - Inside a Keyboard-Driven Terminal UI for AWS ECS Operations</h1>
+  <p class="subtitle">
+    Based on the source repository, this document analyzes ecs9s at the code level: its Go package
+    structure, view/navigation model, ECS Exec preflight validation, and the implementation and
+    actual wiring status of its operational actions (deploy, scale, rollback, port forwarding).
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The subject is the ecs9s source repository (github.com/whchoi98/ecs9s); the version is v0.1.0 per the README badge, with no git tags/releases published and a binary version string of dev.</p>
+    <p>The required build version is Go 1.24.2 per <span class="mono">go.mod</span>.</p>
+    <p>Every number in this document was verified directly in the source code (<span class="mono">internal/ui/messages.go</span> and others).</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>ecs9s is an ECS-dedicated TUI built with Go and Bubbletea. It brings <strong>21 resource views</strong> and <strong>5 actually wired page action keys</strong> (f, e, x, and Ctrl+d on Task/TaskDef) into a single terminal screen; these numbers were verified directly in the source, in the PageType enum and key handlers. The S (scale), b (rollback), and Ctrl+f (port forwarding) keys shown in the help overlay have no wired key handlers and do not work yet.</li>
+    <li>Every screen follows the Elm architecture (Model-Update-View), AWS API calls run asynchronously as <span class="mono">tea.Cmd</span> closures, and the drill-down position accumulates in a single <span class="mono">NavContext</span> struct.</li>
+    <li>Inspired by k9s and e1s, its differentiators are ECS-specific operational actions (force redeploy, ECS Exec enablement, task stop, task definition deregistration - scale/rollback/port forwarding exist only as unwired <span class="mono">action/</span> modules) and <strong>integrated views of surrounding services</strong> such as ECR, ELB, IAM, and Cost.</li>
+    <li>The inspect-diagnose-act loop that used to bounce between the console and the CLI can now finish inside the terminal. Note that the ECS Exec shell requires the AWS CLI and session-manager-plugin to be installed locally.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem - ECS Operations Scattered Everywhere</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How It Works - TUI Architecture</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Core Mechanism Deep Dive</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Overview of the 21 Resource Views</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Real Operational Flow</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Limitations</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem - ECS Operations Scattered Everywhere</h2>
+  <p>
+    Day-to-day ECS operations means bouncing between screens. Service deployment status lives in the
+    ECS console, container logs in CloudWatch Logs, image tags in ECR, and alarms on the CloudWatch
+    alarms page. When a deployment misbehaves you type
+    <span class="mono">aws ecs describe-services</span>, and to get into a container you reassemble
+    the long arguments of <span class="mono">aws ecs execute-command</span> yet again.
+    Diagnosing a single incident means switching between browser tabs and the terminal many times.
+  </p>
+  <p>
+    The Kubernetes world solved this with k9s: a terminal UI that handles resource lists,
+    drill-down, logs, and shell access with the keyboard alone became the default tool for EKS
+    operators. ecs9s is a project that brings that experience to ECS. The README states it was
+    inspired by k9s (Kubernetes), e1s (ECS), and tui-aws (AWS).
+  </p>
+  <p>
+    It differs from existing tools in two ways. First, <strong>ECS-specific operational actions</strong>
+    that go beyond read-only browsing. Force redeploy, ECS Exec enablement, task stop, and task
+    definition deregistration are bound to shortcut keys on their pages. Adjusting the desired
+    count, rolling back to a previous task definition, and SSM port forwarding exist as wrapper
+    modules in <span class="mono">internal/action/</span> but are not yet wired to shortcut keys.
+    Second, integrated views of the services around ECS. ECR images, ELB target groups, IAM roles,
+    Secrets Manager, and even cost estimation - 21 views live inside one tab structure, so the
+    context switching a diagnosis requires ends inside the terminal.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - How the numbers in this document were verified</span>
+    <p>
+      The README describes 21 views, Go 1.24+, and 3 themes. This document re-verified those
+      numbers in the code. The view count matched the 21 PageType constants in
+      <span class="mono">internal/ui/messages.go</span> and the 21 page files in
+      <span class="mono">internal/ui/pages/</span>; the Go version matched the
+      <span class="mono">go 1.24.2</span> declaration in <span class="mono">go.mod</span>.
+      No numbers were found where the README and the code disagree.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How It Works - TUI Architecture</h2>
+  <p>
+    ecs9s is a single Go binary. The TUI framework is Bubbletea (Elm architecture), styling uses
+    Lipgloss, and AWS integration uses the AWS SDK for Go v2. <span class="mono">main.go</span>
+    parses four flags - <span class="mono">--profile</span>, <span class="mono">--region</span>,
+    <span class="mono">--theme</span>, <span class="mono">--version</span> - reads
+    <span class="mono">~/.ecs9s/config.yaml</span>, creates the AWS session, and starts
+    <span class="mono">tea.NewProgram</span>. CLI flags take precedence over config file values.
+  </p>
+
+  <h3>2.1 Layered Structure</h3>
+  <p>
+    Under <span class="mono">internal/</span> the code splits into a presentation layer, a data
+    layer, and an action layer. The root of the presentation layer is the App model in
+    <span class="mono">internal/app/app.go</span>, which composes 21 pages and 8 reusable
+    components (table, tabs, commandbar, statusbar, help, confirm, logviewer, sparkline) and routes
+    messages between them.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Composition by layer (based on internal/ packages)</caption>
+      <thead>
+        <tr><th scope="col">Layer</th><th scope="col">Packages</th><th scope="col">Contents</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Presentation</th>
+          <td><span class="mono">app</span>, <span class="mono">ui/pages</span>, <span class="mono">ui/components</span>, <span class="mono">ui/styles</span>, <span class="mono">theme</span></td>
+          <td>Root model and routing, 21 page models, 8 widgets, Lipgloss styles, 3 theme presets (dark, light, blue)</td>
+        </tr>
+        <tr>
+          <th scope="row">Data</th>
+          <td><span class="mono">aws</span></td>
+          <td>10 SDK v2 client wrapper files - ecs, cloudwatch, ecr, elb, ec2, iam, autoscaling, ssm, secrets, session</td>
+        </tr>
+        <tr>
+          <th scope="row">Action</th>
+          <td><span class="mono">action</span></td>
+          <td>6 mutation wrapper modules - exec, portforward, scale, deploy, rollback, taskdef (only exec is currently called)</td>
+        </tr>
+        <tr>
+          <th scope="row">Config</th>
+          <td><span class="mono">config</span></td>
+          <td><span class="mono">~/.ecs9s/config.yaml</span> loader (profile, region, theme)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>2.2 View and Navigation Model</h3>
+  <p>
+    The identity of every view is defined by a single PageType enum in
+    <span class="mono">internal/ui/messages.go</span>. Each PageType carries both a tab name
+    (<span class="mono">String()</span>) and a command-mode string (<span class="mono">Command()</span>),
+    so adding one view grows the tab bar and the <span class="mono">:</span> commands in the same
+    place. The drill-down position travels between pages inside the NavContext struct.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">internal/ui/messages.go - view definitions and drill-down context (excerpt)</div>
+    <pre><code>const (
+    PageCluster PageType = iota
+    PageService
+    PageTask
+    PageContainer
+    PageTaskDef
+    <span class="cm">// ... Logs, ECR, ELB, ASG, VPC, IAM, Metrics, EC2,</span>
+    <span class="cm">// ... Events, Stopped, ResMap, Cost, SSM, Secrets, Deploy,</span>
+    PageAlarms          <span class="cm">// 21 in total</span>
+)
+
+<span class="cm">// NavContext holds the drill-down context as the user navigates deeper.</span>
+type NavContext struct {
+    ClusterARN  string
+    ClusterName string
+    ServiceName string
+    ServiceARN  string
+    TaskARN     string
+    TaskID      string
+}</code></pre>
+  </div>
+
+  <p>
+    Navigation is hybrid. A path that cycles tabs with <span class="mono">Tab</span>,
+    <span class="mono">[</span>, and <span class="mono">]</span> coexists with a k9s-style command
+    mode where typing <span class="mono">:service</span>, <span class="mono">:ecr</span>, or
+    <span class="mono">:cost</span> jumps straight to a view. Switching tabs preserves the
+    drill-down context, so after drilling into a specific service from the Service view, moving to
+    the Events or Metrics tab shows data scoped to that same service.
+  </p>
+
+  <h3>2.3 Asynchronous AWS API Integration</h3>
+  <p>
+    AWS calls never block the UI thread. Each page's <span class="mono">Update()</span> returns the
+    API call as a <span class="mono">tea.Cmd</span> closure; the Bubbletea runtime executes it on a
+    goroutine and delivers the result back as a typed message such as
+    <span class="mono">clusterLoadedMsg</span>. Errors are promoted to
+    <span class="mono">ui.ErrorMsg</span> and shown in the status bar. Data flows in one direction:
+    user input &rarr; <span class="mono">App.Update()</span> &rarr; <span class="mono">Page.Update()</span>
+    &rarr; <span class="mono">tea.Cmd</span> (AWS API) &rarr; loaded message &rarr; <span class="mono">Page.View()</span>.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - the filter/sort vs. row-selection trap</span>
+    <p>
+      The repository convention mandates reading the selected table row via
+      <span class="mono">SelectedRow()</span> row data, not the <span class="mono">Cursor()</span>
+      index. If the cursor index were used as an index into the original array, an action would hit
+      a different resource the moment a <span class="mono">/</span> filter or a sort is applied.
+      For a tool with destructive actions, this is an important design decision.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Core Mechanism Deep Dive</h2>
+
+  <h3>3.1 Drill-down and Breadcrumbs</h3>
+  <p>
+    The primary axis of navigation is the Cluster &rarr; Service &rarr; Task &rarr; Container
+    hierarchy. Pressing <span class="mono">Enter</span> descends one level while accumulating the
+    selected row's ARN and name into NavContext; <span class="mono">Esc</span> or
+    <span class="mono">Backspace</span> restores the previous state pushed onto navStack. Because
+    drilling down is the only path that mutates NavContext, "which service of which cluster am I
+    looking at right now" stays consistently visible in the status bar.
+  </p>
+  <p>
+    Pages fall into two groups. Global pages such as ECR, ELB, VPC, and IAM show the whole region
+    without any context and hide the cluster indicator in the status bar. Context pages such as
+    Service, Task, Events, and Metrics narrow their data to the drill-down scope. Jumping to any
+    page via command mode preserves this distinction.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  CL["Cluster view"] -->|"Enter: record cluster in NavContext"| SV["Service view"]
+  SV -->|"Enter: record service"| TK["Task view"]
+  TK -->|"Enter: record task"| CO["Container view"]
+  CO -.->|"Esc: restore navStack"| TK
+  TK -.->|"Esc"| SV
+  SV -.->|"Esc"| CL
+  CMD[":command mode / Tab switch"] -->|"swap view, keep context"| SV
+  CMD --> GL["Global views (ECR, ELB, VPC, IAM ...)"]
+    </div>
+    <figcaption>
+      Figure 1. Drill-down and view-switch flow. Solid lines are drill-downs that push onto
+      NavContext, dotted lines are navStack restores, and command mode / tab switching swaps only
+      the view while keeping the context.
+    </figcaption>
+  </figure>
+
+  <h3>3.2 The 3-Stage Preflight Validation for the ECS Exec Shell</h3>
+  <p>
+    ECS Exec is a feature with many failure points. A missing local plugin, an unset
+    <span class="mono">enableExecuteCommand</span> on the service, or an agent that never started -
+    any one of these keeps the shell from opening, and the AWS CLI's error messages alone make the
+    cause hard to find. The moment you press <span class="mono">x</span> in the Container view,
+    ecs9s walks through validation stages before launching the shell.
+  </p>
+  <ol class="plain">
+    <li>Local tooling check - <span class="mono">exec.LookPath</span> verifies that the AWS CLI and
+      session-manager-plugin are on PATH; if not, an error including the installation docs URL is
+      shown in the status bar.</li>
+    <li>Task state check - <span class="mono">DescribeTasks</span> verifies the task's
+      <span class="mono">enableExecuteCommand</span> flag and that the ExecuteCommandAgent managed
+      agent is RUNNING. Each failure cause is explained with a different message.</li>
+    <li>TUI suspend and restore - once validation passes, <span class="mono">tea.ExecProcess</span>
+      hands terminal control to the <span class="mono">aws ecs execute-command --interactive</span>
+      subprocess, and restores the TUI state intact when the shell exits.</li>
+  </ol>
+
+  <div class="codeblock">
+    <div class="code-caption">internal/aws/ecs.go - CheckExecEnabled validation (excerpt)</div>
+    <pre><code>for _, ctr := range task.Containers {
+    for _, ma := range ctr.ManagedAgents {
+        if ma.Name == ecstypes.ManagedAgentNameExecuteCommandAgent {
+            result.InitStatus = aws.ToString(ma.LastStatus)
+            result.AgentRunning = result.InitStatus == "RUNNING"
+        }
+    }
+}
+
+if !result.TaskExecEnable {
+    result.Details = "enableExecuteCommand is not set on this task. ..."
+} else if !result.AgentRunning {
+    result.Details = "ExecuteCommand agent status: ... may need to be restarted ..."
+}</code></pre>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - the shell does not open right after enabling Exec</span>
+    <p>
+      Enabling ECS Exec with <span class="mono">e</span> in the Service view sets
+      <span class="mono">enableExecuteCommand</span> on the service and triggers a force redeploy
+      along with it. Existing tasks have no agent, so you can connect <strong>only after new tasks
+      carrying the ExecuteCommandAgent have started</strong>. The Task Role also needs the 4 channel
+      permissions such as <span class="mono">ssmmessages:CreateControlChannel</span>. This wait and
+      these permissions are the most common source of confusion with ECS Exec.
+    </p>
+  </div>
+
+  <h3>3.3 Operational Actions - Deploy, Scale, Rollback, Port Forwarding</h3>
+  <p>
+    Mutation wrappers exist as 6 modules in <span class="mono">internal/action/</span> (exec,
+    portforward, scale, deploy, rollback, taskdef), but the currently wired actions call
+    <span class="mono">internal/aws</span> client methods directly from the pages. The only action
+    module actually invoked is <span class="mono">exec.go</span> on the ECS Exec path. The confirm
+    component is implemented but not connected to any action, so force redeploy / task stop / task
+    definition deregistration execute immediately without a confirmation dialog. The only path with
+    preflight validation is ECS Exec (<span class="mono">x</span>).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Operational action key bindings per page (the 5 with key handlers wired in the page sources)</caption>
+      <thead>
+        <tr><th scope="col">Page</th><th scope="col">Key</th><th scope="col">Action</th><th scope="col">Actual call path</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Service</td><td><span class="mono">f</span></td><td>Force redeploy</td><td><span class="mono">ForceNewDeployment</span> in <span class="mono">internal/aws/ecs.go</span> (UpdateService)</td></tr>
+        <tr><td>Service</td><td><span class="mono">e</span></td><td>Enable ECS Exec</td><td><span class="mono">EnableExecOnService</span> in <span class="mono">internal/aws/ecs.go</span> (sets enableExecuteCommand + redeploy)</td></tr>
+        <tr><td>Task</td><td><span class="mono">Ctrl+d</span></td><td>Stop task</td><td><span class="mono">StopTask</span> in <span class="mono">internal/aws/ecs.go</span></td></tr>
+        <tr><td>Container</td><td><span class="mono">x</span></td><td>ECS Exec shell</td><td><span class="mono">action/exec.go</span> + <span class="mono">CheckExecEnabled</span> validation + <span class="mono">tea.ExecProcess</span></td></tr>
+        <tr><td>TaskDef</td><td><span class="mono">Ctrl+d</span></td><td>Deregister task definition</td><td><span class="mono">DeregisterTaskDefinition</span> in <span class="mono">internal/aws/ecs.go</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Remark - keys shown in the help overlay but with no wired handler</span>
+    <p>
+      <span class="mono">S</span> (adjust desired count) and <span class="mono">b</span> (roll back
+      to the previous task definition) in the Service view, and <span class="mono">Ctrl+f</span>
+      (port forwarding) in the Container view, appear in the help overlay but have no wired key
+      handlers. The corresponding <span class="mono">action/scale.go</span>,
+      <span class="mono">action/rollback.go</span>, and <span class="mono">action/portforward.go</span>
+      modules exist but are never called, so these three keys do nothing in the current version.
+    </p>
+  </div>
+
+  <p>
+    Although unwired, the rollback wrapper is designed not to guess.
+    <span class="mono">RollbackService</span> in <span class="mono">action/rollback.go</span> first
+    identifies the PRIMARY deployment's task definition via
+    <span class="mono">DescribeServices</span>, then picks as the rollback target the most recent
+    deployment in the list with a different task definition. Only when no such deployment exists
+    does it construct a candidate by decrementing the revision number - and even then it calls
+    <span class="mono">DescribeTaskDefinition</span> to confirm the revision actually exists before
+    calling <span class="mono">UpdateService</span>. If validation fails, it ends in an error with
+    no changes made.
+  </p>
+  <p>
+    The port forwarding wrapper uses SSM's <span class="mono">AWS-StartPortForwardingSession</span>
+    document. The target identifier has the form
+    <span class="mono">ecs:{cluster-name}_{task-id}_{runtime-id}</span>, which requires short names
+    rather than ARNs, so the code keeps a dedicated helper that extracts names and IDs from ARNs.
+    Hand-assembling this format is a common mistake when using the CLI, so the wrapper's value is
+    clear - but the key handler and port input UI that would call it are not wired yet, so it
+    cannot be used in the current version.
+  </p>
+
+  <p class="lead-def">
+    <b>Current state:</b> the confirm component is implemented but connected to no action, so force
+    redeploy / task stop / task definition deregistration execute immediately without confirmation.
+    The only path that goes through preflight validation is ECS Exec (<span class="mono">x</span>).
+  </p>
+
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Overview of the 21 Resource Views</h2>
+  <p>
+    The views split into 5 ECS core, 8 operational services, and 8 management views. The command
+    strings below are copied verbatim from the <span class="mono">PageType.Command()</span> array
+    and match exactly what you type after <span class="mono">:</span> in command mode.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The 21 resource views and their command-mode commands (per internal/ui/messages.go)</caption>
+      <thead>
+        <tr><th scope="col">Group</th><th scope="col">View</th><th scope="col">Command</th><th scope="col">What it shows</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row" rowspan="5">ECS core</th><td>Cluster</td><td><span class="mono">:cluster</span></td><td>Cluster list, the drill-down entry point</td></tr>
+        <tr><td>Service</td><td><span class="mono">:service</span></td><td>Services and deployment status; entry point for force redeploy and ECS Exec enablement</td></tr>
+        <tr><td>Task</td><td><span class="mono">:task</span></td><td>Running tasks, task stop</td></tr>
+        <tr><td>Container</td><td><span class="mono">:container</span></td><td>Containers within a task, entry point for the ECS Exec shell</td></tr>
+        <tr><td>TaskDef</td><td><span class="mono">:taskdef</span></td><td>Task definition revisions, deregistration</td></tr>
+        <tr><th scope="row" rowspan="8">Operational services</th><td>Logs</td><td><span class="mono">:log</span></td><td>CloudWatch Logs log viewer</td></tr>
+        <tr><td>ECR</td><td><span class="mono">:ecr</span></td><td>Repositories and images</td></tr>
+        <tr><td>ELB</td><td><span class="mono">:elb</span></td><td>Load balancers, target groups</td></tr>
+        <tr><td>ASG</td><td><span class="mono">:asg</span></td><td>Auto Scaling targets and policies</td></tr>
+        <tr><td>VPC</td><td><span class="mono">:vpc</span></td><td>VPCs, subnets, security groups</td></tr>
+        <tr><td>IAM</td><td><span class="mono">:iam</span></td><td>Roles and policies</td></tr>
+        <tr><td>Metrics</td><td><span class="mono">:metrics</span></td><td>CPU / Memory sparklines</td></tr>
+        <tr><td>EC2</td><td><span class="mono">:ec2</span></td><td>EC2 instances</td></tr>
+        <tr><th scope="row" rowspan="8">Management</th><td>Events</td><td><span class="mono">:events</span></td><td>Service events</td></tr>
+        <tr><td>Stopped</td><td><span class="mono">:stopped</span></td><td>Stopped tasks and stop reasons (StoppedReason)</td></tr>
+        <tr><td>ResMap</td><td><span class="mono">:resmap</span></td><td>Service-centric resource map (deployments, target groups, task links)</td></tr>
+        <tr><td>Cost</td><td><span class="mono">:cost</span></td><td>Fargate cost estimate based on actual task definition values</td></tr>
+        <tr><td>SSM</td><td><span class="mono">:ssm</span></td><td>Parameter Store (SecureStrings masked without decryption)</td></tr>
+        <tr><td>Secrets</td><td><span class="mono">:secrets</span></td><td>Secrets Manager list</td></tr>
+        <tr><td>Deploy</td><td><span class="mono">:deploy</span></td><td>Deployment history</td></tr>
+        <tr><td>Alarms</td><td><span class="mono">:alarms</span></td><td>CloudWatch alarms</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The Cost view does not guess from names: it computes hourly/daily/monthly cost from the actual
+    vCPU and memory values returned by <span class="mono">DescribeTaskDefinition</span>. The SSM
+    view calls with <span class="mono">WithDecryption: false</span> so SecureString values never
+    reach memory, and masks them on screen as <span class="mono">****</span>. For a read-oriented
+    tool handling secret values, this is a conservative choice.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Real Operational Flow</h2>
+
+  <h3>5.1 Install and Run</h3>
+  <p>
+    Distribution is a single binary produced by <span class="mono">go build</span>. Clone the
+    repository, build, and move it onto your PATH - that is all.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">In the shell - install and launch</div>
+    <pre><code>git clone https://github.com/whchoi98/ecs9s.git
+cd ecs9s
+go build -o ecs9s .          <span class="cm"># Go 1.24.2 or later</span>
+sudo mv ecs9s /usr/local/bin/
+
+ecs9s --profile myprofile --region ap-northeast-2 --theme dark</code></pre>
+  </div>
+
+  <p>
+    Store frequently used values in <span class="mono">~/.ecs9s/config.yaml</span>. If the same key
+    is also given as a CLI flag, the flag wins.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">~/.ecs9s/config.yaml</div>
+    <pre><code>aws:
+  profile: default
+  region: ap-northeast-2
+theme: dark    <span class="cm"># dark | light | blue</span></code></pre>
+  </div>
+
+  <h3>5.2 A Deployment Incident Diagnosis Scenario</h3>
+  <p>
+    Assume "5xx errors rose after a deployment". The flow goes like this: jump to
+    <span class="mono">:service</span> and check the running/desired mismatch, press
+    <span class="mono">Enter</span> to descend into tasks, and read the stop reasons in
+    <span class="mono">:stopped</span>. View container logs with <span class="mono">:log</span>,
+    and if you need to dig deeper, descend to Container and open a shell with
+    <span class="mono">x</span>. If the cause is the new image you need a rollback - but the
+    <span class="mono">b</span> key shown in the help overlay is not wired yet, so in the current
+    version you must revert with <span class="mono">aws ecs update-service</span>, specifying the
+    previous task definition. Aside from the rollback, nothing in this loop requires opening a
+    browser.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. Global navigation keys</caption>
+      <thead>
+        <tr><th scope="col">Key</th><th scope="col">Action</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">Tab</span> / <span class="mono">[</span> / <span class="mono">]</span></td><td>Switch tabs (drill-down context preserved)</td></tr>
+        <tr><td><span class="mono">:</span> + command</td><td>Jump straight to a view via command mode</td></tr>
+        <tr><td><span class="mono">Enter</span> / <span class="mono">Esc</span></td><td>Drill down / go back</td></tr>
+        <tr><td><span class="mono">/</span>, <span class="mono">s</span>, <span class="mono">R</span></td><td>Filter, sort, refresh</td></tr>
+        <tr><td><span class="mono">?</span>, <span class="mono">q</span></td><td>Help overlay, quit</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Limitations</h2>
+  <p>
+    These are the limitations visible in the code. The project is at v0.1.0 per the README badge
+    (no git tags/releases, binary version string is dev) and the CHANGELOG is still [Unreleased],
+    so the items below are a snapshot of the current state.
+  </p>
+  <ul class="plain">
+    <li>Unwired actions - <span class="mono">S</span> (scale), <span class="mono">b</span> (rollback),
+      and <span class="mono">Ctrl+f</span> (port forwarding) shown in the help overlay have no
+      wired key handlers and do not work. The scale, rollback, and portforward modules in
+      <span class="mono">action/</span> exist but are never called. The confirm component is
+      likewise connected to no action, so force redeploy / task stop / task definition
+      deregistration execute immediately without a confirmation dialog.</li>
+    <li>External dependencies - the ECS Exec shell is not implemented directly against the SDK; it
+      runs an <span class="mono">aws</span> CLI subprocess (the unwired port forwarding wrapper
+      works the same way). It will not work without the AWS CLI and session-manager-plugin
+      installed locally (the preflight validation reports this as an error).</li>
+    <li>Session pinning - profile and region are decided once when <span class="mono">main.go</span>
+      creates the session. All 21 command-mode commands are for view switching; there is no command
+      to change profile/region at runtime. For multi-region operations you must run one process per
+      region.</li>
+    <li>Cost estimation scope - the Cost view's unit prices are hard-coded to us-east-1 on-demand
+      Fargate values (vCPU $0.04048/hour, memory $0.004445/GB-hour). In other regions or in
+      environments with Savings Plans applied, estimates will differ from the actual bill.</li>
+    <li>Rollback candidate limits - based on the unwired rollback wrapper
+      (<span class="mono">action/rollback.go</span>): when no deployment with a different task
+      definition exists, it tries a candidate with the revision number decremented by one, and if
+      that revision has already been deregistered the existence check fails and the rollback ends
+      in an error. Safe, but in that case you must pick the target revision manually.</li>
+    <li>Installation path - there is no released binary distribution; building from source is the
+      only installation method, so a Go toolchain is required.</li>
+  </ul>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Conclusion</h2>
+  <p>
+    ecs9s rebuilds for ECS the "loop that finishes inside the terminal" that k9s gave Kubernetes
+    operators. Compared with e1s in the same family, where this project puts its weight is the
+    actual ECS operational workflow. Force redeploy, ECS Exec enablement, task stop, and task
+    definition deregistration are bound to shortcuts (scale, rollback, and port forwarding remain
+    unwired with only their wrapper modules prepared), and 21 views spanning surrounding services -
+    from ECR to cost estimation - live inside one navigation model.
+  </p>
+  <p>
+    From an implementation standpoint, the design that moves failure earlier is worth noting. The
+    3-stage ECS Exec preflight validation, the unwired rollback wrapper's target existence check,
+    SelectedRow-based row selection, and non-decryption of SecureStrings all point in the same
+    direction: "make reads easy, keep writes conservative". That said, the confirm dialog is not
+    yet connected to any action, so the safety net for mutating actions is currently limited to the
+    ECS Exec preflight validation. If you operate ECS by bouncing between the console and the CLI,
+    this is a tool whose single binary makes it cheap enough to simply try.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="ecs9s-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary source</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ecs9s">ecs9s - GitHub repository</a>
+      - WooHyung Choi, source and README (v0.1.0 per badge), docs/architecture.md (accessed 2026-08-09)
+      <span class="url">https://github.com/whchoi98/ecs9s</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html">Monitor containers with ECS Exec - Amazon ECS Developer Guide</a>
+      (accessed 2026-08-09)
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html</span>
+    </li>
+  </ul>
+
+  <h3>Related projects</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/derailed/k9s">k9s - Kubernetes CLI To Manage Your Clusters In Style</a>
+      (accessed 2026-08-09)
+      <span class="url">https://github.com/derailed/k9s</span>
+    </li>
+    <li>
+      <a href="https://github.com/keidarcy/e1s">e1s - Easily Manage AWS ECS Resources in Terminal</a>
+      (accessed 2026-08-09)
+      <span class="url">https://github.com/keidarcy/e1s</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis written by reading the ecs9s source repository
+    (v0.1.0 per the README badge) directly. All numbers - view counts, key bindings, unit prices -
+    reflect the code at the time of writing; check the repository and the official documentation
+    above for the latest values.
+  </p>
+</footer>
+
+</div>
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO/EN 페이지에 버튼이 하나씩 있으므로 모두 배선한다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var en = btn.closest && btn.closest('.page[data-lang="en"]');
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 디스패치.
+   Mermaid 다이어그램이 있으면 themechange 를 함께 보내 표시된 페이지 기준으로 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    });
+  });
+
+  document.addEventListener("langchange", function () {
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", {
+        detail: { theme: root.getAttribute("data-theme") }
+      }));
+    }
   });
 })();
 </script>

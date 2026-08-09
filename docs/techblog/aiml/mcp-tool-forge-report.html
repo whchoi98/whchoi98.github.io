@@ -22,6 +22,14 @@
     ? saved === "dark"
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+
+  /* 언어 부트: URL ?lang= 파라미터가 localStorage 보다 우선한다. 기본값은 ko. */
+  var LKEY = "techblogs-lang", lang = null;
+  try { lang = new URLSearchParams(location.search).get("lang"); } catch (e) {}
+  if (lang !== "en" && lang !== "ko") {
+    try { lang = localStorage.getItem(LKEY); } catch (e) {}
+  }
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
 })();
 </script>
 <style>
@@ -64,6 +72,11 @@ html[data-theme="dark"] {
   --code-bg: #10161e;
   --link: #6cb8e6;
 }
+
+/* ---------- Language toggle ----------
+   한 파일에 KO/EN 두 .page 를 담고 html[data-lang] 으로 한쪽만 보여준다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -402,7 +415,7 @@ tbody th {
 }
 
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -526,7 +539,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +562,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -1144,6 +1158,8 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
   </div>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="mcp-tool-forge-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -1190,27 +1206,734 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 
 </div>
 
+<!-- ===================== English page (data-lang="en") ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Tool Deep Dive</p>
+  <h1>MCP Tool Forge - A Python CLI That Converts MCP Server Tools into Executable Code</h1>
+  <p class="subtitle">
+    We quantify the token cost that MCP servers impose on every conversation through tool
+    definitions, and show how converting those tools once into five native formats -
+    boto3 / AWS CLI / OpenAPI schema / AgentCore Gateway / Skill - eliminates that cost.
+  </p>
+
+  <div class="stat" role="img" aria-label="Initial load token comparison: one MCP server costs about 58,000 tokens, one Skill costs about 3,000 tokens">
+    <div class="stat-item old">
+      <span class="stat-num">58,000<span class="unit">tokens</span></span>
+      <span class="stat-sub">Initial load of 1 MCP server (IAM, 29 tools)</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">3,000<span class="unit">tokens</span></span>
+      <span class="stat-sub">Selective load of 1 Skill (SKILL.md)</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>Written as of 2026-03-19.</p>
+    <p>Applies to environments using MCP servers or AWS Skills with Claude Code and Kiro-CLI.</p>
+    <p>Key identifiers are the <span class="mono">mcp-tool-forge</span> CLI and the nine <span class="mono">aws-*</span> skills.</p>
+    <p>Primary source is the GitHub whchoi98/mcp-tool-forge repository (2026-03-19).</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>Loading an MCP server injects every tool's JSON Schema into the LLM context. Each tool costs roughly 2,000 tokens, so loading all 792 tools across 67 AWS MCP servers consumes <strong>about 1,584,000 tokens (~1.5M)</strong> on tool definitions alone.</li>
+    <li>MCP Tool Forge extracts MCP tools once and converts them into five native formats: boto3, AWS CLI, OpenAPI schema, AgentCore Gateway, and Skill. The converted code runs directly without an MCP server, so <strong>both tool-definition tokens and call round-trip tokens drop to 0</strong>.</li>
+    <li>In real Kiro-CLI measurements, a conversation with 4 MCP servers enabled cost 0.71 credits versus 0.27 credits with Skills only - a <strong>62% reduction</strong> - and at Claude Opus 4.6 input pricing, token cost falls by more than 95%.</li>
+    <li>The bundled nine AWS Skills install with a <span class="mono">git clone</span> plus three copy commands, and run with nothing but AWS credentials - no MCP server, no Python packages, no Bedrock access. Real-account testing passed <strong>17/17</strong>.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Overview - What Is MCP Tool Forge</a></li>
+    <li><span class="no">02</span><a href="#s2-en">The Core Problem - MCP Token Cost</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Token Economics - MCP vs Skills</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Installing Skills and the 9 AWS Skills</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Architecture - 3-Stage Conversion Pipeline</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Output Formats and Supported Servers</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Quick Start - The CLI Tool</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Overview - What Is MCP Tool Forge</h2>
+  <p>
+    <a href="https://github.com/whchoi98/mcp-tool-forge">MCP Tool Forge</a> is a Python CLI
+    that extracts tools from MCP (Model Context Protocol) servers and converts them into five
+    formats: <strong>boto3, AWS CLI, OpenAPI schema, AgentCore Gateway, and
+    Claude Code / Kiro-CLI Skill</strong>. It ships with nine ready-to-install AWS Skills and
+    supports both Claude Code and Kiro-CLI.
+  </p>
+  <p>
+    The reason this tool exists is MCP's token cost structure. Merely keeping an MCP server
+    enabled puts every tool definition into the context of every conversation, so you pay
+    even when the tools are never used. This document quantifies that cost (chapters 2-3),
+    covers the remedy - installing and organizing Skills (chapter 4) - and then walks through
+    how the conversion pipeline works (chapters 5-7).
+  </p>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>The Core Problem - MCP Token Cost</h2>
+
+  <h3>2.1 Why MCP Consumes So Many Tokens</h3>
+  <p>
+    The MCP protocol is powerful, but <strong>every tool definition and every request/response
+    is paid for in LLM tokens</strong>. When an MCP server loads, the JSON Schema of every tool
+    is injected into the LLM context. This step is necessary for the LLM to "know" which tools
+    are available, yet most of the injected tools are never used in that conversation.
+  </p>
+  <p>
+    The scale, in numbers: one tool definition is roughly 2,000 tokens, so loading a single
+    IAM MCP server means 29 tools &times; ~2,000 tokens = <strong>about 58,000 tokens</strong>
+    consumed by tool definitions alone. On top of that, every tool call adds roughly
+    500 tokens for the JSON-RPC request/response round trip.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - Cost grows linearly with each server you add</span>
+    <p>
+      Loading all 792 tools from the 67 AWS MCP servers means 792 tools &times; ~2,000 tokens =
+      <strong>about 1,584,000 tokens (~1.5M)</strong> spent on tool definitions alone.
+      This cost is incurred on every conversation even if no tool is ever called.
+    </p>
+  </div>
+
+  <h3>2.2 Measured Results (Kiro-CLI)</h3>
+  <p>
+    The same task was measured with MCP servers enabled and disabled (Skills only).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Kiro-CLI measurements - 4 MCP servers ON vs OFF</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Credits</th><th scope="col">Token usage</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>4 MCP servers ON</td><td><span class="num">0.71</span></td><td>Tool schema load + responses</td></tr>
+        <tr><td>4 MCP servers OFF (Skills only)</td><td><span class="num"><strong>0.27</strong></span></td><td>Only the needed skill loaded</td></tr>
+        <tr><th scope="row">Savings</th><td><span class="num"><strong>62%</strong></span></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>2.3 The MCP Tool Forge Remedy</h3>
+  <p>
+    The remedy is <strong>extract once &rarr; convert to native code &rarr; run directly
+    without MCP</strong>. The MCP path travels Agent &harr; MCP Server &harr; AWS API on every
+    call, burning tokens each time, whereas the Skill path has the Agent execute boto3 / CLI
+    code straight against the AWS API - no extra tokens, no round-trip latency.
+  </p>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">MCP - tool definitions (every conversation)</span>
+        <span class="flow-val">2,000 tokens/tool</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">MCP - call round trip (every call)</span>
+        <span class="flow-val">500 tokens/call</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">Skill - direct code execution</span>
+        <span class="flow-val">0 tokens</span>
+      </div>
+    </div>
+    <figcaption>
+      Figure 1. Where each approach spends tokens. MCP bills repeatedly on both definitions
+      and calls; converted code consumes neither.
+    </figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. MCP approach vs Skill approach</caption>
+      <thead>
+        <tr><th scope="col">Aspect</th><th scope="col">MCP approach</th><th scope="col">Skill approach</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Tool definition tokens</th><td><span class="num">~2,000/tool</span> (every conversation)</td><td><strong>0</strong> (embedded in code)</td></tr>
+        <tr><th scope="row">Request/response tokens</th><td>JSON-RPC round trip</td><td><strong>0</strong> (direct execution)</td></tr>
+        <tr><th scope="row">Server dependency</th><td>Must always be running</td><td><strong>None</strong></td></tr>
+        <tr><th scope="row">Latency</th><td>MCP server round trip</td><td><strong>0</strong></td></tr>
+        <tr><th scope="row">Offline operation</th><td>Not possible</td><td><strong>Possible</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Token Economics - MCP vs Skills</h2>
+
+  <h3>3.1 How Skills Save Tokens</h3>
+  <p>
+    Skills use <strong>selective loading - only the skill that is needed gets loaded</strong>.
+    For a request like "show me the IAM users", the MCP approach loads the full schema of all
+    29 tools on the IAM server (58,000 tokens) and then uses exactly one of them. The Skill
+    approach loads a single SKILL.md from <span class="mono">aws-iam</span>
+    (about 3,000 tokens) and executes immediately.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. Initial load and per-call cost comparison</caption>
+      <thead>
+        <tr><th scope="col">Item</th><th scope="col">MCP (1 server)</th><th scope="col">MCP (all 67)</th><th scope="col">Skill</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Initial loading</th><td><span class="num">~58,000 tokens</span></td><td><span class="num">~1,584,000 tokens</span></td><td><span class="num"><strong>~3,000 tokens</strong></span></td></tr>
+        <tr><th scope="row">Per call</th><td><span class="num">~500 tokens/call</span></td><td><span class="num">~500 tokens/call</span></td><td><span class="num"><strong>0 tokens</strong></span></td></tr>
+        <tr><th scope="row">Server processes</th><td>1 required</td><td>67 required</td><td><strong>0</strong></td></tr>
+        <tr><th scope="row">Cold start</th><td><span class="num">2-5 s</span></td><td><span class="num">30 s+</span></td><td><span class="num"><strong>0 s</strong></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>3.2 Cost in Dollars (Claude Opus 4.6)</h3>
+  <p>
+    Converting at an input token price of $15 per 1M tokens, the per-conversation cost
+    difference looks like this.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. Input token cost per conversation - Claude Opus 4.6, $15/1M tokens</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Input tokens</th><th scope="col">Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1 MCP server / conversation</td><td><span class="num">58,000</span></td><td><span class="num">$0.87/conversation</span></td></tr>
+        <tr><td>10 MCP servers / conversation</td><td><span class="num">580,000</span></td><td><span class="num">$8.70/conversation</span></td></tr>
+        <tr><td><strong>1 Skill / conversation</strong></td><td><span class="num">3,000</span></td><td><span class="num"><strong>$0.045/conversation</strong></span></td></tr>
+        <tr><td><strong>All 9 Skills / conversation</strong></td><td><span class="num">27,000</span></td><td><span class="num"><strong>$0.41/conversation</strong></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="lead-def">
+    <b>Bottom line:</b> the Skill approach cuts token cost by more than 95% compared to MCP.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Installing Skills and the 9 AWS Skills</h2>
+
+  <div class="callout note">
+    <span class="callout-title">Note - The only prerequisite is credentials</span>
+    <p>
+      No MCP server installation, no Python packages, no Bedrock access.
+      AWS credentials are all you need to start using the skills.
+    </p>
+  </div>
+
+  <h3>4.1 Installation - Three Lines and Done</h3>
+  <p>
+    Clone the repository and copy into the skills directory - that is the whole install.
+    Claude Code uses <span class="mono">.claude/skills</span> and Kiro-CLI uses
+    <span class="mono">.kiro/skills</span>.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Project-local install - Claude Code / Kiro-CLI</div>
+    <pre><code><span class="cm"># Claude Code</span>
+git clone https://github.com/whchoi98/mcp-tool-forge.git
+mkdir -p .claude/skills
+cp -r mcp-tool-forge/.claude/skills/aws-* .claude/skills/
+
+<span class="cm"># Kiro-CLI</span>
+mkdir -p .kiro/skills
+cp -r mcp-tool-forge/.claude/skills/aws-* .kiro/skills/</code></pre>
+  </div>
+
+  <div class="codeblock">
+    <div class="code-caption">Global install - applies to every project</div>
+    <pre><code><span class="cm"># Claude Code</span>
+mkdir -p ~/.claude/skills
+cp -r mcp-tool-forge/.claude/skills/aws-* ~/.claude/skills/
+
+<span class="cm"># Kiro-CLI</span>
+mkdir -p ~/.kiro/skills
+cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
+  </div>
+
+  <p>
+    If you do not need the full set, copy only the skill directories you want
+    (e.g. install just <span class="mono">aws-iam</span>, <span class="mono">aws-cost</span>,
+    and <span class="mono">aws-network</span>). Once installed, skills activate automatically
+    from natural-language requests.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 5. Example requests and the skill they activate</caption>
+      <thead>
+        <tr><th scope="col">Example request</th><th scope="col">Activated skill</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>"Show me the IAM users"</td><td><span class="mono">aws-iam</span></td></tr>
+        <tr><td>"What is this month's cost?"</td><td><span class="mono">aws-cost</span></td></tr>
+        <tr><td>"Check the CloudWatch alarms"</td><td><span class="mono">aws-cloudwatch</span></td></tr>
+        <tr><td>"List the Lambda functions"</td><td><span class="mono">aws-infra</span></td></tr>
+        <tr><td>"List the SQS queues"</td><td><span class="mono">aws-messaging</span></td></tr>
+        <tr><td>"Check the VPC network"</td><td><span class="mono">aws-network</span></td></tr>
+        <tr><td>"List the Bedrock models"</td><td><span class="mono">aws-ai</span></td></tr>
+        <tr><td>"Query the DynamoDB tables"</td><td><span class="mono">aws-data</span></td></tr>
+        <tr><td>"Run a security audit"</td><td><span class="mono">aws-security</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>4.2 The Nine Skills</h3>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 6. The 9 AWS Skills - triggers and key operations</caption>
+      <thead>
+        <tr><th scope="col">Skill</th><th scope="col">Trigger</th><th scope="col">Key operations</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">aws-iam</th><td>"IAM users/roles/policies"</td><td><span class="mono">list_users, create_role, attach_policy, simulate_policy</span></td></tr>
+        <tr><th scope="row">aws-cloudwatch</th><td>"logs/metrics/alarms/audit"</td><td>Logs Insights, <span class="mono">get_metric_data, describe_alarms</span>, CloudTrail</td></tr>
+        <tr><th scope="row">aws-cost</th><td>"cost/billing/pricing"</td><td><span class="mono">get_cost_and_usage, cost_forecast</span>, pricing lookup</td></tr>
+        <tr><th scope="row">aws-infra</th><td>"resources/stacks/containers"</td><td>Cloud Control API, CloudFormation, EKS, ECS, Lambda</td></tr>
+        <tr><th scope="row">aws-messaging</th><td>"queues/topics/messages/workflows"</td><td>SNS publish, SQS send/receive, MQ, Step Functions</td></tr>
+        <tr><th scope="row">aws-network</th><td>"VPC/subnets/TGW/VPN"</td><td>VPC, Transit Gateway, Cloud WAN, Network Firewall, VPN, Flow Logs</td></tr>
+        <tr><th scope="row">aws-ai</th><td>"Bedrock/SageMaker/Kendra"</td><td>Bedrock Converse, Knowledge Bases, Agents, SageMaker, Kendra, Q Business</td></tr>
+        <tr><th scope="row">aws-data</th><td>"DB/cache/query"</td><td>DynamoDB, Aurora, Redshift, ElastiCache, Neptune</td></tr>
+        <tr><th scope="row">aws-security</th><td>"account/credentials/security audit"</td><td><span class="mono">get_caller_identity</span>, credential audit, MFA check</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>4.3 Coverage</h3>
+  <p>
+    The nine hand-written skills cover <strong>52 of the 67 MCP servers (78%)</strong>.
+    The remaining 15 were excluded from hand-written skills because they either do not map
+    to a specific AWS service or belong to a specialist domain.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 7. The 15 uncovered servers and why</caption>
+      <thead>
+        <tr><th scope="col">Category</th><th scope="col">Uncovered servers</th><th scope="col">Reason</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Core / Essential</td><td><span class="mono">aws-api, core-mcp, aws-mcp</span></td><td>MCP proxy/planning - not a specific service</td></tr>
+        <tr><td>Documentation</td><td><span class="mono">aws-documentation, aws-knowledge</span></td><td>Documentation search only - not a boto3/CLI target</td></tr>
+        <tr><td>Developer Tools</td><td><span class="mono">aws-diagram, aws-msk, code-doc-gen, frontend, git-repo-research, synthetic-data</span></td><td>Developer tooling (diagrams, Kafka, code documentation, etc.)</td></tr>
+        <tr><td>Healthcare</td><td><span class="mono">aws-healthomics, healthimaging, healthlake</span></td><td>Specialist healthcare services</td></tr>
+        <tr><td>Cost &amp; Operations</td><td><span class="mono">aws-managed-prometheus</span></td><td>Prometheus monitoring</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Uncovered servers are still usable</span>
+    <p>
+      Tools from the uncovered servers are still available through the
+      <strong>792 auto-generated individual skills</strong> produced by
+      <span class="mono">mcp-tool-forge convert</span>.
+    </p>
+  </div>
+
+  <h3>4.4 Test Results</h3>
+  <p>
+    All nine skills were tested against a real AWS account (Seoul region, IAM role
+    authentication) across 17 checks, passing <strong>17/17</strong>. Every skill runs on
+    standard AWS credentials alone.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 8. Skills test results - real AWS account, Seoul region</caption>
+      <thead>
+        <tr><th scope="col">#</th><th scope="col">Skill</th><th scope="col">Test</th><th scope="col">Result</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="num">1</span></td><td><span class="mono">aws-security</span></td><td><span class="mono">sts get-caller-identity</span></td><td>OK</td></tr>
+        <tr><td><span class="num">2</span></td><td><span class="mono">aws-iam</span></td><td><span class="mono">list-users</span></td><td>OK (2 users)</td></tr>
+        <tr><td><span class="num">3</span></td><td><span class="mono">aws-iam</span></td><td><span class="mono">list-roles</span></td><td>OK (13 roles)</td></tr>
+        <tr><td><span class="num">4</span></td><td><span class="mono">aws-cloudwatch</span></td><td><span class="mono">describe-log-groups</span></td><td>OK</td></tr>
+        <tr><td><span class="num">5</span></td><td><span class="mono">aws-cloudwatch</span></td><td><span class="mono">describe-alarms</span></td><td>OK</td></tr>
+        <tr><td><span class="num">6</span></td><td><span class="mono">aws-infra</span></td><td>Cloud Control EC2</td><td>OK</td></tr>
+        <tr><td><span class="num">7</span></td><td><span class="mono">aws-infra</span></td><td>Cloud Control S3</td><td>OK (1 bucket)</td></tr>
+        <tr><td><span class="num">8</span></td><td><span class="mono">aws-infra</span></td><td>CloudFormation stacks</td><td>OK</td></tr>
+        <tr><td><span class="num">9</span></td><td><span class="mono">aws-cost</span></td><td><span class="mono">get-cost-and-usage</span></td><td>OK ($1,093)</td></tr>
+        <tr><td><span class="num">10</span></td><td><span class="mono">aws-cost</span></td><td>Cost by service (top 5)</td><td>OK</td></tr>
+        <tr><td><span class="num">11</span></td><td><span class="mono">aws-security</span></td><td>MFA check (boto3)</td><td>OK (2 NO MFA)</td></tr>
+        <tr><td><span class="num">12</span></td><td><span class="mono">aws-security</span></td><td>Access key age (boto3)</td><td>OK (23 days)</td></tr>
+        <tr><td><span class="num">13</span></td><td><span class="mono">aws-security</span></td><td>Account summary (boto3)</td><td>OK (Root MFA: NO)</td></tr>
+        <tr><td><span class="num">14</span></td><td><span class="mono">aws-messaging</span></td><td>SNS topics</td><td>OK</td></tr>
+        <tr><td><span class="num">15</span></td><td><span class="mono">aws-messaging</span></td><td>SQS queues</td><td>OK</td></tr>
+        <tr><td><span class="num">16</span></td><td><span class="mono">aws-data</span></td><td>DynamoDB tables</td><td>OK</td></tr>
+        <tr><td><span class="num">17</span></td><td><span class="mono">aws-infra</span></td><td>Lambda functions</td><td>OK</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Architecture - 3-Stage Conversion Pipeline</h2>
+  <p>
+    Conversion runs as a three-stage pipeline - schema extraction, static mapping, and
+    LLM inference - and finishes with Jinja2 generators emitting code in the five formats.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  MCP["MCP Server (stdio)"] -->|"tools/list - MCP SDK"| CACHE["Schema Cache (~/.mcp-tool-forge)"]
+  CACHE --> STATIC["Phase 2. Static Mapping - YAML Mappings"]
+  STATIC -->|"Unmapped tools"| LLM["Phase 3. LLM Inference - Bedrock Claude Opus 4.6"]
+  STATIC --> GEN["Code Generation - Jinja2 Generators"]
+  LLM --> GEN
+  GEN --> OUT["boto3 / cli / schema / agentcore / skill"]
+    </div>
+    <figcaption>
+      Figure 2. The mcp-tool-forge conversion pipeline. Only tools that static mapping cannot
+      resolve go to the LLM inference stage, so LLM calls are limited to unmapped tools.
+    </figcaption>
+  </figure>
+
+  <ol class="plain">
+    <li><strong>Extract</strong> - connect to the server with the MCP SDK <span class="mono">stdio_client</span> and pull schemas via <span class="mono">tools/list</span>. Results are cached in <span class="mono">~/.mcp-tool-forge/cache/</span>.</li>
+    <li><strong>Static Map</strong> - look up known mappings in <span class="mono">mappings/*.yaml</span> (IAM 29 + DynamoDB 6 = 35 mappings).</li>
+    <li><strong>LLM Map</strong> - send unmapped tools to Bedrock Claude Opus 4.6 to infer boto3 mappings. Enabled with the <span class="mono">--llm-assist</span> flag.</li>
+  </ol>
+
+  <h3>5.1 Multi-Profile Support</h3>
+  <p>
+    The <span class="mono">--aws-profile</span> option bakes an AWS profile into the generated
+    boto3 code. This is handy when hopping between accounts in an AWS Organizations + SSO
+    setup, and the profile can still be overridden at call time.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Generated boto3 code - effect of the --aws-profile option</div>
+    <pre><code><span class="cm"># Generated without --aws-profile (default)</span>
+def list_users(profile_name: str | None = None, **kwargs) -> dict:
+    session = boto3.Session(profile_name=profile_name)
+    client = session.client('iam')
+    ...
+
+<span class="cm"># Generated with --aws-profile prod-account</span>
+def list_users(profile_name: str | None = "prod-account", **kwargs) -> dict:
+    session = boto3.Session(profile_name=profile_name)
+    client = session.client('iam')
+    ...
+
+<span class="cm"># Profile can be overridden at call time</span>
+list_users()                                  <span class="cm"># uses the default profile</span>
+list_users(profile_name="staging-account")    <span class="cm"># switch to another account</span></code></pre>
+  </div>
+
+  <h3>5.2 Extraction Results</h3>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 9. Overall extraction metrics</caption>
+      <thead>
+        <tr><th scope="col">Metric</th><th scope="col">Value</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Registered servers</th><td><span class="num">67</span></td></tr>
+        <tr><th scope="row">Connected</th><td><span class="num">55 / 67 (82%)</span></td></tr>
+        <tr><th scope="row">Extracted tools</th><td><span class="num">792</span></td></tr>
+        <tr><th scope="row">Generated boto3 functions</th><td><span class="num">480+</span></td></tr>
+        <tr><th scope="row">Generated skills</th><td><span class="num">792</span></td></tr>
+        <tr><th scope="row">Syntax pass rate</th><td><span class="num">91.4%</span> (after auto-fix)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Output Formats and Supported Servers</h2>
+  <p>
+    Conversion produces five formats. The same tool ends up in a different format depending
+    on where it will run.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 10. The five output formats</caption>
+      <thead>
+        <tr><th scope="col">Format</th><th scope="col">File</th><th scope="col">Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">boto3 (.py)</th><td><span class="mono">output/*/boto3/tools.py</span></td><td>Called directly from AgentCore Gateway Lambda</td></tr>
+        <tr><th scope="row">AWS CLI (.sh)</th><td><span class="mono">output/*/cli/tools.sh</span></td><td>Shell-based agents, automation scripts</td></tr>
+        <tr><th scope="row">Schema (.json)</th><td><span class="mono">output/*/schema/tools.json</span></td><td>OpenAPI-compatible tool definitions</td></tr>
+        <tr><th scope="row">AgentCore (.json)</th><td><span class="mono">output/*/agentcore/tool_config.json</span></td><td>Bedrock AgentCore Gateway toolSpec</td></tr>
+        <tr><th scope="row">Skill (.md)</th><td><span class="mono">output/*/skill/*.md</span></td><td>Claude Code / Kiro-CLI skills</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    A total of 67 MCP servers are registered as conversion targets, distributed across
+    categories as follows.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 11. The 67 supported servers - category distribution</caption>
+      <thead>
+        <tr><th scope="col">Category</th><th scope="col">Count</th><th scope="col">Key servers</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Data &amp; Analytics</td><td><span class="num">18</span></td><td>DynamoDB, Aurora, Redshift, ElastiCache, Neptune</td></tr>
+        <tr><td>Infrastructure &amp; Deployment</td><td><span class="num">11</span></td><td>EKS, ECS, CDK, CloudFormation, Terraform</td></tr>
+        <tr><td>AI &amp; Machine Learning</td><td><span class="num">10</span></td><td>Bedrock, SageMaker, Kendra, Nova Canvas</td></tr>
+        <tr><td>Cost &amp; Operations</td><td><span class="num">8</span></td><td>CloudWatch, CloudTrail, Cost Explorer</td></tr>
+        <tr><td>Developer Tools &amp; Support</td><td><span class="num">7</span></td><td>IAM, MSK, Diagram, Code Doc Gen</td></tr>
+        <tr><td>Integration &amp; Messaging</td><td><span class="num">5</span></td><td>SNS/SQS, MQ, Step Functions, Location</td></tr>
+        <tr><td>Healthcare &amp; Lifesciences</td><td><span class="num">3</span></td><td>HealthOmics, HealthImaging, HealthLake</td></tr>
+        <tr><td>Core</td><td><span class="num">2</span></td><td>AWS API, Core MCP</td></tr>
+        <tr><td>Documentation</td><td><span class="num">2</span></td><td>AWS Documentation, Knowledge</td></tr>
+        <tr><td>Essential Setup</td><td><span class="num">1</span></td><td>AWS MCP (unified proxy)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Quick Start - The CLI Tool</h2>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Skip this section if you only need the Skills</span>
+    <p>
+      The installation in chapter 4 is all you need to use the nine AWS Skills.
+      This section only matters if you want to convert MCP servers yourself.
+    </p>
+  </div>
+
+  <div class="codeblock">
+    <div class="code-caption">mcp-tool-forge CLI - from install to skill registration</div>
+    <pre><code><span class="cm"># Install</span>
+pip install -e ".[dev]"
+
+<span class="cm"># List servers</span>
+mcp-tool-forge list-servers
+mcp-tool-forge list-servers --category "Data &amp; Analytics"
+
+<span class="cm"># List tools - connects to the live MCP server</span>
+mcp-tool-forge list-tools --server aws-iam-mcp-server
+
+<span class="cm"># Convert to all formats</span>
+mcp-tool-forge convert --server aws-iam-mcp-server --output all
+
+<span class="cm"># LLM-assisted mapping</span>
+mcp-tool-forge convert --server amazon-cloudwatch-mcp-server --output all --llm-assist
+
+<span class="cm"># Multi-profile support</span>
+mcp-tool-forge convert --server aws-iam-mcp-server --output boto3 --aws-profile prod-account
+
+<span class="cm"># Register skills with Claude Code</span>
+mcp-tool-forge register --server aws-iam-mcp-server -d output
+
+<span class="cm"># Register skills with Kiro-CLI</span>
+mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</code></pre>
+  </div>
+
+  <h3>7.1 Project Structure</h3>
+
+  <div class="codeblock">
+    <div class="code-caption">mcp-tool-forge/ - repository layout</div>
+    <pre><code>mcp-tool-forge/
+├── .claude/skills/             <span class="cm"># 9 AWS Skills (portable)</span>
+│   ├── aws-iam/                <span class="cm"># IAM users, roles, policies</span>
+│   ├── aws-cloudwatch/         <span class="cm"># Logs, metrics, alarms, CloudTrail</span>
+│   ├── aws-cost/               <span class="cm"># Cost Explorer, billing, pricing</span>
+│   ├── aws-infra/              <span class="cm"># CloudFormation, EKS, ECS, Lambda</span>
+│   ├── aws-messaging/          <span class="cm"># SNS, SQS, MQ, Step Functions</span>
+│   ├── aws-network/            <span class="cm"># VPC, Transit Gateway, Cloud WAN, VPN</span>
+│   ├── aws-ai/                 <span class="cm"># Bedrock, SageMaker, Kendra, Q Business</span>
+│   ├── aws-data/               <span class="cm"># DynamoDB, Aurora, Redshift, Neptune</span>
+│   └── aws-security/           <span class="cm"># Account info, security audit</span>
+├── src/mcp_to_cli/
+│   ├── cli.py                  <span class="cm"># Click CLI entry point</span>
+│   ├── pipeline.py             <span class="cm"># 3-stage orchestrator</span>
+│   ├── connector.py            <span class="cm"># MCP SDK stdio_client connection</span>
+│   ├── registry.yaml           <span class="cm"># Configuration for 67 servers</span>
+│   ├── llm_mapper.py           <span class="cm"># Bedrock Claude Opus 4.6 mapping</span>
+│   ├── validator.py            <span class="cm"># Generated-code validation/auto-fix</span>
+│   ├── generators/             <span class="cm"># 5 output generators</span>
+│   ├── mappings/               <span class="cm"># Static YAML mappings (IAM, DynamoDB)</span>
+│   └── templates/              <span class="cm"># 6 Jinja2 templates</span>
+├── tests/                      <span class="cm"># 38 pytest tests</span>
+└── docs/                       <span class="cm"># Architecture and design docs</span></code></pre>
+  </div>
+
+  <h3>7.2 Requirements</h3>
+  <p>
+    The Skills-only path and the full CLI path have different requirements.
+    The Skills path needs nothing beyond AWS credentials.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 12. Requirements - Skills only vs full CLI</caption>
+      <thead>
+        <tr><th scope="col">Item</th><th scope="col">Skills only</th><th scope="col">Full CLI</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Python &gt;= 3.11</th><td>Not required</td><td>Required</td></tr>
+        <tr><th scope="row">AWS credentials</th><td>Required</td><td>Required</td></tr>
+        <tr><th scope="row">uvx / npx</th><td>Not required</td><td>Required (to run MCP servers)</td></tr>
+        <tr><th scope="row">Bedrock access</th><td>Not required</td><td>Optional (for LLM mapping)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="mcp-tool-forge-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary Source</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/mcp-tool-forge">GitHub: whchoi98/mcp-tool-forge</a>
+      - whchoi98 (2026-03-19)
+      <span class="url">https://github.com/whchoi98/mcp-tool-forge</span>
+    </li>
+  </ul>
+
+  <h3>Official Documentation</h3>
+  <ul>
+    <li>
+      <a href="https://modelcontextprotocol.io/">Model Context Protocol (MCP) Specification</a>
+      <span class="url">https://modelcontextprotocol.io/</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html">Amazon Bedrock AgentCore Documentation</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/agentcore.html</span>
+    </li>
+    <li>
+      <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code Documentation</a>
+      <span class="url">https://docs.anthropic.com/en/docs/claude-code</span>
+    </li>
+    <li>
+      <a href="https://kiro.dev/">Kiro CLI Official Site</a>
+      <span class="url">https://kiro.dev/</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-03-19.
+    This document is a technical analysis based on the GitHub whchoi98/mcp-tool-forge
+    repository. Token figures, cost conversions, and server/tool counts reflect the time of
+    writing; check the repository and official documentation above for current values.
+  </p>
+</footer>
+
+</div>
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO/EN 두 페이지에 버튼이 하나씩 있으므로 전부 바인딩한다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var en = btn.closest('.page[data-lang="en"]');
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트 발행. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    });
+  });
+
+  /* 새로 보이는 페이지의 Mermaid 다이어그램을 재렌더하기 위해 themechange 를 함께 발행한다. */
+  document.addEventListener("langchange", function () {
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { reason: "langchange" } }));
   });
 })();
 </script>

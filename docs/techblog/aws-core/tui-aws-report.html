@@ -23,6 +23,16 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. localStorage 와 ?lang= 파라미터를 읽고 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") saved = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", saved === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -89,6 +99,10 @@ body {
   margin: 0 auto;
   padding: 48px 28px 72px;
 }
+
+/* ---------- Language toggle ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
 a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 a:hover { color: var(--navy); }
@@ -402,7 +416,7 @@ tbody th {
 }
 
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -526,7 +540,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +563,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -928,6 +943,8 @@ tokenCache[key] = &amp;cachedToken{
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="tui-aws-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -992,27 +1009,530 @@ tokenCache[key] = &amp;cachedToken{
 
 </div>
 
+<!-- ===================================================== -->
+<!-- =================== English page ==================== -->
+<!-- ===================================================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AWS Core / Tool Deep Dive</p>
+  <h1>tui-aws: An AWS Infrastructure Terminal UI with 22 Views and a Local Connectivity Checker</h1>
+  <p class="subtitle">
+    A code-level analysis of a single-binary Go TUI that replaces AWS console tab hopping and CLI command
+    memorization with a single terminal. In particular, we cover how the connectivity checker evaluates
+    SG / Route / NACL rules locally in five steps, and where its limits are.
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The subject of this analysis is tui-aws v0.1.0 (released 2026-04-05, Go 1.25, MIT license).</p>
+    <p>Verification is based on the repository code; the key files are <span class="mono">internal/ui/tab_troubleshoot/checker.go</span> and <span class="mono">internal/aws/k8s.go</span>.</p>
+    <p>Primary sources are the README, CHANGELOG, and ADR documents in the GitHub repository whchoi98/tui-aws.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>tui-aws is a single-binary Go TUI that unifies EC2, VPC networking, containers, serverless, and security into <strong>22 tabs</strong>. Its goal is to replace console screen hopping and CLI command memorization with a single terminal.</li>
+    <li>The flagship connectivity checker reads SG, Route, and NACL data once, then runs <strong>all five evaluation steps locally</strong>, printing the blocking rule and a fix suggestion. The README's "without AWS API calls" refers to the evaluation phase; collecting the check data takes 4 Describe-family API calls.</li>
+    <li>SSM sessions and ECS Exec suspend the TUI and delegate to the AWS CLI, while EKS calls the K8s REST API directly without kubectl and <strong>caches auth tokens for 14 minutes</strong>.</li>
+    <li>If you troubleshoot networking frequently, this is a first-choice tool for cutting console round trips. Note, however, that the checker does not evaluate SG-reference rules or NACL return paths, so precise verdicts should be cross-checked with Reachability Analyzer.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem - the cost of console hopping and CLI memorization</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How it works - single-binary TUI architecture</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Deep dive - the 5-step local connectivity checker</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Deep dive - session delegation and direct EKS calls</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Overview of the 22 views</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Real-world workflow and IAM permissions</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations and conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem - the cost of console hopping and CLI memorization</h2>
+  <p>
+    Answering a single question like "why can't instance A reach B" takes at least four screens in the AWS console.
+    You check the security group on the EC2 instance detail page, switch to the VPC console to find the route table,
+    then cross-reference subnet associations on the NACL screen.
+    Each screen is organized per resource, so there is <strong>no way to see the entire path the traffic must traverse on one screen.</strong>
+  </p>
+  <p>
+    Dropping down to the CLI only changes the shape of the cost. You have to combine <span class="mono">aws ec2 describe-security-groups</span>,
+    <span class="mono">describe-route-tables</span>, and <span class="mono">describe-network-acls</span> with
+    <span class="mono">--filters</span> syntax, and eyeballing the JSON output is as slow as console hopping.
+    Shell access is yet another problem: to avoid SSH key management you must look up and type the
+    <span class="mono">aws ssm start-session</span> command and the instance ID every time.
+  </p>
+  <p>
+    tui-aws absorbs this recurring cost into a single terminal. Queries are made directly with aws-sdk-go-v2,
+    shell access and ECS Exec are delegated to the AWS CLI, and network path verdicts are handled by a local evaluator.
+    As of v0.1.0 it supports 4 platforms - amd64 / arm64 on macOS and Linux - and the TUI framework is Bubble Tea v2.
+  </p>
+  <div class="callout note">
+    <span class="callout-title">Note - project lineage</span>
+    <p>
+      The project started as tui-ssm, a tool dedicated to SSM session management. According to ADR-005, the friction of
+      bouncing between the TUI and the console directly motivated the expansion, moving through the tab architecture
+      refactor (Phase 0), VPC / networking (Phases 1-2), and the connectivity checker (Phase 3) to reach the current
+      22-tab layout. The configuration directory also migrated from <span class="mono">~/.tui-ssm/</span> to
+      <span class="mono">~/.tui-aws/</span>, and <span class="mono">main.go</span> migrates it automatically on first run.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How it works - single-binary TUI architecture</h2>
+
+  <h3>2.1 RootModel and 22 tab packages</h3>
+  <p>
+    The structure follows Bubble Tea's Elm architecture directly. <span class="mono">RootModel</span> owns the tab bar
+    and global keys, and each of the 22 tabs is an independent package implementing the <span class="mono">TabModel</span> interface.
+    The tab list is defined in the <span class="mono">TabID</span> enum in <span class="mono">internal/ui/shared/tab.go</span>,
+    with 22 entries from <span class="mono">TabEC2</span> to <span class="mono">TabCheck</span>, so the README's
+    "22 integrated tabs" claim matches the code.
+    The repository totals 115 Go files and 23,091 lines (measured directly on 2026-08-09, tests included).
+  </p>
+  <p>
+    All AWS calls converge on a single client factory in <span class="mono">internal/aws/session.go</span>.
+    The <span class="mono">Clients</span> struct creates <strong>18 SDK clients</strong> at once: EC2, SSM, STS, ELBv2,
+    Classic ELB, ASG, CloudWatch, CloudWatch Logs, IAM, CloudFront, WAFv2, ACM, Route 53, RDS, S3, ECS, EKS, and Lambda.
+    Each tab lazy-loads its data on first entry, and ADR-005 records the binary size of this configuration at about 25MB.
+  </p>
+
+  <h3>2.2 Profile / region switching and cache isolation</h3>
+  <p>
+    The <span class="mono">p</span> key opens a picker listing the named profiles from <span class="mono">~/.aws/credentials</span>
+    and <span class="mono">~/.aws/config</span> plus the EC2 instance role, and the <span class="mono">r</span> key opens a region picker.
+    Switching reloads the current tab's data, and tab caches are keyed as <span class="mono">profile::region</span>,
+    so data from different profiles or regions never mixes on screen.
+    Credentials are validated with <span class="mono">sts:GetCallerIdentity</span> before use, falling back to the instance role on failure.
+  </p>
+  <p>
+    Search and navigation are shared across all tabs. <span class="mono">/</span> searches by name, ID, or IP,
+    and from the EC2 tab a single keystroke jumps to the instance's VPC, Subnet, Route Table, or Security Group tab.
+    This cross-resource navigation replaces the URL hopping you would do in the console.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Deep dive - the 5-step local connectivity checker</h2>
+  <p>
+    In the Check tab, you specify Source / Destination instances, a protocol (tcp / udp / all), and a port,
+    and the <span class="mono">CheckConnectivity</span> function runs a five-step evaluation.
+    The function is pure - it takes route tables, security groups, NACLs, and subnet lists as arguments -
+    so <strong>the evaluation itself completes instantly with no network round trips</strong>. The data it needs is read
+    at check time with 4 Describe-family calls: <span class="mono">DescribeRouteTables</span>, <span class="mono">DescribeSecurityGroups</span>,
+    <span class="mono">DescribeNetworkAcls</span>, and <span class="mono">DescribeSubnets</span>.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - what "without AWS API calls" precisely means</span>
+    <p>
+      The README describes the feature as "verifying SG + Route + NACL rules without AWS API calls".
+      To be precise about what the code does: the rule evaluation logic runs locally, while the data being evaluated
+      is collected via the Describe calls above. The practical difference is that, unlike Reachability Analyzer,
+      it does not create an analysis resource and incur cost for every check.
+    </p>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  L["Load check data - 4 Describe calls"] --> S1["Step 1 Source SG Outbound"]
+  S1 -->|"pass"| S2["Step 2 Source NACL Outbound"]
+  S2 -->|"pass"| S3["Step 3 Source Route"]
+  S3 -->|"pass"| S4["Step 4 Dest NACL Inbound"]
+  S4 -->|"pass"| S5["Step 5 Dest SG Inbound"]
+  S5 -->|"pass"| R["Reachable"]
+  S1 -->|"fail"| B["BLOCKED - prints blocking rule and fix suggestion, later steps Skipped"]
+  S2 -->|"fail"| B
+  S3 -->|"fail"| B
+  S4 -->|"fail"| B
+  S5 -->|"fail"| B
+    </div>
+    <figcaption>
+      Figure 1. Connectivity check flow. If any step fails, the remaining steps are marked Skipped, and the blocking
+      point plus a fix suggestion are recorded in the result.
+    </figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 5 connectivity check steps (per checker.go)</caption>
+      <thead>
+        <tr><th scope="col">Step</th><th scope="col">What it checks</th><th scope="col">Fix suggestion on failure</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">1. Source SG Outbound</th><td>Search the outbound rules of the SGs attached to the source instance for one that allows the protocol, port, and destination IP all at once</td><td>Add a <span class="mono">/32</span> outbound rule for the destination to the source SG</td></tr>
+        <tr><th scope="row">2. Source NACL Outbound</th><td>Evaluate the outbound rules of the NACL associated with the source subnet in ascending rule-number order; the first match's ALLOW / DENY decides</td><td>Add an outbound NACL allow rule</td></tr>
+        <tr><th scope="row">3. Source Route</th><td>In the source subnet's route table (explicit association first, main otherwise), search for an active route covering the destination IP</td><td>Add a route to the source route table</td></tr>
+        <tr><th scope="row">4. Dest NACL Inbound</th><td>Evaluate the destination subnet NACL's inbound rules the same way</td><td>Add an inbound NACL allow rule</td></tr>
+        <tr><th scope="row">5. Dest SG Inbound</th><td>Search the destination instance SG's inbound rules for one allowing the source IP</td><td>Add a <span class="mono">/32</span> inbound rule for the source to the destination SG</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The point of this checker is that the step order reproduces the order a real packet travels.
+    NACL evaluation sorts rules in ascending number order and takes the first matching rule's ALLOW / DENY as the verdict,
+    which matches AWS's first-match NACL semantics. Route evaluation first checks whether the <span class="mono">local</span>
+    route's VPC CIDR covers the destination, and other routes count only when their state is <span class="mono">active</span>,
+    so cross-VPC paths through a TGW or peering are also filtered at the route step.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Example Check tab output (excerpt from the README)</div>
+    <pre><code>Connectivity: web-server → db-primary  TCP/443
+══════════════════════════════════════════════
+
+✓ Source SG Outbound     sg-0abc: TCP 443 → 0.0.0.0/0 ALLOW
+✓ Source NACL Outbound   acl-xxx: Rule 100 All ALLOW
+✓ Source Route           rtb-xxx: 10.2.0.0/16 → tgw-xxx (active)
+✗ Dest SG Inbound        sg-0def: TCP 443 ← 10.1.0.0/16 NOT FOUND
+
+Result: ✗ BLOCKED at Destination SG Inbound
+Suggestion: Add inbound rule TCP 443 from 10.1.88.66/32</code></pre>
+  </div>
+
+  <p>
+    Separate from the checker, the EC2 tab has a network path visualization. Selecting Network Path from the instance
+    action menu renders the instance's VPC, Subnet, Route Table, Security Group, and NACL in a single scrollable overlay.
+    Where the checker gives "a verdict between two endpoints", this overlay is a read-only view of
+    "one instance's entire network context".
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - the R key is not a local check</span>
+    <p>
+      Pressing <span class="mono">R</span> in the Check tab runs AWS Reachability Analyzer.
+      This path actually calls <span class="mono">CreateNetworkInsightsPath</span> and the analysis-run APIs, so it can
+      incur cost and requires 4 additional IAM permissions. tui-aws shows a cost confirmation prompt before running it.
+    </p>
+  </div>
+
+  <p class="lead-def">
+    <b>Principle:</b> the connectivity checker locally reproduces AWS's evaluation rules (SG allow search, NACL first-match,
+    existence of an active route covering the destination IP - first match in list order, not longest-prefix match),
+    and the accuracy of its verdict cannot exceed the scope of the rules it reproduces.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Deep dive - session delegation and direct EKS calls</h2>
+
+  <h3>4.1 SSM sessions and ECS Exec: suspend the TUI, hand over to the CLI</h3>
+  <p>
+    tui-aws does not implement the SSM session protocol itself. When you select SSM Session in the EC2 tab,
+    <span class="mono">EC2Model</span> emits an <span class="mono">SSMExecRequest</span> message,
+    which <span class="mono">RootModel</span> intercepts and runs <span class="mono">aws ssm start-session</span>
+    via <span class="mono">tea.Exec</span>. At that moment the TUI suspends, terminal control passes to the
+    AWS CLI and the Session Manager Plugin, and the TUI resumes when the session ends.
+    ECS Exec delegates <span class="mono">aws ecs execute-command</span> through the same path.
+  </p>
+  <p>
+    The price of delegation is terminal state pollution. SSM sessions sometimes exit leaving raw mode disturbed,
+    so tui-aws runs <span class="mono">stty sane</span> and a stdin flush after each session.
+    Since <span class="mono">TCIFLUSH</span> for the stdin flush is Linux-only, the code splits
+    <span class="mono">flush_linux.go</span> from a no-op <span class="mono">flush_other.go</span> using Go build tags (ADR-002).
+    This is why AWS CLI v2 and the Session Manager Plugin are <strong>hard runtime dependencies</strong>, not build dependencies.
+  </p>
+
+  <h3>4.2 EKS: direct K8s REST API calls without kubectl</h3>
+  <p>
+    The EKS tab shows Pods, Deployments, Services, Nodes, and Pod logs, yet uses neither kubectl nor client-go.
+    ADR-001's judgment was that pulling in client-go's massive dependency tree for a handful of REST calls would grow
+    the binary from about 25MB to over 40MB; instead it calls the EKS API server directly with <span class="mono">net/http</span>.
+    TLS is verified against the cluster CA certificate from the <span class="mono">DescribeCluster</span> response.
+  </p>
+  <p>
+    Auth tokens are obtained by running <span class="mono">aws eks get-token</span> via <span class="mono">os/exec</span>,
+    and are <strong>cached for 14 minutes</strong> keyed by cluster + profile + region. The token itself expires at 15 minutes,
+    so the value leaves a 1-minute margin. The cache exists so that refreshing the Pod list while hopping between tabs
+    does not spawn an external process every time.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">internal/aws/k8s.go - token cache (excerpt)</div>
+    <pre><code>// GetEKSToken obtains a bearer token for K8s API authentication via
+// `aws eks get-token`. The token is cached for 14 minutes (expires at 15).
+tokenCache[key] = &amp;cachedToken{
+    token:   resp.Status.Token,
+    expires: time.Now().Add(14 * time.Minute),
+}</code></pre>
+  </div>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Overview of the 22 views</h2>
+  <p>
+    The 22 tabs are arranged starting with compute, then networking, edge, data, containers / serverless, and operations.
+    The last tab, Check, is the connectivity checker. The table below groups them by the display order of
+    <span class="mono">AllTabs()</span>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. The 22 tabs by category (AllTabs display order)</caption>
+      <thead>
+        <tr><th scope="col">Area</th><th scope="col">Tabs</th><th scope="col">Key features</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Compute (3)</th><td>EC2, ASG, EBS</td><td>SSM sessions, port forwarding, Network Path, favorites, scaling policies, volume encryption status</td></tr>
+        <tr><th scope="row">VPC networking (6)</th><td>VPC, Subnet, Routes, SG, VPCE, TGW</td><td>IGW / NAT / Peering / EIP details, ENI viewer, route entries, SG and NACL dual mode (toggle with <span class="mono">f</span>), TGW attachments and routes</td></tr>
+        <tr><th scope="row">Edge / DNS (4)</th><td>ELB, CF, WAF, ACM</td><td>ALB / NLB / CLB target group details, CloudFront distributions, WAFv2 rules and associated resources, certificate expiry and SANs</td></tr>
+        <tr><th scope="row">DNS / data (3)</th><td>R53, RDS, S3</td><td>Hosted zone records (loaded on demand), DB instance endpoints, bucket versioning / encryption / public access</td></tr>
+        <tr><th scope="row">Containers / serverless (3)</th><td>ECS, EKS, Lambda</td><td>Clusters &gt; Services &gt; Tasks &gt; Containers &gt; Logs &gt; ECS Exec drill-down, direct K8s resource queries, function runtime and VPC config</td></tr>
+        <tr><th scope="row">Operations (3)</th><td>CW, IAM, Check</td><td>CloudWatch alarm states, IAM users / groups / policies, connectivity checker + Reachability Analyzer</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Unlike the other tabs, ECS and EKS are hierarchical drill-downs. ECS goes all the way down to CloudWatch Logs viewing
+    and an interactive shell (ECS Exec) at the container level, and the choice to read container logs from CloudWatch Logs
+    rather than the ECS API is recorded in ADR-006.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Real-world workflow and IAM permissions</h2>
+  <p>
+    A typical troubleshooting flow goes like this. Set the target account profile with <span class="mono">p</span> and
+    the region with <span class="mono">r</span>, then search for the problem instance with <span class="mono">/</span> in the EC2 tab.
+    Skim the instance's network context with the Network Path overlay, then run the 5-step check against the peer instance
+    in the Check tab. When a blocking rule appears, apply the suggested <span class="mono">/32</span> rule, and finally
+    connect over an SSM session from the same screen to verify at the application level. For RDS or an internal web
+    server, tunnel a local port with SSM port forwarding.
+  </p>
+  <p>
+    Favorites (<span class="mono">F</span>) and session history are stored under <span class="mono">~/.tui-aws/</span>
+    in <span class="mono">favorites.json</span> and <span class="mono">history.json</span>.
+    History is a FIFO capped at 100 entries, and favorites are keyed by instance ID + profile + region,
+    so they never mix even when you move between accounts.
+  </p>
+  <p>
+    Permissions come in three tiers by usage. If you only use EC2 viewing and SSM sessions, 7 actions suffice:
+    3 <span class="mono">ec2:Describe</span> actions, the SSM session actions, and <span class="mono">sts:GetCallerIdentity</span>.
+    Using all 22 tabs requires the full policy in the README, and Reachability Analyzer demands 4 additional actions.
+    The fact that most tabs run on <strong>read-only</strong> Describe / List permissions keeps the adoption barrier low.
+  </p>
+  <div class="callout note">
+    <span class="callout-title">Note - missing permissions are isolated per tab</span>
+    <p>
+      If a tab hits AccessDenied, only that tab shows an error while the rest keep working.
+      The structure supports starting with minimal permissions and incrementally granting only the tabs you need.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations and conclusion</h2>
+
+  <h3>7.1 The connectivity checker's verdict scope</h3>
+  <p>
+    The checker's limits are visible directly in the code. First, the CIDR matching function <span class="mono">cidrContains</span>
+    treats rules whose source starts with <span class="mono">sg-</span> or <span class="mono">pl-</span>
+    (SG references, prefix lists) as non-matching. It follows that traffic actually allowed by an SG-reference rule
+    can be judged blocked by the check. Second, NACLs are stateless, yet the check only looks at the request direction
+    (source outbound, destination inbound) and does not evaluate the return path over ephemeral ports.
+    Third, routes are checked only from source to destination; the destination subnet's return route is not verified.
+    The check targets are also limited to pairs of EC2 instances.
+  </p>
+  <div class="callout warn">
+    <span class="callout-title">Caution - a passing check does not guarantee working traffic</span>
+    <p>
+      Because of the unevaluated areas above (SG-reference rules, NACL return paths, return routes), the local check's
+      verdict can disagree with actual traffic. The intended usage order of this tool is to narrow candidates with the
+      local check, and when the verdict differs from observed behavior, cross-check with Reachability Analyzer
+      via <span class="mono">R</span>.
+    </p>
+  </div>
+
+  <h3>7.2 Tool-level limitations</h3>
+  <ul class="plain">
+    <li>It is a read-oriented tool. Write operations are limited to session access and running Reachability Analyzer; it does not create or modify resources.</li>
+    <li>SSM sessions and ECS Exec are delegated to AWS CLI v2 + Session Manager Plugin, so those features do not work where the two tools are absent.</li>
+    <li>As ADR-005 itself records, every added SDK client grows both the binary size (about 25MB) and the maintenance surface.</li>
+  </ul>
+
+  <h3>7.3 Conclusion</h3>
+  <p>
+    The value of tui-aws lies less in any single feature than in the arrangement. The viewing (22 tabs), the verdict
+    (local checker), and the post-fix verification (SSM / ECS Exec access) needed for network troubleshooting all sit
+    within a few keystrokes of one terminal, so work that would scatter across console screens becomes a single flow.
+    For operators who look at VPCs, TGWs, and SGs / NACLs often, the local checker alone justifies an evaluation.
+    Reachability Analyzer complements the checker's unevaluated areas.
+  </p>
+  <p>
+    A sister tool by the same maintainer is ecs9s, an ECS-focused TUI. Its README credits k9s, e1s, and tui-aws as
+    inspirations, and it goes deeper into ECS operations such as task definitions and metrics.
+    The roles split cleanly: tui-aws for infrastructure-wide coverage and connectivity checking, ecs9s when ECS
+    operations are your main screen.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="tui-aws-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/tui-aws">tui-aws GitHub repository</a>
+      - whchoi98, README / CHANGELOG / ADR documents (v0.1.0, 2026-04-05)
+      <span class="url">https://github.com/whchoi98/tui-aws</span>
+    </li>
+    <li>
+      <a href="https://youtu.be/78gfU_Vfluw">tui-aws demo video</a>
+      - whchoi98, YouTube
+      <span class="url">https://youtu.be/78gfU_Vfluw</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html">AWS Systems Manager Session Manager</a>
+      - AWS official documentation
+      <span class="url">https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html">Amazon ECS Exec</a>
+      - AWS official documentation
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/vpc/latest/reachability/what-is-reachability-analyzer.html">VPC Reachability Analyzer</a>
+      - AWS official documentation
+      <span class="url">https://docs.aws.amazon.com/vpc/latest/reachability/what-is-reachability-analyzer.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html">Control subnet traffic with network ACLs</a>
+      - AWS official documentation
+      <span class="url">https://docs.aws.amazon.com/vpc/latest/userguide/vpc-network-acls.html</span>
+    </li>
+  </ul>
+
+  <h3>Related repositories</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ecs9s">ecs9s - an ECS-focused terminal UI for AWS</a>
+      - whchoi98
+      <span class="url">https://github.com/whchoi98/ecs9s</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on the tui-aws repository (README, CHANGELOG, ADR) and its source code.
+    Figures such as tab counts, check steps, and cache durations reflect the v0.1.0 code at the time of writing;
+    check the repository and official documentation above for the latest values.
+  </p>
+</footer>
+
+</div>
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO / EN 두 페이지에 버튼이 하나씩 있으므로 전부 바인딩한다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 도 함께 보내 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
   });
 })();
 </script>

@@ -18,6 +18,21 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 언어 부트: URL ?lang= 파라미터 > localStorage > 기본 ko */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  if (!lang) {
+    try {
+      var saved = localStorage.getItem(KEY);
+      if (saved === "en" || saved === "ko") lang = saved;
+    } catch (e) {}
+  }
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -388,8 +403,12 @@ tbody th {
   line-height: 1.65;
 }
 
+/* ---------- Language toggle ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -508,7 +527,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <div class="theme-bar">
   <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
@@ -528,6 +547,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -802,6 +822,8 @@ except Exception:
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="ontology-for-retail-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -854,27 +876,418 @@ except Exception:
   </p>
 </footer>
 
+</div>
+
+<!-- =================================================== -->
+<!-- ===================== EN page ===================== -->
+<!-- =================================================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Architecture Deep Dive</p>
+  <h1>ontology-for-retail - Architecture Analysis of a Korean Retail/CPG Knowledge Graph PoC</h1>
+  <p class="subtitle">
+    How a single domain ontology drives 13 retail experience scenarios - an analysis of the Neptune openCypher / OpenSearch Serverless / Bedrock / AgentCore stack, grounded in the repository's actual code and data.
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The subject of this analysis is the local repository ontology-for-retail (a FastAPI + Next.js 14 + AWS CDK v2 monorepo, last commit <span class="mono">c852ba0</span>, 2026-05-09).</p>
+    <p>The core backends are Neptune openCypher, OpenSearch Serverless, Bedrock Sonnet 4.6, and AgentCore Memory; a Code Interpreter wrapper exists but is not wired up yet.</p>
+    <p>Every figure in this document was verified directly against the repository's code (<span class="mono">api/</span>) and data (<span class="mono">data/output/</span>).</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>ontology-for-retail is a 30-60 minute PoC demo that drives 13 scenarios (A-M) plus the meta page /codegraph from a Korean retail/CPG domain ontology (<strong>25 node classes / 40 relation types</strong>).</li>
+    <li>Search fuses Nori BM25 and Cohere KNN with RRF (k=60) and then reorders with rerank-v3; the agent combines a Bedrock Converse loop with 7 tools and AgentCore Memory (short-term session + long-term user namespaces).</li>
+    <li>Parts of the README and docs are staler than the code. The README describes scenario B with 4 tools and architecture.md lists 19 node classes, but the code has <strong>7 tools and 25 classes</strong>. This document is written against the code and data.</li>
+    <li>Bottom line - it holds up as a pattern catalog for combining managed AI services with a graph schema, but the data is entirely synthetic and security is in demo posture, so the numbers must not be read as measured performance or production baselines.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Why a domain ontology for retail experiences</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Ontology schema and synthetic data</a></li>
+    <li><span class="no">03</span><a href="#s3-en">AWS architecture - six CDK stacks</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Deep dive into the core mechanisms</a></li>
+    <li><span class="no">05</span><a href="#s5-en">The 13 scenarios at a glance</a></li>
+    <li><span class="no">06</span><a href="#s6-en">The meta page /codegraph</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations and conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Why a domain ontology for retail experiences</h2>
+  <p>
+    In retail, most of the genuinely valuable questions are relationship questions. Questions such as "which products contain ingredients a pregnant woman should avoid", "what are the same-category, different-brand alternatives to this product", and "which channels and prices do camping-enthusiast members encounter" cannot be answered by document search alone. The raw material for the answer is how products, ingredients, personas, channels, members, and logistics hubs are connected.
+  </p>
+  <p>
+    ontology-for-retail pins these relationships down as an explicit schema in a Neptune knowledge graph and layers <strong>13 scenarios (A-M)</strong> on top - a PoC that demonstrates in a 30-60 minute demo how many experiences a single ontology can drive. The same graph is shared all the way from LLM scenarios such as semantic search and a conversational agent to pure graph-aggregation scenarios such as churn-risk diagnosis and tier-upgrade lift.
+  </p>
+  <p>
+    The device that runs through the entire demo is a set of 5 spine personas (pregnant woman, mother of a 4-year-old, camper, sensitive skin, gluten allergy). Of the 40 narrative personas (<span class="mono">psn_*</span>), only those whose label keywords match a spine (currently 9/40) are connected to it with <span class="mono">DERIVED_FROM</span> edges; the rest are not interpreted as member cohorts. Keeping the same persona context consistent from scenario A through M is one of the design goals of this PoC.
+  </p>
+  <p class="lead-def">
+    <b>Principle:</b> instead of building a new data model per scenario, the PoC grows its scenario count by accumulating layers (commerce, logistics, membership, external spending) on a single ontology schema.
+  </p>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Ontology schema and synthetic data</h2>
+  <p>
+    The single source of truth for the schema is the <span class="mono">_CLASSES</span> and <span class="mono">_RELATIONS</span> registries in <span class="mono">api/routers/ontology.py</span>. By the code, there are <strong>25 node classes</strong> and 40 relation types. Classes are layered by a domain field.
+  </p>
+  <ul class="plain">
+    <li>core / standards - Product, Brand, Manufacturer, Category, Ingredient, Nutrient. Ingredients and categories are linked to external standards via INCI, FoodOn (219 Korean aliases), and GS1/KFDA mapping CSVs (<span class="mono">ontology/mappings/</span>).</li>
+    <li>lifestyle / retail / narrative - Concern, Trend, Persona, Channel, Promotion, Review.</li>
+    <li>logistics / events - Region, Warehouse, Carrier, Route, Shipment, Inventory, Event. Inventory is modeled as a first-class node rather than an edge property, which keeps openCypher traversals and validation simple.</li>
+    <li>membership - Member, MembershipTier, Campaign, Transaction, Touchpoint.</li>
+    <li>external - IndustryCategory. The axis of scenario M, which connects an external spending panel to internal categories via <span class="mono">OVERLAPS_WITH</span>.</li>
+  </ul>
+
+  <div class="callout note">
+    <span class="callout-title">Note - where the docs diverge from the code</span>
+    <p><span class="mono">docs/architecture.md</span> describes 19 node classes, but after the 5 membership classes and IndustryCategory were added, <span class="mono">_CLASSES</span> in the code has 25. The README's scenario B description also still lists 4 tools, while <span class="mono">TOOL_SPECS</span> in the code has 7. Every figure in this document follows the code and data.</p>
+  </div>
+
+  <p>
+    All of the data that populates the graph is synthetic. Counting the files in <span class="mono">data/output/</span>, the volumes are as follows.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Synthetic data volume (record counts in data/output/ files)</caption>
+      <thead>
+        <tr><th scope="col">Layer</th><th scope="col">Entities</th><th scope="col">Count</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Commerce</th><td>Products / reviews / brands / manufacturers / trends / concerns</td><td><span class="num">250 / 2,480 / 60 / 30 / 30 / 25</span></td></tr>
+        <tr><th scope="row">Personas / channels</th><td>Narrative personas / sales channels</td><td><span class="num">40 / 4</span></td></tr>
+        <tr><th scope="row">Logistics</th><td>Warehouses / transport lanes / inventory rows / shipments / carriers / events</td><td><span class="num">30 / 76 / 940 / 2,280 / 7 / 12</span></td></tr>
+        <tr><th scope="row">Membership</th><td>Members / tiers / campaigns / transactions / marketing touchpoints</td><td><span class="num">1,000 / 4 / 20 / 7,862 / 10,021</span></td></tr>
+        <tr><th scope="row">External spending</th><td>Industry categories / quarterly spend edges</td><td><span class="num">10 / 10,410</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The 10,410 external spend edges are split exactly in half - <strong>5,205 each</strong> for 2025-Q4 and 2026-Q1. Per-member growth coefficients are seeded into the data, so the Trajectory axis of scenario M can compute quarter-over-quarter growth. Of the 10 industry categories, 8 overlap internal categories through 43 GS1 brick codes, while household goods and camping gear are deliberately designed as blind spots with no internal coverage, producing the Opportunity VIP signal.
+  </p>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>AWS architecture - six CDK stacks</h2>
+  <p>
+    The infrastructure is defined as six AWS CDK v2 (TypeScript) stacks (network, data, compute, ai, edge, observability), with per-stack Jest snapshot tests catching drift. The region is ap-northeast-2 and all compute runs on ECS Fargate ARM64.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["Browser"] --> CF["CloudFront + Lambda@Edge cookie auth"]
+  CF -.-> COG["Cognito User Pool"]
+  CF --> ALB["ALB (CloudFront prefix list SG)"]
+  ALB --> WEB["Web - Next.js 14 Fargate x2"]
+  ALB --> API["API - FastAPI Fargate x2"]
+  API --> NEP[("Neptune openCypher")]
+  API --> OS[("OpenSearch Serverless")]
+  API --> BR["Bedrock - Sonnet 4.6 / embed-v4 / rerank-v3 / Guardrails / KB"]
+  API --> AC["AgentCore - Memory / Code Interpreter"]
+    </div>
+    <figcaption>
+      Figure 1. Request path and backend service layout. Authentication ends at the edge (Lambda@Edge cookie check), and a single API container orchestrates the graph, search, LLM, and agent memory.
+    </figcaption>
+  </figure>
+
+  <p>
+    What stands out about the request path is that authentication and origin protection live outside the application. CloudFront's Lambda@Edge inspects cookies on every request and 302-redirects unauthenticated users to the Cognito Hosted UI, the ALB opens only through a security group locked to the CloudFront-managed prefix list, and a Secrets Manager-backed <span class="mono">X-Origin-Auth-Token</span> header is validated by API middleware. The API service is FastAPI + uvicorn with 2 replicas, and the same container image doubles as a one-off data loader via command override.
+  </p>
+  <p>
+    The data tier separates roles. Neptune holds the ontology graph (openCypher, IAM SigV4 auth), OpenSearch Serverless owns the hybrid search index, and Aurora PostgreSQL Serverless v2 is provisioned for session metadata but the current API code never connects to it (no driver included). The AI tier combines Bedrock's Sonnet 4.6 (chat/insights), Cohere embed-v4 (1,536-dimension embeddings), Cohere rerank-v3 (reranking), Guardrails (input/output scrubbing), and Knowledge Base (managed RAG), plus AgentCore Memory (Code Interpreter has only a wrapper and is not yet wired into the insights path).
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - Neptune lives only in private subnets</span>
+    <p>You cannot reach the Neptune endpoint directly from a development EC2 instance. Loading the synthetic data is only possible through a one-off ECS task that shares the same security group (<span class="mono">aws ecs run-task</span> + command override). Trying to run the loader locally and hitting a timeout is the most common trap in this repository.</p>
+  </div>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Deep dive into the core mechanisms</h2>
+
+  <h3>4.1 Hybrid search and the rerank fallback</h3>
+  <p>
+    Scenario A's search lives in <span class="mono">api/services/search.py</span>. A Korean query is run through the Nori analyzer's BM25 and through Cohere embed-v4 KNN separately, then merged application-side with Reciprocal Rank Fusion. As the code comment notes, <strong>k=60</strong> is the standard tuning value from the original RRF paper, and running the two searches separately and fusing them gets close to native-hybrid quality. The fused results are reordered by the rerank-v3 cross-region inference profile, and this stage is designed to fall back silently to RRF order on any error.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">api/services/search.py - RRF fusion and the rerank fallback</div>
+    <pre><code>hits_raw = _rrf_merge(knn_raw, bm25_raw, k=60)
+<span class="cm"># ... build SearchHit candidates ...</span>
+if not rerank or not settings.bedrock_reranker_inference_profile_arn or not candidates:
+    return candidates[:top_k]
+try:
+    return _bedrock_rerank(scrubbed, candidates, top_k)
+except Exception:
+    return candidates[:top_k]   <span class="cm"># keep RRF order if rerank fails</span></code></pre>
+  </div>
+
+  <p>
+    Another design decision is that the Guardrails scrub sits before rerank. The query is reduced to a PII-scrubbed (<span class="mono">scrubbed</span>) form before it reaches the reranking model. Search results are visualized together with a 1-hop knowledge subgraph, explaining through relationships why each product was returned.
+  </p>
+
+  <h3>4.2 Multi-turn agent and AgentCore Memory</h3>
+  <p>
+    Scenario B's agent (<span class="mono">api/services/agent.py</span>) is a Bedrock Converse tool-calling loop. <span class="mono">TOOL_SPECS</span> registers <strong>7 tools</strong> - <span class="mono">semantic_search</span>, <span class="mono">kb_lookup</span>, <span class="mono">neptune_subgraph</span>, and <span class="mono">memory_recall</span>, plus 3 logistics tools (<span class="mono">nearest_warehouses</span> haversine k-NN, <span class="mono">shortest_path</span> BFS, <span class="mono">inventory_lookup</span>). All streaming endpoints share a common SSE vocabulary of <span class="mono">phase</span>/<span class="mono">delta</span> plus a terminal event (<span class="mono">stop</span> or <span class="mono">result</span>), and tool-call <span class="mono">log</span> events exist only on the agent stream, feeding the frontend's live tool-call panel.
+  </p>
+  <p>
+    A single AgentCore Memory handles both short-term and long-term memory. Short-term is per-session event storage; long-term keeps per-user facts in the <span class="mono">user/{actor_id}/preferences</span> namespace with a 7-day TTL. At the start of a conversation, <span class="mono">memory_recall</span> retrieves persona-related facts from long-term memory and injects them into the system context, so context such as "last time you were looking for pregnancy-safe products" carries across sessions. Guardrails checks on both input and output are surfaced as phase events.
+  </p>
+  <p>
+    Scenario C streams a Korean-language summary of Neptune trend aggregates through Sonnet 4.6 (a plain <span class="mono">converse_stream</span> call, not an agent tool loop). The Code Interpreter wrapper (<span class="mono">api/services/code_interpreter.py</span>) exists but is not yet wired into the insights endpoint (the frontend copy also says "Phase 4 wiring"), and the actual charts are rendered by the frontend from <span class="mono">chart_spec</span> JSON returned by the API.
+  </p>
+
+  <h3>4.3 Recurring patterns in the graph-traversal scenarios</h3>
+  <p>
+    The scenarios without LLM involvement (D, I, J, K, L, M) are variations on openCypher traversal and aggregation. Rather than enumerating all 13, we look at three patterns that keep coming back.
+  </p>
+  <p>
+    <strong>Pattern 1 - the persona spine OR bridge.</strong> Every member scenario applies its persona filter with the same Cypher fragment. A member either matches a spine persona directly, or reaches the spine through a narrative persona via <span class="mono">DERIVED_FROM</span> - the key is OR-ing the two paths together.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">api/routers/vip.py - _persona_filter_fragment <span class="mono">(ADR-0006)</span></div>
+    <pre><code>f"{where_keyword} ((m)-[:MATCHES_PERSONA]-&gt;(:Persona {{persona_id: $pid}}) "
+"  OR (m)-[:MATCHES_PERSONA]-&gt;(:Persona)&lt;-[:DERIVED_FROM]-(:Persona {{persona_id: $pid}})) "</code></pre>
+  </div>
+
+  <p>
+    <strong>Pattern 2 - graph-side precomputation and cohort lift.</strong> Scenario I's <span class="mono">churn_risk</span> is not computed in real time by the API. The synthetic-data generator computes it with RFM and seeds it as a Member node property; the router only aggregates it along the tier and persona axes. Scenario K's Silver-to-Gold upgrade lift is a per-capita ratio dividing each product's Gold purchase rate by its Silver purchase rate, and half-step smoothing (<span class="mono">1 / silver_n / 2</span>) is applied to cohorts with a zero numerator to avoid division by zero.
+  </p>
+  <p>
+    <strong>Pattern 3 - joining external data with bridge edges.</strong> Scenario M does not stand up the external spending panel as a separate system; it attaches it to the existing graph with 10,410 <span class="mono">HAS_CATEGORY_SPEND</span> edges and 43 <span class="mono">OVERLAPS_WITH</span> bridges. As a result, a 5-axis VIP definition such as "members whose internal wallet share is low but whose external total spend is high" (Opportunity) is expressible entirely as a single graph query, and pattern 1's persona filter is reused as-is.
+  </p>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>The 13 scenarios at a glance</h2>
+  <p>
+    There are 13 scenario routers, one file each under <span class="mono">api/routers/</span>. Organized by which mechanisms each scenario combines, they look like this.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Scenarios A-M summary (based on router files and README feature descriptions)</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Name</th><th scope="col">Core mechanism</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A</td><td>Semantic search</td><td>BM25 + KNN hybrid, RRF fusion, rerank-v3, 1-hop subgraph</td></tr>
+        <tr><td>B</td><td>Conversational agent</td><td>Converse multi-turn + AgentCore Memory + 7 tools, SSE streaming</td></tr>
+        <tr><td>C</td><td>MD insights</td><td>Neptune trend aggregation + Sonnet 4.6 streaming summary + chart_spec frontend rendering (Code Interpreter not wired)</td></tr>
+        <tr><td>D</td><td>Persona matching</td><td>HAS_CONCERN traversal over 40 personas + weighted SKU recommendations</td></tr>
+        <tr><td>E</td><td>Safety lens</td><td>KFDA/INCI ingredient blacklist filtering via Concern AVOIDS_INGREDIENT traversal (no Guardrails involved)</td></tr>
+        <tr><td>F</td><td>Alternative products</td><td>Same-category / different-brand traversal + price-gap cards</td></tr>
+        <tr><td>G</td><td>Price/availability comparison</td><td>4-channel price/discount/stock matrix + persona-channel affinity weighting</td></tr>
+        <tr><td>H</td><td>Logistics network</td><td>Province-level map with 30 hubs / 76 lanes / 940 inventory rows, inline LLM panel</td></tr>
+        <tr><td>I</td><td>Churn-risk diagnosis</td><td>RFM-based churn_risk aggregation + top-30 drilldown + map tab</td></tr>
+        <tr><td>J</td><td>Acquisition channel ROI</td><td>Attributed LTV vs. spend per campaign/channel + per-persona response-rate heatmap</td></tr>
+        <tr><td>K</td><td>Tier upgrade path</td><td>Gold-vs-Silver purchase-rate lift + upgrade-candidate ranking</td></tr>
+        <tr><td>L</td><td>Coverage map</td><td>Member-distribution choropleth + hub markers + radius-slider hub screen</td></tr>
+        <tr><td>M</td><td>VIP target builder</td><td>External spending panel x wallet share, 5-axis VIP definition on a single screen</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    What the table should convey is not the flashiness of individual scenarios but the reuse structure. A and B share the search stack; H, I, K, and L share the Korean province choropleth component; and I, K, L, and M share the persona spine filter (J is a TARGETS-based persona x channel matrix). Even with 13 scenarios, the underlying mechanisms converge to combinations of the three patterns from section 4 and the search/agent stack.
+  </p>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>The meta page /codegraph - a knowledge graph of the codebase itself</h2>
+  <p>
+    The repository applies its own thesis - "draw the domain as an ontology" - to itself. The <span class="mono">/codegraph</span> page embeds a graph that graphify extracted from the source-code AST; counting <span class="mono">web/public/codegraph/graph.json</span> directly gives <strong>1,751 nodes / 2,217 edges / 159 communities</strong> across 150 source files. Per GRAPH_REPORT, 97% of the edges were extracted directly from the AST (EXTRACTED), with zero LLM calls at build time.
+  </p>
+  <p>
+    The LLM participates only in the labeling stage, not the build. <span class="mono">scripts/label_codegraph_communities.py</span> calls Bedrock Sonnet 4.6 for each of the 159 communities to obtain structured JSON with 4 fields (label, description, key_concepts, top_files), then patches <span class="mono">graph.html</span> in place, replacing IDs like "Community 42" with meaningful Korean labels. A full refresh is a single <span class="mono">./scripts/refresh_codegraph.sh</span> run and takes about 3 minutes, including the 159 Bedrock calls.
+  </p>
+  <p>
+    This separation of deterministic structure (AST extraction) from probabilistic interpretation (LLM labeling) follows the same philosophy as the main scenarios. The graph holds the facts, and the LLM layers a readable veneer on top.
+  </p>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations and conclusion</h2>
+
+  <h3>7.1 Limitations</h3>
+  <ul class="plain">
+    <li>The data is entirely synthetic. Persona biases and growth coefficients are values the generator seeded, so results such as the churn-risk distribution or the sizes of the VIP axes cannot be generalized as properties of real retail data.</li>
+    <li>Security is in demo posture. The ALB origin is HTTP-80 (TLS terminates at CloudFront) and the Cognito password policy is demo-grade. SECURITY.md spells out a production-hardening plan, but the current code predates it.</li>
+    <li>Neptune is a single-instance dev sizing, and rerank-v3 is inactive in regions/accounts without the cross-region inference profile (search quality then degrades to RRF order).</li>
+    <li>Doc-code drift exists. The class-count and tool-count mismatches in section 2 are examples; when reading the repository, treat registry code such as <span class="mono">ontology.py</span> and <span class="mono">agent.py</span> as the source of truth.</li>
+  </ul>
+
+  <h3>7.2 Conclusion</h3>
+  <p>
+    The value of this PoC lies not in individual features but in being a catalog of composition patterns. How to anchor everything on a single ontology schema and accumulate layers, how to place rerank on top of RRF fusion as an optional stage with a fallback, how to register graph traversal and memory recall as tools in a Converse tool loop, and how to join external data with bridge edges - all of it survives as working code. If you are evaluating the combination of knowledge graphs and managed AI services in the Korean retail/CPG domain, this repository, together with its architecture decision records (ADRs), makes a solid starting point.
+  </p>
+  <p class="lead-def">
+    <b>Conclusion:</b> an ontology is an asset whose marginal cost falls with every added scenario, and this PoC shows in code that the break-even point was already passed within 13 scenarios.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="ontology-for-retail-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      ontology-for-retail local repository - README.md, CLAUDE.md, docs/architecture.md, api/, data/output/ (last commit c852ba0, 2026-05-09). The GitHub repository the README points to could not be reached at the time of writing (404), so it is not listed.
+      <span class="url">/home/ec2-user/my-project/ontology-for-retail</span>
+    </li>
+    <li>
+      <a href="https://www.youtube.com/watch?v=irGMb3x6Iys">Demo video - a walkthrough of the 13 scenarios and /codegraph</a>
+      - whchoi98, YouTube
+      <span class="url">https://www.youtube.com/watch?v=irGMb3x6Iys</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html">Amazon Neptune - Accessing the Graph with openCypher</a>
+      <span class="url">https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html">Amazon Bedrock AgentCore - Developer Guide</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/rerank.html">Amazon Bedrock - Rerank API</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/rerank.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html">Amazon Bedrock - Guardrails</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-vector-search.html">Amazon OpenSearch Serverless - Vector Search Collections</a>
+      <span class="url">https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-vector-search.html</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis produced by directly inspecting the code and data of the ontology-for-retail local repository (last commit c852ba0, 2026-05-09).
+    Figures and configurations are as of the time of writing; check the repository code and the official documentation above for current values.
+  </p>
+</footer>
+
+</div>
+
 <script>
 /* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var en = btn.closest('.page[data-lang="en"]');
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange dispatch. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    });
+  });
+
+  /* 언어 전환 시 Mermaid가 있으면 themechange를 함께 쏴서 재렌더한다. */
+  document.addEventListener("langchange", function () {
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", {
+        detail: { theme: root.getAttribute("data-theme") }
+      }));
+    }
   });
 })();
 </script>
@@ -929,6 +1342,5 @@ if (blocks.length) {
 }
 </script>
 
-</div>
 </body>
 </html>

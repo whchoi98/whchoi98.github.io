@@ -23,6 +23,16 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 이 localStorage 보다 우선, 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -426,6 +436,12 @@ tbody th {
 [data-theme="dark"] .theme-toggle .to-dark { display: none; }
 [data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ---------- Language toggle ----------
+   문서 전체가 KO/EN 두 벌의 .page 로 존재하고, html[data-lang] 이 표시할 쪽을 고른다. */
+.theme-bar { gap: 8px; }
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
 /* ---------- Mermaid diagram ---------- */
 .diagram { margin-top: 22px; }
 .diagram .mermaid {
@@ -526,7 +542,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +565,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -961,6 +978,8 @@ flowchart LR
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="gemma4-vllm-serving-benchmark-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -1006,27 +1025,546 @@ flowchart LR
 
 </div>
 
+<!-- ===================== English page (data-lang="en") ===================== -->
+<div class="page" data-lang="en" lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">LLM SERVING / BENCHMARK REPORT</p>
+  <h1>Gemma-4-31B vLLM Serving PoC Benchmark: Detailed Results</h1>
+  <p class="subtitle">
+    A PoC serving Gemma-4-31B with vLLM on EKS and Karpenter, measuring throughput, startup time, and Korean acceptance rate. Starting from a 28-combination baseline on L40S (g6e), it walks through the startup-reduction A/B tests and the follow-up experiments on FP8 and Korean speculative decoding, all the way to the final verdict on g7e (RTX PRO 6000 Blackwell).
+  </p>
+
+  <div class="stat" role="img" aria-label="S1 chat peak throughput rises from 536 tok/s on L40S to 1,871 tok/s on g7e">
+    <div class="stat-item old">
+      <span class="stat-num">536<span class="unit">tok/s</span></span>
+      <span class="stat-sub">L40S, g6e.2xlarge (S1 chat peak)</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">1,871<span class="unit">tok/s</span></span>
+      <span class="stat-sub">g7e, RTX PRO 6000 Blackwell (same workload)</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>This report is written as of 2026-08-09.</p>
+    <p>The experiments ran from 2026-08-05 to 2026-08-06.</p>
+    <p>It covers Gemma-4-31B (NVFP4/FP8) serving, EKS with Karpenter, and the g6e/g7e instance generations.</p>
+    <p>The measurement tool is <span class="mono">vllm bench serve</span> from vLLM v0.26.0.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">Summary</h2>
+  <ul>
+    <li>On L40S (g6e.2xlarge), S1 chat peaks at <strong>536 tok/s</strong>. Moving the same workload to g7e (RTX PRO 6000 Blackwell) reaches 1,871 tok/s, 3.49x to 4.83x higher across every scenario.</li>
+    <li>The g7e advantage comes from native FP4 tensor-core kernels and 96GB of GDDR7. The KV cache grows to 125,023 tokens, eliminating the preemption that saturated L40S in the high-concurrency range.</li>
+    <li>The PoC pass bar of 1.5x throughput per GPU is exceeded by 3x to 5x, and cost efficiency with the Spot price ($1.50/hr) applied is 6x to 9x. However, Karrot's current per-GPU throughput number has not been provided yet, so the final ratio against production remains open until that value arrives.</li>
+    <li>Startup drops from 537 s cold to 155 s warm with runai_streamer direct-to-S3 loading and a persisted compile cache, and weight loading goes down to 19-18 s on 12xlarge NVMe and g7e. Korean latency is cut 2.6x with the official MTP assistant (56% acceptance). The recommended production configuration is summarized in Section 6.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Background and Success Criteria</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Test Environment and Method</a></li>
+    <li><span class="no">03</span><a href="#s3-en">L40S Baseline: 28 Combinations</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Startup Reduction A/B</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Follow-ups: FP8, Scale-up, Korean Draft</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Final Verdict on g7e</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Recommended Production Configuration</a></li>
+    <li><span class="no">08</span><a href="#s8-en">Conclusion and Remaining Work</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Background and Success Criteria</h2>
+  <p>
+    This PoC asks a single question. If serving Gemma-4-31B with vLLM delivers <strong>1.5x or more throughput per GPU versus the current setup</strong>, the same traffic can be handled with fewer replicas, which justifies shrinking the serving fleet from 12 replicas to 8. The verdict covers four realistic workloads: chat, summarization, moderation, and long-context RAG.
+  </p>
+  <p>
+    Measurement proceeded in two stages. First, a baseline was established on L40S (g6e), which is easy to procure, and the serving-pipeline bottlenecks (startup, quantization format, Korean latency) were worked through. Then g7e (RTX PRO 6000 Blackwell), which has native FP4 tensor cores, was secured as Spot capacity for the final verdict. Throughput is reported as output tok/s and req/s; latency as TTFT (time to first token) and ITL (inter-token latency).
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - An open item in the success criteria</span>
+    <p>The denominator of the pass formula, Karrot's current per-GPU throughput, has not been provided yet. The ratios in this document are therefore g7e relative to the L40S baseline; the final ratio against the current production setup will be fixed once that number is available.</p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Test Environment and Method</h2>
+  <p>
+    vLLM v0.26.0 was deployed to the <span class="mono">serving</span> namespace of an EKS cluster (GPU01) in the Seoul region, and model weights were loaded directly from an S3 bucket with <span class="mono">runai_streamer</span>. Three instance generations were used, each for a distinct purpose.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Instance generations used in the experiments</caption>
+      <thead>
+        <tr><th scope="col">Instance</th><th scope="col">GPU</th><th scope="col">Memory and NIC</th><th scope="col">Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">g6e.2xlarge</th><td>1x L40S 48GB (SM89, Ada)</td><td>GDDR6 / 20Gbps burst</td><td>L40S baseline, startup A/B</td></tr>
+        <tr><th scope="row">g6e.12xlarge</th><td>4x L40S 48GB</td><td>GDDR6 / 100Gbps, NVMe RAID0</td><td>FP8 vs NVFP4 side by side, scale-up</td></tr>
+        <tr><th scope="row">g7e.2xlarge</th><td>1x RTX PRO 6000 Blackwell 96GB</td><td>GDDR7 1.6TB/s / 50Gbps</td><td>FP4-native final verdict</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>2.1 Workload definitions</h3>
+  <p>
+    The four scenarios model real usage patterns through input and output lengths. Each scenario was swept across concurrency 1, 2, 4, 8, 16, 32, and 64, giving 7 combinations per scenario and 28 in total, measured with <span class="mono">vllm bench serve</span>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Benchmark scenario definitions</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Input / output tokens</th><th scope="col">Modeled workload</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">S1_chat</th><td>256 / 128</td><td>CS and short chat</td></tr>
+        <tr><th scope="row">S2_summary</th><td>1,024 / 256</td><td>Post summarization and generation</td></tr>
+        <tr><th scope="row">S3_moderation</th><td>512 / 16</td><td>Classification and moderation, prefill-heavy</td></tr>
+        <tr><th scope="row">S4_rag</th><td>4,096 / 256</td><td>Long-context RAG</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Kernel paths per quantization format</span>
+    <p>The same NVFP4 weights execute on different kernels depending on GPU generation. L40S (SM89) has no FP4 tensor cores, so NVFP4 automatically falls back to <span class="mono">Marlin</span> W4A16, while g7e (Blackwell) runs it natively with <span class="mono">FlashInferCutlassNvFp4</span>. FP8 W8A8 runs natively on L40S too, on Ada FP8 tensor cores, and is not a fallback.</p>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>L40S Baseline: 28 Combinations</h2>
+  <p>
+    nvidia/Gemma-4-31B-IT-NVFP4 was measured with an 8K context, a KV cache of 31,344 tokens, and speculative decoding off. Peak throughput per scenario and the concurrency at which it occurs are as follows.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. L40S peak output throughput per scenario</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Peak output tok/s</th><th scope="col">req/s</th><th scope="col">Concurrency at peak</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">S1_chat</th><td><span class="num">536.0</span></td><td><span class="num">4.19</span></td><td>64</td></tr>
+        <tr><th scope="row">S2_summary</th><td><span class="num">226.0</span></td><td><span class="num">0.88</span></td><td>32</td></tr>
+        <tr><th scope="row">S3_moderation</th><td><span class="num">81.7</span></td><td><span class="num">5.11</span></td><td>8</td></tr>
+        <tr><th scope="row">S4_rag</th><td><span class="num">98.6</span></td><td><span class="num">0.39</span></td><td>32</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Unrolling the S1 chat concurrency curve exposes the saturation pattern. Throughput keeps climbing up to concurrency 64, but TTFT <strong>degrades sharply</strong> past concurrency 32. This happens even though short inputs and outputs make it the scenario with the least KV pressure.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. L40S S1_chat concurrency curve (input 256 / output 128)</caption>
+      <thead>
+        <tr><th scope="col">Concurrency</th><th scope="col">req/s</th><th scope="col">output tok/s</th><th scope="col">TTFT p50 (ms)</th><th scope="col">ITL p50 (ms)</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">1</th><td><span class="num">0.17</span></td><td><span class="num">21.6</span></td><td><span class="num">110.6</span></td><td><span class="num">45.2</span></td></tr>
+        <tr><th scope="row">2</th><td><span class="num">0.33</span></td><td><span class="num">42.6</span></td><td><span class="num">102.9</span></td><td><span class="num">46.5</span></td></tr>
+        <tr><th scope="row">4</th><td><span class="num">0.64</span></td><td><span class="num">82.0</span></td><td><span class="num">143.6</span></td><td><span class="num">47.1</span></td></tr>
+        <tr><th scope="row">8</th><td><span class="num">1.22</span></td><td><span class="num">155.8</span></td><td><span class="num">169.6</span></td><td><span class="num">48.1</span></td></tr>
+        <tr><th scope="row">16</th><td><span class="num">2.22</span></td><td><span class="num">284.2</span></td><td><span class="num">296.6</span></td><td><span class="num">49.7</span></td></tr>
+        <tr><th scope="row">32</th><td><span class="num">3.17</span></td><td><span class="num">405.7</span></td><td><span class="num">1,860.3</span></td><td><span class="num">56.1</span></td></tr>
+        <tr><th scope="row">64</th><td><span class="num">4.19</span></td><td><span class="num">536.0</span></td><td><span class="num">2,677.4</span></td><td><span class="num">66.6</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - The baseline is not the g7e verdict</span>
+    <p>The values in this table come from NVFP4 running on L40S through the Marlin W4A16 fallback. They must not be compared directly with the FP4-native g7e verdict; they serve only as the denominator in the ratio calculations of Section 6. Also, a collection-script bug in this round left the GPU utilization column unrecorded.</p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Startup Reduction A/B</h2>
+  <p>
+    Breaking down the 537 s (8 min 57 s) cold start gives weight loading 149 s, torch.compile 73 s, new-node provisioning 48 s, and image pull 82 s. Configurations were varied to see how far each bottleneck could be pushed down. The measured window runs from pod creation to <span class="mono">/health</span> returning 200, and the phase breakdown follows the vLLM startup logs (vLLM v0.26.0, manually instrumented on 2026-08-05 to 06).
+  </p>
+  <p>
+    The comparison baseline is Karrot's current path: HuggingFace &rarr; S3 sync &rarr; loading with
+    <span class="mono">runai_streamer</span> (concurrency 32, memory_limit 8GiB) on top of S3 Mountpoint,
+    a setup whose startup time had already improved from 16 minutes to 5. This round verified the bottlenecks
+    of that same path phase by phase and re-measured with only the configuration changed.
+  </p>
+
+  <h3>4.1 Per-configuration A/B - g6e.2xlarge</h3>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 5. Startup time per configuration (pod creation to /health OK)</caption>
+      <thead>
+        <tr><th scope="col">Configuration</th><th scope="col">Total startup</th><th scope="col">Weight load</th><th scope="col">torch.compile</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Cold baseline (Mountpoint, no cache)</th><td><span class="num">537 s</span></td><td><span class="num">149 s</span></td><td><span class="num">73 s</span></td></tr>
+        <tr><th scope="row">Cold + hostPath cache volume (populating run)</th><td><span class="num">475 s</span></td><td><span class="num">148 s</span></td><td><span class="num">63 s</span></td></tr>
+        <tr><th scope="row">Warm + compile cache hit</th><td><span class="num">285 s</span></td><td><span class="num">149 s</span></td><td><span class="num">8.4 s</span></td></tr>
+        <tr><th scope="row">Warm + runai_streamer direct to S3</th><td><span class="num">238 s</span></td><td><span class="num">32 s</span></td><td><span class="num">64 s</span></td></tr>
+        <tr><th scope="row">Warm + runai + cache hit (best)</th><td><span class="num">155 s</span></td><td><span class="num">29 s</span></td><td><span class="num">8.5 s</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">Cold baseline</span>
+        <span class="flow-val">537 s</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">Warm compile cache</span>
+        <span class="flow-val">285 s</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">runai + cache, best</span>
+        <span class="flow-val">155 s</span>
+      </div>
+    </div>
+    <figcaption>
+      Figure 1. Startup reduction stages. The best configuration is 48% shorter than Karrot's current 5-minute (300 s) startup.
+    </figcaption>
+  </figure>
+
+  <p>
+    The biggest gain came from replacing the weight-loading path. Mountpoint FUSE took 149 s (effective 1.75Gbps), while <span class="mono">runai_streamer</span> direct to S3 took 29 to 32 s (effective 8.2Gbps, concurrency 64, memory_limit 24GiB), <strong>about 5x faster</strong>. Persisting the compile cache on the node cuts compilation from 73 s to 8.5 s on restart, reclaiming 55 s for free, and engine initialization also drops from 93 s to 25 s.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  S3[("S3 bucket weights")] -->|"Mountpoint FUSE 149 s"| V["vLLM engine"]
+  S3 -->|"runai_streamer direct 29 s"| V
+  V --> API["OpenAI-compatible API"]
+  API --> B["vllm bench serve"]
+    </div>
+    <figcaption>
+      Figure 2. Weight-loading path comparison. The bottleneck was the FUSE path, not bandwidth; bypassing it with a direct S3 connection makes the node NIC the new limit.
+    </figcaption>
+  </figure>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Returning idle GPU memory with sleep mode</span>
+    <p>When idle, <span class="mono">/sleep</span> released 30GB of GPU memory (45.4GB down to 14.7GB) in 26.8 s, and <span class="mono">/wake_up</span> restored it in 3.6 s when demand returned. That is roughly 40x faster than the 155 s full restart, making it a structural alternative to automatic GPU allocation.</p>
+  </div>
+
+  <h3>4.2 Instance / storage axis - 12xlarge NVMe and g7e</h3>
+  <p>
+    Even with the same <span class="mono">runai_streamer</span> direct connection, load time keeps dropping with instance and storage.
+    Looking at weight load alone, the series is Mountpoint 149 s &rarr; 2xlarge direct 29-32 s &rarr; 12xlarge 19 s &rarr; g7e 18 s.
+  </p>
+  <ul class="plain">
+    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - weight load <strong>19 s</strong>. This held even while loading two models (FP8 and NVFP4, 66GB combined) on the same node at once, 7.8x faster than Mountpoint. Cold start (new node provisioning + image pull + loading) was 380 s with both models. A single <span class="mono">instanceStorePolicy: RAID0</span> line in the Karpenter NodePool auto-configures 3.8TB of instance store, and runai used concurrency 128 / memory_limit 64GiB.</li>
+    <li><b>g7e.2xlarge (Spot)</b> - weight load was <strong>18 s</strong> in the Section 6 verdict environment. The load-phase breakdown was performed only on the g6e family, so g7e has a single weight-load value.</li>
+  </ul>
+
+  <h3>4.3 Limitations</h3>
+  <ul class="plain">
+    <li>Cold starts are expensive to reproduce and were not measured repeatedly. A new node has no compile cache, so the best configuration's cold startup of about 4.5 minutes is an estimate.</li>
+    <li>concurrency changed together with the instance (32 &rarr; 64 &rarr; 128), so its standalone effect could not be isolated.</li>
+    <li>NVMe pre-staging with local load, fastsafetensors + GDS, FSx for Lustre, EBS snapshot FSR, and S3 Express One Zone remain unmeasured alternatives.</li>
+  </ul>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Follow-ups: FP8, Scale-up, Korean Draft</h2>
+
+  <h3>5.1 FP8-dynamic vs NVFP4</h3>
+  <p>
+    An FP8 pod and an NVFP4 pod were run side by side on one g6e.12xlarge node with GPU isolation, compared under identical conditions. The conclusion depends on the workload: NVFP4 wins for ultra-low-latency chat, while <strong>FP8 with fp8 KV enabled</strong> wins for high-concurrency mixed workloads like summarization and RAG.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 6. FP8-dynamic vs NVFP4 (Marlin) throughput comparison (output tok/s)</caption>
+      <thead>
+        <tr><th scope="col">Scenario / concurrency</th><th scope="col">FP8 (BF16 KV)</th><th scope="col">FP8 (fp8 KV)</th><th scope="col">NVFP4 (Marlin)</th><th scope="col">Winner</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">S1_chat / 8</th><td><span class="num">129.8</span></td><td>-</td><td><span class="num">146.4</span></td><td>NVFP4</td></tr>
+        <tr><th scope="row">S1_chat / 32</th><td><span class="num">321.5</span></td><td>-</td><td><span class="num">411.1</span></td><td>NVFP4</td></tr>
+        <tr><th scope="row">S2_summary / 32</th><td><span class="num">112.1</span></td><td><span class="num">201.8</span></td><td><span class="num">195.8</span></td><td>FP8 + fp8 KV</td></tr>
+        <tr><th scope="row">S3_moderation / 8, 32</th><td><span class="num">70.4</span> / <span class="num">95.9</span></td><td>-</td><td><span class="num">57.3</span> / <span class="num">75.8</span></td><td>FP8</td></tr>
+        <tr><th scope="row">S4_rag / 32</th><td><span class="num">52.2</span></td><td><span class="num">104.5</span></td><td><span class="num">92.4</span></td><td>FP8 + fp8 KV</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - FP8 checkpoints need fp8 KV set explicitly</span>
+    <p>FP8-dynamic checkpoints ship with <span class="mono">kv_cache_scheme</span> set to <span class="mono">None</span>, so the KV cache defaults to BF16 and the model underperforms at high concurrency for lack of KV space. Adding <span class="mono">--kv-cache-dtype fp8</span> grows KV capacity from 12,150 to 23,320 tokens, and FP8 overtakes NVFP4 on S2 and S4. Judging FP8 as slow while missing this flag is the most common mistake.</p>
+  </div>
+
+  <h3>5.2 g6e.12xlarge scale-up</h3>
+  <p>
+    On the 12xlarge with a 100Gbps NIC and NVMe RAID0, <span class="mono">runai_streamer</span> finished loading weights in 19 s even while bringing up two models (66GB) at once, <strong>7.8x</strong> faster than Mountpoint's 149 s. A single <span class="mono">instanceStorePolicy: RAID0</span> line auto-configures 3.8TB of NVMe as kubelet ephemeral-storage.
+  </p>
+
+  <h3>5.3 Korean speculative decoding</h3>
+  <p>
+    Draft-model acceptance was measured with 200 Karrot-style Korean prompts. The official MTP speculator, <span class="mono">google/gemma-4-31B-it-assistant</span>, reached <strong>56% acceptance</strong>, 10x higher than the 5.6% of the reduced-vocabulary (32K vocab) EAGLE3. It covers Korean because it keeps the full 262K vocabulary.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 7. Korean speculative decoding: acceptance and latency per configuration (FP8 target)</caption>
+      <thead>
+        <tr><th scope="col">Configuration</th><th scope="col">Acceptance</th><th scope="col">c1 tok/s</th><th scope="col">c1 E2E p50</th><th scope="col">c8 tok/s</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">baseline (spec off)</th><td>-</td><td><span class="num">18.4</span></td><td><span class="num">6.85 s</span></td><td><span class="num">122.9</span></td></tr>
+        <tr><th scope="row">ngram (k=4)</th><td>25.8-27.5%</td><td><span class="num">20.1</span></td><td><span class="num">6.70 s</span></td><td><span class="num">131.4</span></td></tr>
+        <tr><th scope="row">MTP assistant (k=4)</th><td>54.7-56.0%</td><td><span class="num">48.5</span></td><td><span class="num">2.69 s</span></td><td><span class="num">281.5</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The MTP assistant brings c1 end-to-end latency from 6.85 s down to 2.69 s (2.6x) and raises c8 throughput from 122.9 to 281.5 tok/s (2.3x). The model is also small at 0.94GB, one fifth of EAGLE3 (4.5GB). The conclusion: for a Korean draft, adopting the official MTP assistant with no extra training is the right answer.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Final Verdict on g7e</h2>
+  <p>
+    NVFP4 ran on native kernels on a Spot g7e.2xlarge. The KV cache reaches 125,023 tokens and weights load in 18 s. Compared against the L40S baseline on the same workloads and the same 8K context, g7e came out <strong>3.49x to 4.83x</strong> higher across every scenario.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 8. g7e vs L40S: peak throughput and cost efficiency</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">L40S peak</th><th scope="col">g7e peak</th><th scope="col">Throughput ratio</th><th scope="col">Cost-efficiency ratio</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">S1_chat</th><td><span class="num">536</span> tok/s</td><td><span class="num">1,871</span> tok/s (14.6 req/s)</td><td><span class="num">3.49x</span></td><td><span class="num">6.4x</span></td></tr>
+        <tr><th scope="row">S2_summary</th><td><span class="num">226</span> tok/s</td><td><span class="num">910</span> tok/s (3.6 req/s)</td><td><span class="num">4.03x</span></td><td><span class="num">7.4x</span></td></tr>
+        <tr><th scope="row">S3_moderation</th><td><span class="num">81.7</span> tok/s</td><td><span class="num">395</span> tok/s (24.7 req/s)</td><td><span class="num">4.83x</span></td><td><span class="num">8.9x</span></td></tr>
+        <tr><th scope="row">S4_rag</th><td><span class="num">98.6</span> tok/s</td><td><span class="num">402</span> tok/s (1.6 req/s)</td><td><span class="num">4.08x</span></td><td><span class="num">7.5x</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="lead-def">
+    <b>Key point:</b> the g7e advantage widens at high concurrency, because 96GB of GDDR7 holds up to 125,023 KV tokens and removes the preemption in the range where L40S used to saturate.
+  </p>
+
+  <ul class="plain">
+    <li>Decode latency ITL p50 halves from 45ms to 25ms at concurrency 1 across all scenarios, the effect of 1.6TB/s GDDR7 bandwidth and native FP4 kernels.</li>
+    <li>Moderation (S3) shows the widest gap at 4.83x. The concurrency 16-to-32 range that thrashed on L40S from KV shortage is fully resolved on g7e at 24.7 req/s.</li>
+    <li>Even in the low-concurrency latency range, g7e leads consistently at a minimum of 1.8x across all combinations.</li>
+  </ul>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Assumptions behind the cost-efficiency figures</span>
+    <p>The cost-efficiency ratio divides peak tok/s by the hourly price and compares the results. g7e uses Spot at $1.50/hr; L40S uses on-demand at $2.76/hr. g7e on-demand is $4.13/hr, so Spot availability is the big variable in cost efficiency.</p>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Recommended Production Configuration</h2>
+  <p>
+    Combining the follow-up results on the L40S environment, the following configuration captures both overall performance and Korean latency: an FP8-dynamic checkpoint with fp8 KV and the MTP assistant on top, with startup shortened by <span class="mono">runai_streamer</span> and the compile cache.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Recommended serving configuration (vLLM v0.26.0, on L40S)</div>
+    <pre><code>vllm serve &lt;FP8-dynamic checkpoint&gt; \
+  --load-format runai_streamer \
+  --model-loader-extra-config '{"concurrency":64,"memory_limit":25769803776}' \
+  --kv-cache-dtype fp8 \
+  --speculative-config '{"method":"mtp","model":"&lt;gemma-4-31B-it-assistant&gt;","num_speculative_tokens":4}' \
+  --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-auto-tool-choice
+<span class="cm"># Additionally: persist VLLM_CACHE_ROOT (compile cache), Pod Identity (S3 read)</span></code></pre>
+  </div>
+
+  <p>
+    The expected effect of this combination is a warm startup of 2 to 3 minutes, Korean response latency cut 2.5x, and prefill throughput of about 1.25x. Once g7e is secured, the same configuration is re-verified with native NVFP4 to re-validate the ratios of Section 6.
+  </p>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8-en">
+  <h2><span class="no">08</span>Conclusion and Remaining Work</h2>
+  <p>
+    On throughput, g7e is 3.5x to 4.8x over L40S, and 6x to 9x on cost efficiency. It clears the PoC pass bar of 1.5x by a wide margin, so if Karrot's current GPUs are at L40S level or below, there is room to consider going <strong>beyond 12-to-8 replicas, down to around 4</strong>. Startup and Korean latency have each moved into practical range as well.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 9. Recommended configuration per situation</caption>
+      <thead>
+        <tr><th scope="col">Operating situation</th><th scope="col">Recommendation</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Ultra-low-latency chat first</th><td>NVFP4, lowest decode ITL</td></tr>
+        <tr><th scope="row">Mixed workloads such as summarization and RAG</th><td>FP8 + fp8 KV</td></tr>
+        <tr><th scope="row">Korean latency matters</th><td>MTP assistant speculator (56% acceptance)</td></tr>
+        <tr><th scope="row">Shorter startup time</th><td>runai_streamer direct to S3 + persisted compile cache</td></tr>
+        <tr><th scope="row">Maximum throughput and cost efficiency</th><td>g7e Spot, native NVFP4</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Three items remain. First, closing the pass formula requires Karrot's current per-GPU throughput number. Second, the interaction sweep of MTP, fp8 KV, and high concurrency (num_speculative_tokens 4 vs 8) is unfinished. Third, TP=2/4 (PCIe) measurements in preparation for 70B-class models are still to be done.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="gemma4-vllm-serving-benchmark-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Raw measurements</h3>
+  <ul>
+    <li>
+      GPU01 benchmark result archive (28 combinations + 28 g7e combinations, ENV included) - in-house measurements (2026-08-05 to 2026-08-06)
+      <span class="url">results/SUMMARY.md, results/STARTUP.md, results/FOLLOWUP.md, results/G7E-JUDGMENT.md</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.vllm.ai/en/latest/">vLLM Documentation</a>
+      <span class="url">https://docs.vllm.ai/en/latest/</span>
+    </li>
+    <li>
+      <a href="https://docs.vllm.ai/en/latest/models/extensions/runai_model_streamer.html">vLLM - Loading models with Run:ai Model Streamer</a>
+      <span class="url">https://docs.vllm.ai/en/latest/models/extensions/runai_model_streamer.html</span>
+    </li>
+    <li>
+      <a href="https://docs.vllm.ai/en/latest/features/spec_decode.html">vLLM - Speculative Decoding</a>
+      <span class="url">https://docs.vllm.ai/en/latest/features/spec_decode.html</span>
+    </li>
+    <li>
+      <a href="https://huggingface.co/google/gemma-4-31B-it-assistant">google/gemma-4-31B-it-assistant (MTP speculator)</a>
+      <span class="url">https://huggingface.co/google/gemma-4-31B-it-assistant</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on in-house benchmarks run with vLLM v0.26.0 on the GPU01 cluster.
+    Figures are as of the time of writing; instance prices and model versions may change.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== /English page ===================== -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. KO/EN 두 페이지의 버튼을 모두 묶는다.
+   저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. html[data-lang] 을 바꾸고 저장한 뒤 langchange 를 알린다.
+   Mermaid 가 있으면 themechange 도 함께 보내 새로 보이는 페이지의 다이어그램을 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = document.querySelectorAll(".lang-toggle");
+  if (!btns.length) return;
+
+  Array.prototype.forEach.call(btns, function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    });
+  });
+
+  document.addEventListener("langchange", function () {
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", {
+        detail: { theme: root.getAttribute("data-theme") }
+      }));
+    }
   });
 })();
 </script>

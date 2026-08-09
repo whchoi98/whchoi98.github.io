@@ -23,6 +23,14 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 언어도 첫 페인트 전에 확정한다. URL ?lang= 파라미터가 저장값보다 우선. 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var m = (window.location.search || "").match(/[?&]lang=(en|ko)\b/);
+  var lang = (m && m[1]) || saved;
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -401,8 +409,13 @@ tbody th {
   line-height: 1.65;
 }
 
+/* ---------- Language switch ----------
+   문서에 KO/EN 두 개의 .page 가 있고, html[data-lang] 이 어느 쪽을 보일지 정한다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -526,7 +539,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +562,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -986,6 +1000,8 @@ flowchart LR
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="ontology-for-assembly-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -1047,27 +1063,614 @@ flowchart LR
 
 </div>
 
+<!-- ===================== EN PAGE START ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Architecture Deep Dive</p>
+  <h1>A Newsroom Agentic AI Knowledge Graph on the Korean National Assembly OpenAPI: An Architecture Analysis of ontology-for-assembly</h1>
+  <p class="subtitle">
+    A code-level analysis of a PoC repository that loads real public data from the National Assembly Open Data Portal
+    into a 31-class ontology and demonstrates 23 Agentic AI scenarios on top of it. Written for engineers evaluating
+    public-data knowledge graphs and multi-agent designs.
+  </p>
+
+  <div class="meta">
+    <p>This document is written as of 2026-08-09.</p>
+    <p>The intended audience is architects and engineers designing Agentic AI knowledge-graph PoCs on public data.</p>
+    <p>The repository under analysis is <span class="mono">whchoi98/ontology-for-assembly</span>.</p>
+    <p>Primary sources are the repository's README, CLAUDE.md, CHANGELOG, docs/, and code (local checkout as of 2026-08-09).</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>ontology-for-assembly is a newsroom Agentic AI PoC that loads real data from the National Assembly Open Data Portal OpenAPI (286 members of the 22nd Assembly, roughly 74,000 graph edges) into Neptune under a <strong>31-class</strong> ontology, and demos 23 scenarios across 6 personas in a 30-60 minute session.</li>
+    <li>Every graph node inherits a required <span class="mono">source &isin; {real, synthetic, external}</span> field from the Pydantic base class, so real and synthetic data are always distinguished in the UI by a provenance badge (<span class="mono">DataSourceBadge</span>).</li>
+    <li>Two things set it apart: a three-stage evolution comparison that runs the same question through Chatbot (RAG), Agent (Tool Use), and Agentic AI (a 4-agent Planner-Graph-Analyst-Editor pipeline) side by side, and ad-matching governance where only the Agent mode withholds ads on sensitive content and records its reasoning in an <span class="mono">AdMatchDecision</span> node.</li>
+    <li>To handle politics as a sensitive domain, ADR-0004 defines six layers of neutrality guardrails (Bedrock Guardrails, a prompt suffix, a balance score, banned fields at schema level, a pre-vetted question pool, and ad governance) - a pattern that transfers directly to PoCs in other sensitive domains.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem definition: newsroom Agentic AI on public data</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How it works: a 31-class ontology and data cohorts</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Deep dive 1: the three-stage evolution comparison</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Deep dive 2: AI governance, ad matching, and neutrality</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Overview of the 23 scenarios</a></li>
+    <li><span class="no">06</span><a href="#s6-en">How it actually runs</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations and conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem definition: newsroom Agentic AI on public data</h2>
+  <p>
+    The problem this project tackles is: "can a Korean news organization actually use National Assembly public data
+    as a working tool?" The National Assembly Open Data Portal (open.assembly.go.kr) publishes bills, members, votes,
+    committees, and party data through an OpenAPI, but raw data alone does not connect to newsroom work such as
+    editorial judgment, reader-facing services, or policy intelligence. ontology-for-assembly bridges this gap with a
+    <strong>knowledge graph + Agentic AI</strong> combination, packaged as a 30-60 minute PoC demo.
+  </p>
+  <p>
+    The design spec (docs/superpowers/specs/2026-05-13-ontology-assembly-design.md) states three goals:
+    demonstrating newsroom productivity (internal), reader-service differentiation (B2C), and policy intelligence (B2B)
+    on a single data foundation at the same time. That is why the personas are split into three internal ones
+    (editorial, data/AI, ads/sales) and three customer-facing ones (general reader, paid subscriber, corporate/B2B
+    policy intelligence), each viewing the same graph with different KPI weights and tone.
+    The single source of truth for persona definitions is <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>,
+    which registers six entries.
+  </p>
+  <p>
+    The repository borrows its skeleton from the sister project <span class="mono">ontology-for-gcc</span>
+    (plan1-foundation branch). Both README and CLAUDE.md state that the directory layout, the 6-stack CDK setup, and
+    the project harness were carried over as-is, with only the domain swapped to the National Assembly / news media.
+    This document therefore focuses not on the borrowed skeleton but on what is unique to this project: real National
+    Assembly OpenAPI data, the three-stage evolution comparison, ad-matching governance, and provenance badges.
+  </p>
+  <p class="lead-def">
+    <b>Key point:</b> the subject of this PoC is not model performance, but how to enforce provenance transparency and
+    governance at the code level in an Agentic AI system that handles sensitive public data.
+  </p>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How it works: a 31-class ontology and data cohorts</h2>
+
+  <h3>2.1 31 classes, with code as the single source of truth for the schema</h3>
+  <p>
+    The ontology classes are defined as Pydantic models in <span class="mono">data/schemas.py</span>.
+    Exactly <strong>31</strong> classes inherit from the <span class="mono">GraphNode</span> base, and the group totals in
+    <span class="mono">api/services/objects_catalog.py:CLASS_GROUPS</span>, used by the Object Explorer, also add up to 31.
+    The domain groups are as follows.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 31 ontology class groups (per api/services/objects_catalog.py:CLASS_GROUPS)</caption>
+      <thead>
+        <tr><th scope="col">Group</th><th scope="col">Classes</th><th scope="col">Class names</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">People, organizations</th><td><span class="num">6</span></td><td><span class="mono">Person, Party, Staff, Committee, District, Term</span></td></tr>
+        <tr><th scope="row">Legislation</th><td><span class="num">7</span></td><td><span class="mono">Bill, Law, Amendment, Vote, Statement, Session, Budget</span></td></tr>
+        <tr><th scope="row">Topics, external</th><td><span class="num">6</span></td><td><span class="mono">Topic, Policy, Agency, ElectionResult, PollResult, SocialSignal</span></td></tr>
+        <tr><th scope="row">Media</th><td><span class="num">2</span></td><td><span class="mono">Article, Tag</span></td></tr>
+        <tr><th scope="row">Reader side</th><td><span class="num">5</span></td><td><span class="mono">Reader, ReaderProfile, SubscriptionTier, ReadingEvent, Bookmark</span></td></tr>
+        <tr><th scope="row">Advertising</th><td><span class="num">4</span></td><td><span class="mono">Advertisement, AdInventory, AdImpression, AdMatchDecision</span></td></tr>
+        <tr><th scope="row">Analysis meta</th><td><span class="num">1</span></td><td><span class="mono">Cluster</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - the ontology/ directory is a scaffold</span>
+    <p>
+      The repository's <span class="mono">ontology/classes</span> and <span class="mono">ontology/relations</span>
+      directories are currently empty scaffolds, and CLAUDE.md says so explicitly. The actual single sources of truth
+      for the schema are <span class="mono">data/schemas.py</span> (Pydantic) and
+      <span class="mono">api/services/objects_catalog.py</span> (explorer metadata). If you open those directories
+      expecting YAML ontology files, you will find them empty.
+    </p>
+  </div>
+
+  <h3>2.2 Data cohorts: real / synthetic / external source tagging</h3>
+  <p>
+    The standout design choice is that data provenance is enforced at the schema level.
+    The base class of every node requires a <span class="mono">source</span> field, and
+    <span class="mono">extra="forbid"</span> blocks the storage of any undefined attribute
+    (for example, an inferred political-leaning field) outright.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">data/schemas.py - the base class for every Neptune node</div>
+    <pre><code>class GraphNode(BaseModel):
+    <span class="cm"># `source` field is required - used for the DataSourceBadge UI</span>
+    <span class="cm"># `extra="forbid"` - blocks undefined attributes such as inferred political leaning</span>
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    source: Source    <span class="cm"># "real" | "synthetic" | "external"</span></code></pre>
+  </div>
+
+  <p>
+    The three cohorts are also separated by adapter directory. <span class="mono">data/real/</span> holds the National
+    Assembly OpenAPI adapters (bill, member, vote, committee, session, party, agency) and pulls real data including the
+    286 members of the 22nd Assembly (<span class="mono">members_22.json</span>); <span class="mono">data/synthetic/</span>
+    generates synthetic readers, ads, articles, and topics; and <span class="mono">data/external/</span> handles the
+    Naver News and opinion-poll ETL. Which cohort a given persona-scenario combination queries is decided at a single
+    point by <span class="mono">api/services/cohort.py</span>, which translates the decision into a Cypher WHERE clause
+    (<span class="mono">n.source IN [...]</span>). On the frontend, <span class="mono">web/components/DataSourceBadge.tsx</span>
+    renders a provenance badge on every screen, so during a demo it is immediately clear which results are real and
+    which are synthetic.
+  </p>
+
+  <h3>2.3 Architecture</h3>
+  <p>
+    The infrastructure deploys as six AWS CDK v2 stacks (network, data, ai, compute, edge, and observability, per
+    <span class="mono">infra-cdk/bin/assembly.ts</span>). A FastAPI backend (21 routers) and a Next.js 14 frontend run
+    on ECS Fargate ARM64, fronted by CloudFront with Lambda@Edge JWT. The graph is Neptune openCypher; search is an
+    OpenSearch Serverless hybrid of Nori BM25 + Cohere KNN (RRF fusion followed by rerank-v3); the LLM layer is
+    Bedrock Sonnet 4.6 plus AgentCore Memory / Code Interpreter (note: AgentCore Memory is a CDK placeholder and
+    Code Interpreter exists only in mock responses - both are planned items with no real API integration code yet).
+    The B2B persona takes a separate API Gateway Usage Plan + API Key path.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["Browser (6 personas)"] --> CF["CloudFront + Lambda@Edge JWT"]
+  CF --> ALB["ALB"]
+  CF --> GW["API Gateway (B2B API Key)"]
+  ALB --> WEB["Next.js 14 (Fargate ARM64)"]
+  ALB --> API["FastAPI, 21 routers (Fargate ARM64)"]
+  GW --> API
+  API --> NEP[("Neptune openCypher")]
+  API --> OS[("OpenSearch Serverless BM25+KNN")]
+  API --> BR["Bedrock Sonnet 4.6 + Guardrails"]
+  API --> AC["AgentCore Memory / Code Interpreter (planned)"]
+  API --> ADL["Ad Matcher Lambda"]
+    </div>
+    <figcaption>
+      Figure 1. Request paths and the AI layer. The operationally important point is that authentication is enforced at
+      the edge (Lambda@Edge JWT, API Gateway API Key), not in the API layer.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Deep dive 1: the three-stage evolution comparison (Chatbot vs Agent vs Agentic AI)</h2>
+  <p>
+    Scenario B is the demo's first headline message. The same question runs through three modes simultaneously and the
+    results are compared side by side on one screen. Mode dispatch lives in
+    <span class="mono">api/services/three_stage.py</span>, and the third mode's multi-agent pipeline is executed by
+    <span class="mono">api/services/multi_agent.py:run_agentic_pipeline</span>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. The three-stage evolution comparison (per api/services/three_stage.py and multi_agent.py)</caption>
+      <thead>
+        <tr><th scope="col">Stage</th><th scope="col">Approach</th><th scope="col">Execution flow</th><th scope="col">Limitation on display</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Stage 1 Chatbot</th>
+          <td>RAG</td>
+          <td>One Bedrock call with OpenSearch top-K results as context</td>
+          <td>Cannot answer questions outside the retrieved documents</td>
+        </tr>
+        <tr>
+          <th scope="row">Stage 2 Agent</th>
+          <td>Tool Use</td>
+          <td>Sequentially calls predefined tools such as <span class="mono">search_bills, get_proposers, cosponsor_network, analyze_votes</span> based on question intent</td>
+          <td>Acts only within the tool list, no planning</td>
+        </tr>
+        <tr>
+          <th scope="row">Stage 3 Agentic AI</th>
+          <td>Multi-agent</td>
+          <td>Planner (task decomposition) &rarr; Graph (Cypher translation and Neptune queries) &rarr; Analyst (interpretation and hypotheses) &rarr; Editor (article draft and follow-up reporting angles)</td>
+          <td>Autonomous collaboration, including agent-to-agent re-queries</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The role prompts for the four agents are defined as constants in <span class="mono">multi_agent.py:AGENT_PROMPTS</span>,
+    and the Analyst can query the graph stage again using the "re-query the Graph agent" convention when needed.
+    Every LLM call goes through the single entry point <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span>,
+    which runs as a <strong>deterministic demo mock</strong> when <span class="mono">DEMO_PUBLIC_MODE=true</span>
+    (the trigger is this environment variable, not the presence of credentials). This mode is what makes demos and
+    tests reproducible offline. Streaming is unified on SSE, and the event vocabulary
+    (<span class="mono">phase|delta|log|result|error|done</span>) has its single source of truth in the
+    <span class="mono">api/routers/chat.py</span> docstring.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - Stage 2 Tool Use is still simulated</span>
+    <p>
+      The docstring of <span class="mono">three_stage.py:stage2_agent</span> states that "real Bedrock Converse tool use
+      API integration is Phase 2". The current code classifies question intent with rules and replays a sequential
+      tool-calling flow; real Converse integration where the LLM chooses tools by itself is still a planned item.
+      This is an easy point to misread if you take this code as a reference implementation.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Deep dive 2: AI governance, the 3-way ad matching, and neutrality guardrails</h2>
+
+  <h3>4.1 The ad-matching matrix (scenario L)</h3>
+  <p>
+    The second headline message is ad-matching governance. <span class="mono">api/services/ad_matcher.py</span> runs
+    three matching modes against the same article and the same candidate ad pool
+    (<span class="mono">compare_modes()</span>) and shows how the decisions differ.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The 3-way ad-matching comparison (per api/services/ad_matcher.py)</caption>
+      <thead>
+        <tr><th scope="col">Mode</th><th scope="col">Decision basis</th><th scope="col">Sensitive-content handling</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">keyword</th>
+          <td>Simple topic-to-category mapping, scores around 0.3~0.5</td>
+          <td>Cannot detect it; matches ads even on a politician-misconduct story</td>
+        </tr>
+        <tr>
+          <th scope="row">embedding</th>
+          <td>Embedding cosine similarity (Cohere embed-v4 in a real environment, deterministic hash vectors in mock) + <span class="mono">avoid_topics</span> penalty</td>
+          <td>Captures semantic similarity but cannot make ethics or reputation judgments</td>
+        </tr>
+        <tr>
+          <th scope="row">agent</th>
+          <td>Sensitive-pattern detection + strict <span class="mono">avoid_topics</span> enforcement + category scoring</td>
+          <td>On sensitive content, sets <span class="mono">chosen_ad_id=None</span> and withholds the ad placement entirely</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    When the agent mode withholds an ad, its reasoning trace is stored in an <span class="mono">AdMatchDecision</span>
+    node and can be tracked in the ops console. In other words, "why did no ad run on this placement" is left as a
+    record in the graph. Matching runs in a dedicated Ad Matcher Lambda, decoupled from the API response path, and the
+    mode is switched via the <span class="mono">AD_MATCH_MODE</span> environment variable and a UI toggle. Six sample
+    articles ship with the demo: three the Agent must refuse (scandal, tragedy, minor_victim) and three safe matches.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - the code has one more sensitive pattern than the README's three</span>
+    <p>
+      README and CLAUDE.md describe three automatic ad-withholding targets - tragedy, politician misconduct, and minor
+      victims - but the code's <span class="mono">SENSITIVE_PATTERNS</span> defines four regex patterns, adding
+      <span class="mono">controversy</span> (exposes, allegations, disputes). This document counts four, per the code.
+    </p>
+  </div>
+
+  <h3>4.2 The six political-neutrality guardrail layers (ADR-0004)</h3>
+  <p>
+    Because the data is political, neutrality is treated as a precondition for the demo being possible at all.
+    ADR-0004 (docs/decisions/0004) defines six layers of defense in depth.
+  </p>
+  <ol class="plain">
+    <li>Layer 1 - a Bedrock Guardrails resource. Blocks party-name + slander combinations and insults against politicians, applied in both input and output directions for scenarios B, C, I, and K.</li>
+    <li>Layer 2 - a neutrality system prompt suffix (<span class="mono">NEUTRALITY_GUARD_SUFFIX</span>) automatically appended to every LLM call.</li>
+    <li>Layer 3 - a <span class="mono">political_balance_score</span> computed automatically for every response. If only one party is highlighted the UI warns, and if the average drops below 0.8 a CloudWatch alarm fires.</li>
+    <li>Layer 4 - class-level field bans. Political-leaning inference fields such as <span class="mono">Reader.political_leaning</span> are forbidden from being created or stored, enforced at the schema level by <span class="mono">extra="forbid"</span>.</li>
+    <li>Layer 5 - live demos use only a pre-vetted question pool (<span class="mono">scripts/eval_wow_queries.py</span>).</li>
+    <li>Layer 6 - the ad-matching governance from 4.1 above.</li>
+  </ol>
+  <p class="lead-def">
+    <b>Principle:</b> the essence of this design is that governance is not left to prompt instructions alone but is
+    enforced across three layers - the schema (<span class="mono">extra="forbid"</span>), metrics (the balance score),
+    and infrastructure (Guardrails, alarms).
+  </p>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Overview of the 23 scenarios</h2>
+  <p>
+    The single source of truth for the scenario list is the <span class="mono">web/components/Sidebar.tsx:SCENARIOS</span>
+    array, which registers exactly 23 entries (A-W). The design spec started with a base of 14 (A-N); O-S were added on
+    user request, and T-W grew during implementation as advanced insights over the real graph edges. Rather than
+    describing all 23 individually, they compress into the eight implementation patterns below.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. Implementation patterns behind the 23 scenarios (per the CLAUDE.md scenario table and api/routers/)</caption>
+      <thead>
+        <tr><th scope="col">Pattern</th><th scope="col">Scenarios</th><th scope="col">Backend</th><th scope="col">Representative techniques</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Hybrid search, graph traversal</th>
+          <td>A, O</td>
+          <td><span class="mono">search.py, relations.py</span></td>
+          <td>BM25 (Nori) + Cohere KNN + RRF + rerank-v3, graph paths between two people</td>
+        </tr>
+        <tr>
+          <th scope="row">Three-stage chat comparison</th>
+          <td>B</td>
+          <td><span class="mono">chat.py</span></td>
+          <td>three_stage + multi_agent, SSE streaming (AgentCore Memory is a planned item)</td>
+        </tr>
+        <tr>
+          <th scope="row">LLM insights, charts, timelines</th>
+          <td>C, G, K, M, N</td>
+          <td><span class="mono">insights.py</span> plus per-scenario routers</td>
+          <td>Sonnet 4.6 streaming summaries, vote-anomaly detection (Code Interpreter charts are a planned item)</td>
+        </tr>
+        <tr>
+          <th scope="row">Persona matching, lookalike</th>
+          <td>D, F</td>
+          <td><span class="mono">persona_match.py, lookalike.py</span></td>
+          <td>KPI weights for 6 personas, cluster matching + cross-party signals</td>
+        </tr>
+        <tr>
+          <th scope="row">Statistics, maps, external signals</th>
+          <td>E, H, J</td>
+          <td><span class="mono">cluster.py, district_map.py, external_signal.py</span></td>
+          <td>KMeans + politically neutral LLM labels, a 17-province choropleth, news/SNS/poll fusion</td>
+        </tr>
+        <tr>
+          <th scope="row">Neutrality guardrails made visible</th>
+          <td>I</td>
+          <td><span class="mono">neutrality.py</span></td>
+          <td>Bedrock Guardrails + exposing <span class="mono">political_balance_score</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Ad-matching governance</th>
+          <td>L</td>
+          <td><span class="mono">ad_match.py</span> + Ad Matcher Lambda</td>
+          <td>keyword / embedding / agent 3-way, the Agent's ad-withholding trace</td>
+        </tr>
+        <tr>
+          <th scope="row">Generic LLM narrative, real-edge insights</th>
+          <td>P, Q, R, S / T, U, V, W</td>
+          <td><span class="mono">members.py + insight_generic.py / insights_advanced.py</span></td>
+          <td>Reusing <span class="mono">POST /api/insight</span> with no dedicated router / openCypher over roughly 74,000 real edges (party cohesion, influence ranking, vote clusters, swing voters)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    It also matters for reading the code that the 23 scenarios are not 1:1 with the 21 routers. The four scenarios
+    P, Q, R, and S have no dedicated router and are backed by the member-directory data plus the generic
+    <span class="mono">insight_generic.py</span>. Beyond the scenario pages, the deployment also ships the 31-class
+    Object Explorer, an ontology relation graph (mindmap), a member directory (286 members, 9 indicators), an ops
+    console (5 panels), and a code knowledge graph (codegraph) page.
+  </p>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>How it actually runs</h2>
+  <p>
+    Deployment starts by bringing up the six stacks with <span class="mono">npx cdk deploy --all</span> in the
+    <span class="mono">ap-northeast-2</span> region. No new VPC is created - the VPC shared with the sister projects is
+    imported (ADR-0006) - and Neptune sits in a private subnet with no direct access. Data loading therefore runs as a
+    one-shot ECS task that reuses the API container image.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Data loading - one-shot ECS task (CLAUDE.md Key Commands)</div>
+    <pre><code>aws ecs run-task --cluster assembly-dev-cluster --task-definition assembly-dev-api \
+  --overrides '{"containerOverrides":[{"name":"api","command":
+    ["python","-m","data.load","--source","all","--to","s3",
+     "--bucket","assembly-dev-synthetic-data","--neptune","--opensearch"]}]}'</code></pre>
+  </div>
+
+  <p>
+    Quality gates come in two layers. CI runs four jobs on every push/PR
+    (<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>), and <span class="mono">make wow-eval</span>
+    evaluates <strong>84 cases</strong> (the 14 core scenarios A-N &times; 6 personas) against the deployed CloudFront.
+    Per the README badge, the current state is 84/84 passing with an average balance score of 0.98; the script exits
+    with a failure code if the pass rate falls below 85% or the neutrality metric misses its threshold. The ops console
+    (<span class="mono">/ops</span>) shows the same metrics live during a demo across five panels: ingest, guardrail,
+    memory, eval, and trace.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - wow-eval does not cover all 23 scenarios</span>
+    <p>
+      The 84 evaluation cases cover the 14 base scenarios (A-N); the nine extension scenarios O-W are outside this
+      automated evaluation, and the README says so. Reading "wow-eval 100%" as validation of all 23 scenarios would be
+      an over-interpretation.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations and conclusion</h2>
+
+  <h3>7.1 Limitations</h3>
+  <ul class="plain">
+    <li>It is a PoC demo. Authentication exists only at the edge layer (Lambda@Edge, API Gateway); the API layer trusts its upstream, and demo-only bypasses such as <span class="mono">DEMO_PUBLIC_MODE</span> exist.</li>
+    <li>Reader, ad, and article data are entirely synthetic. The business validity of the ad-matching governance has not been verified against real inventory.</li>
+    <li>With <span class="mono">DEMO_PUBLIC_MODE=true</span> the system runs on deterministic mocks and Stage 2 Tool Use is simulated, so not everything on screen is a real LLM call. Real-data paths (Neptune openCypher for T-W) and mock paths coexist.</li>
+    <li>Documentation-to-code consistency is still catching up. The CHANGELOG records corrections to the scenario count (14 &rarr; 23), class count (25+ &rarr; 31), and router count (17 &rarr; 21); every figure in this document follows the code.</li>
+    <li>The neutrality guardrails rely heavily on Korean-language regexes and the pre-vetted question pool. A production scenario with more free-form input would need separate validation.</li>
+  </ul>
+
+  <h3>7.2 Conclusion</h3>
+  <p>
+    The value of ontology-for-assembly lies not in the flash of individual scenarios but in a repeatable skeleton.
+    Mixing real public data and synthetic data under schema-level provenance tagging, making the differences between
+    three AI paradigms comparable on the same question, and enforcing sensitive-domain governance through schema,
+    metrics, and infrastructure rather than prompts - that structure ports directly to domains other than National
+    Assembly data. The repository itself is evidence of that portability: it borrowed the skeleton of the GS Caltex
+    customer-analytics PoC (ontology-for-gcc) and swapped only the domain.
+  </p>
+  <p class="lead-def">
+    <b>Recommendation:</b> when referencing this repository, start not with the scenario code but with the three single
+    sources of truth: <span class="mono">data/schemas.py</span> (schema), <span class="mono">PERSONA_REGISTRY</span>
+    (personas), and <span class="mono">Sidebar.tsx:SCENARIOS</span> (the scenario list).
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="ontology-for-assembly-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ontology-for-assembly">ontology-for-assembly GitHub repository</a>
+      - whchoi98 (local checkout as of 2026-08-09: README, CLAUDE.md, CHANGELOG, docs/decisions ADR 0001-0010, api/, web/, data/, infra-cdk/)
+      <span class="url">https://github.com/whchoi98/ontology-for-assembly</span>
+    </li>
+    <li>
+      <a href="https://open.assembly.go.kr">National Assembly Open Data Portal</a>
+      - National Assembly of the Republic of Korea (the source OpenAPI for the real data cohort)
+      <span class="url">https://open.assembly.go.kr</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html">Amazon Neptune - Accessing the graph with openCypher</a>
+      <span class="url">https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html">Amazon Bedrock AgentCore Developer Guide</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html">Amazon Bedrock Guardrails</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html">Amazon OpenSearch Serverless</a>
+      <span class="url">https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html</span>
+    </li>
+  </ul>
+
+  <h3>Related repositories</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ontology-for-gcc">ontology-for-gcc</a>
+      - the borrowed base (plan1-foundation branch; origin of the directory layout / 6-stack CDK / harness skeleton)
+      <span class="url">https://github.com/whchoi98/ontology-for-gcc</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on the code and documentation of the ontology-for-assembly GitHub
+    repository (README, CLAUDE.md, CHANGELOG, docs/, data/schemas.py, and others).
+    Figures and defaults reflect the time of writing; check the repository and official documentation above for the
+    latest values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== EN PAGE END ===================== -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. KO/EN 두 페이지의 버튼을 모두 묶는다.
+   저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = !!(page && page.getAttribute("data-lang") === "en");
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute(
+        "aria-label",
+        en
+          ? (dark ? "Switch to light mode" : "Switch to dark mode")
+          : (dark ? "라이트 모드로 전환" : "다크 모드로 전환")
+      );
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. 클릭 시 html[data-lang] 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 도 함께 보내 새로 보이는 페이지를 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
   });
 })();
 </script>

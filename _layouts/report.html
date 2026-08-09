@@ -104,9 +104,10 @@ layout: default
     if (!d.querySelector(".page")) return;
     lastDoc = d;
 
-    /* 테마의 단일 진실 원천은 블로그 상단 토글 - 문서 자체 토글은 숨긴다. */
-    var bar = d.querySelector(".theme-bar");
-    if (bar) bar.style.display = "none";
+    /* 테마/언어의 단일 진실 원천은 블로그 상단 토글 - 문서 자체 토글은 전부 숨긴다 (KO/EN 페이지 각각). */
+    Array.prototype.forEach.call(d.querySelectorAll(".theme-bar"), function (bar) {
+      bar.style.display = "none";
+    });
 
     /* 외부 링크가 iframe 자체를 이동시키면 높이/테마 제어가 끊긴다 - 새 탭으로. */
     Array.prototype.forEach.call(d.querySelectorAll('a[href^="http"]'), function (a) {

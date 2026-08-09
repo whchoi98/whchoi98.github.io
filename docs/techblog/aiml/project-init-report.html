@@ -23,6 +23,14 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 파라미터가 localStorage 보다 우선한다. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var m = (window.location.search || "").match(/[?&]lang=(en|ko)\b/);
+  var lang = m ? m[1] : (saved === "en" || saved === "ko" ? saved : "ko");
+  document.documentElement.setAttribute("data-lang", lang);
+})();
 </script>
 <style>
 :root {
@@ -504,6 +512,11 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   line-height: 1.7;
 }
 
+/* ---------- Language toggle ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+.theme-bar { gap: 8px; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 640px) {
   .page { padding: 32px 18px 56px; }
@@ -526,12 +539,13 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
      스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
 <div class="theme-bar">
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
   <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
     <span class="to-dark">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -990,6 +1004,8 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="project-init-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -1031,27 +1047,593 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 
 </div>
 
+<!-- ===================== EN page (BEGIN) ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Tool Deep Dive</p>
+  <h1>Inside the project-init Plugin: Structure and Automatic Documentation Sync</h1>
+  <p class="subtitle">
+    A source-level analysis of how the project-init plugin generates and maintains the Claude Code
+    harness (hooks, skills, agents, commands, CLAUDE.md) with a single command.
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The subject of this analysis is project-init v2.2.0 (released 2026-07-12).</p>
+    <p>Target repository: <span class="mono">github.com/whchoi98/project-init</span>.</p>
+    <p>Primary sources are the repository's README.md, docs/architecture.md, CHANGELOG.md, and the 9 command definition files.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>project-init is a plugin that generates and maintains the Claude Code harness (hooks, skills, agents, commands, CLAUDE.md) through <strong>9 commands</strong>. The current version is 2.2.0 (2026-07-12).</li>
+    <li>Its core mechanisms are a CLAUDE.md quality score (0-100, 6 criteria) and <strong>4-layer auto-sync</strong> (Plan-mode rule, PostToolUse hook, /sync-docs, commit-msg hook), targeting the drift problem where documentation fails to keep up with code.</li>
+    <li>Security is handled by a PreToolUse secret scan with <strong>17 patterns</strong> and a deny list of dangerous commands, while /health-check validates the configuration state on a 0-200 scale. The repository's own test suite has 169 tests, all passing.</li>
+    <li>Bottom line - detection accuracy is highest when you run /init-project &rarr; /sync-docs after the code is implemented. Projects initialized before v2.1 require manual settings.json fixes.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem - The Cost of Manual Harness Setup</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How It Works - Plugin Structure and 9 Commands</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Deep Dive - Quality Score and 4-Layer Auto-Sync</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Deep Dive - Secret Scan and health-check</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Usage in Practice</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Limitations</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem - The Cost of Manual Harness Setup</h2>
+  <p>
+    The quality of Claude Code's behavior is determined by the harness. The harness is the combination
+    of hooks, skills, agents, commands, and CLAUDE.md files; among these, CLAUDE.md carries the project
+    context and effectively acts as a system prompt. A project equipped with this combination and one
+    without it produce different-quality results for the same request.
+  </p>
+  <p>
+    The problem is that all five kinds of components must be built by hand. Each has a different file
+    location and syntax, and hook registration in <span class="mono">settings.json</span> in particular
+    fails silently when it is wrong. The project-init repository itself is proof. Versions before v2.1
+    shipped a nonexistent hook event, <span class="mono">PreCommit</span>, and an invalid deny-pattern
+    syntax; both bugs surfaced as "Invalid key in record" errors at session start in generated projects
+    (the Fixed entries of CHANGELOG 2.1.0). <strong>Even the plugin's own author made harness-syntax
+    mistakes</strong> - that is the first cost of manual setup.
+  </p>
+  <p>
+    The second cost is documentation drift. Code keeps changing while CLAUDE.md stays frozen at the time
+    it was first written, and Claude then reasons from stale context. The README characterizes this
+    creation-and-sync process as "manual and error-prone" and places the plugin's raison d'etre right
+    there. project-init takes the approach of automating both creation (scaffolding) and maintenance
+    (auto-sync, scoring) as commands.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Scope of the term "harness"</span>
+    <p>
+      In this document, "harness" follows the definition in the README's Harness Engineering section:
+      the entire set of project-side configuration that shapes the model's behavior in the Claude Code
+      runtime - the <span class="mono">.claude/</span> directory (hooks, skills, commands, agents,
+      settings.json) plus the root and per-module CLAUDE.md files.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How It Works - Plugin Structure and 9 Commands</h2>
+  <p>
+    The repository is structured as a marketplace. The root
+    <span class="mono">.claude-plugin/marketplace.json</span> is the marketplace manifest, and the
+    actual plugin lives under <span class="mono">plugins/project-init/</span>. The plugin package has
+    three parts: 9 commands (<span class="mono">commands/</span>), 1 agent (doc-sync-checker, running
+    with model: opus), and 1 skill (project-scaffolder, with 13 reference files). Commands, agent, and
+    skill are all defined as Markdown files, and the 9 command definition files total 1,807 lines.
+  </p>
+  <p>
+    The source of everything the plugin generates is the 13 reference files in the project-scaffolder
+    skill's <span class="mono">references/</span> directory (the repository's architecture.md says 12,
+    but 13 is the actual file count). Hook scripts, settings.json, skill, agent, test, README, and
+    CHANGELOG templates are all gathered here, and <span class="mono">/init-project</span> reads them
+    and specializes them for the target project. In other words, the quality of the harness the plugin
+    generates equals the quality of these template files.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 9 commands and their roles (plugins/project-init/commands/, v2.2.0)</caption>
+      <thead>
+        <tr><th scope="col">Command</th><th scope="col">Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">/init-project [path]</span></td><td>17-step project initialization. Detects and adapts to existing projects.</td></tr>
+        <tr><td><span class="mono">/sync-docs</span></td><td>Documentation sync. Runs from Phase 0 (style guide) through Phase 10 (report) and computes quality scores.</td></tr>
+        <tr><td><span class="mono">/generate-readme</span></td><td>Creates or updates a bilingual (EN/KR) README.md.</td></tr>
+        <tr><td><span class="mono">/generate-changelog</span></td><td>Creates a bilingual CHANGELOG.md following the Keep a Changelog convention.</td></tr>
+        <tr><td><span class="mono">/add-module &lt;path&gt;</span></td><td>Adds a module directory with CLAUDE.md and updates the architecture docs.</td></tr>
+        <tr><td><span class="mono">/add-runbook &lt;name&gt;</span></td><td>Creates an operational runbook with verification and rollback sections.</td></tr>
+        <tr><td><span class="mono">/add-adr &lt;title&gt;</span></td><td>Creates an auto-numbered Architecture Decision Record (ADR).</td></tr>
+        <tr><td><span class="mono">/add-reference-doc &lt;layer&gt;</span></td><td>Adds an implementation reference doc skeleton for one of 8 layers (infrastructure, data, api, etc.).</td></tr>
+        <tr><td><span class="mono">/health-check</span></td><td>Validates the entire project setup on a 0-200 scale and reports an A-F grade.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    <span class="mono">/init-project</span> reads the build manifest before running to detect the
+    project type: <span class="mono">package.json</span> means Node.js,
+    <span class="mono">pyproject.toml</span> means Python, <span class="mono">go.mod</span> means Go,
+    <span class="mono">Cargo.toml</span> means Rust, and <span class="mono">pom.xml</span> /
+    <span class="mono">build.gradle</span> mean Java/Kotlin. It pre-fills CLAUDE.md with each type's
+    source-directory conventions and build/test commands. With no manifest at all, it treats the
+    project as new and creates default modules (src/api, src/persistence).
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Command namespace after installation</span>
+    <p>
+      When installed via the marketplace, commands are prefixed with the plugin name, e.g.
+      <span class="mono">/project-init:init-project</span>. The body of this document uses the short
+      form.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Deep Dive - Quality Score and 4-Layer Auto-Sync</h2>
+  <p>
+    Two mechanisms set this plugin apart from other scaffolding tools. One is the quality score, which
+    turns documentation state into a number; the other is the four-layered sync machinery that makes
+    documentation follow the code.
+  </p>
+
+  <h3>3.1 CLAUDE.md quality score, 0-100</h3>
+  <p>
+    <span class="mono">/sync-docs</span> and the doc-sync-checker agent grade each CLAUDE.md on 6
+    criteria out of 100 points. That the two heaviest criteria are commands (20 points) and
+    architecture clarity (20 points) reveals the design intent: the greatest weight goes to the
+    information Claude actually consumes - <strong>commands that can be copied and run as-is, and a
+    structural explanation that is understandable from this file alone</strong>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. The 6 CLAUDE.md quality criteria (README, Quality Scoring section)</caption>
+      <thead>
+        <tr><th scope="col">Criterion</th><th scope="col">Points</th><th scope="col">What it evaluates</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Commands/workflows</td><td><span class="num">20</span></td><td>Whether build/test/deploy commands exist in copy-pasteable form</td></tr>
+        <tr><td>Architecture clarity</td><td><span class="num">20</span></td><td>Whether the codebase structure can be understood from this file alone</td></tr>
+        <tr><td>Non-obvious patterns</td><td><span class="num">15</span></td><td>Whether caveats, quirks, and conventions are documented</td></tr>
+        <tr><td>Conciseness</td><td><span class="num">15</span></td><td>Whether verbose explanations or self-evident information are absent</td></tr>
+        <tr><td>Freshness</td><td><span class="num">15</span></td><td>Whether it reflects the current state of the codebase</td></tr>
+        <tr><td>Actionability</td><td><span class="num">15</span></td><td>Whether instructions are unambiguous and actionable</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Grades are A (90-100), B (70-89), C (50-69), D (30-49), and F (0-29). The score is used more as a
+    delta than as an absolute value: <span class="mono">/sync-docs</span> prints a Before/After table
+    on every run, so whether a sync actually improved the documentation is recorded numerically each
+    time. As the README's troubleshooting section makes explicit, this score measures documentation
+    completeness and says nothing about code quality.
+  </p>
+
+  <h3>3.2 4-layer auto-sync</h3>
+  <p>
+    The guard against documentation drift is not one layer but four. Four mechanisms with different
+    trigger points aim at the same goal (keeping docs current), so if one layer is ignored or fails,
+    the next one catches it.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The 4 auto-sync layers (README, Auto-Sync Mechanisms section)</caption>
+      <thead>
+        <tr><th scope="col">Layer</th><th scope="col">Trigger</th><th scope="col">Type</th><th scope="col">Location</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Auto-sync rule</td><td>Exiting Plan mode</td><td>Automatic</td><td><span class="mono">CLAUDE.md</span></td></tr>
+        <tr><td>PostToolUse hook</td><td>Right after Write/Edit</td><td>Automatic</td><td><span class="mono">.claude/settings.json</span> + <span class="mono">.claude/hooks/</span></td></tr>
+        <tr><td>/sync-docs command</td><td>User invocation</td><td>Manual</td><td>Plugin command</td></tr>
+        <tr><td>commit-msg hook</td><td>git commit</td><td>Automatic</td><td><span class="mono">.git/hooks/commit-msg</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The first layer is rule text embedded in CLAUDE.md that instructs Claude itself to reflect
+    architecture changes decided in Plan mode into the docs before implementation begins. The second is
+    the <span class="mono">check-doc-sync.sh</span> hook that runs right after a file edit and walks up
+    the edited path's parent directories checking for a corresponding CLAUDE.md (the repository's tests
+    verify the <span class="mono">Write|Edit</span> matcher). The third layer is the full sync the user
+    invokes, and the fourth, the Git commit-msg hook, doubles as cleanup by automatically stripping AI
+    Co-Authored-By lines from commit messages.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["User"] --> INIT["/init-project"] --> DET["Project detection"] --> GEN["Structure generation"] --> HK["Hook installation"]
+  HK --> SYNC["4-layer auto-sync"]
+  SYNC --> R["CLAUDE.md rule - Plan mode"]
+  SYNC --> P["PostToolUse hook - Write/Edit"]
+  SYNC --> M["/sync-docs - manual"]
+  SYNC --> C["commit-msg hook - git commit"]
+  R --> UP["Docs kept current"]
+  P --> UP
+  M --> UP
+  C --> UP
+    </div>
+    <figcaption>
+      Figure 1. The flow from initialization to sync (reconstructed from the Data Flow Summary in
+      docs/architecture.md). The key point is that four layers with different trigger timings all
+      converge on the single goal of keeping documentation current.
+    </figcaption>
+  </figure>
+
+  <p class="lead-def">
+    <b>Principle:</b> instead of entrusting documentation sync to human memory, this plugin's central
+    design is to enforce it in overlapping layers through four triggers with different timings.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Deep Dive - Secret Scan and health-check</h2>
+
+  <h3>4.1 PreToolUse secret scan - 17 patterns</h3>
+  <p>
+    The generated <span class="mono">secret-scan.sh</span> hook is designed to inspect staged files
+    before commit on the PreToolUse event (matcher: Bash) and to block with exit 1 when a secret is
+    found. However, the generated settings.json registers the hook with <span class="mono">|| true</span>,
+    which swallows the exit code, so in practice it warns rather than blocks (a mismatch between
+    ADR-004's gate-hook policy and the registration - covered together in the limitations of section 6).
+    The pattern array defines <strong>17 patterns</strong>: AWS Access Key
+    (<span class="mono">AKIA...</span>), OpenAI, Anthropic, GitHub (ghp/gho/fine-grained PAT), Slack
+    (xoxb/xoxp), Stripe (sk_live/rk_live), Google (AIza, ya29), Azure connection strings, and
+    password/secret/api-key assignment forms.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">.claude/hooks/secret-scan.sh - pattern array excerpt</div>
+    <pre><code>PATTERNS=(
+    'AKIA[0-9A-Z]{16}'                          <span class="cm"># AWS Access Key ID</span>
+    '(?&lt;=aws_secret_access_key\s{0,5}[=:]\s{0,5})[A-Za-z0-9/+=]{40}'
+                                                <span class="cm"># AWS Secret Key (context-aware)</span>
+    'sk-ant-[A-Za-z0-9-]{90,}'                  <span class="cm"># Anthropic API Key</span>
+    'ghp_[A-Za-z0-9]{36}'                       <span class="cm"># GitHub Personal Access Token</span>
+    'xoxb-[0-9]+-[A-Za-z0-9]+'                  <span class="cm"># Slack Bot Token</span>
+    ...                                         <span class="cm"># 17 patterns in total</span>
+)
+SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.lock')</code></pre>
+  </div>
+
+  <p>
+    The AWS Secret Key pattern is worth noting. Instead of unconditionally matching any 40-character
+    base64 string, it uses a lookbehind to match only occurrences following an
+    <span class="mono">aws_secret_access_key =</span> context. According to the v2.1 CHANGELOG, this
+    replaced the broad base64 pattern to cut the false positives it produced (SHA256 hashes, URL paths,
+    and the like), and the repository's tests include these true-positive/false-positive (TP/FP) cases
+    as fixtures. In the same vein, the generated settings.json's deny list blocks dangerous commands
+    such as <span class="mono">rm -rf</span>, <span class="mono">git push --force</span>,
+    <span class="mono">git reset --hard</span>, <span class="mono">eval</span>, and
+    <span class="mono">curl|bash</span>.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - Markdown files are excluded from the secret scan</span>
+    <p>
+      Because <span class="mono">SKIP_PATTERNS</span> includes <span class="mono">*.md</span>, secrets
+      written in CLAUDE.md or README.md are not caught by this hook. If you have a habit of putting
+      example keys in documentation, this path becomes a hole. The compensating control is the security
+      step of <span class="mono">/health-check</span>, which separately checks CLAUDE.md and committed
+      files for the presence of secrets.
+    </p>
+  </div>
+
+  <h3>4.2 health-check - 0-200 health score</h3>
+  <p>
+    <span class="mono">/health-check</span> verifies that the harness is intact through 7 check stages:
+    core files (CLAUDE.md present +20, etc.), hook configuration (PostToolUse +10, PreToolUse +10,
+    SessionStart +5, commit-msg +10), the 4 skills (+5 each), documentation coverage, security,
+    CLAUDE.md quality (under 500 lines, section structure, etc. - 6 items at +5 each), and test
+    structure. It even catches hooks that are registered but not executable, using
+    <span class="mono">find ... ! -perm -u+x</span>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. health-check grading scale (commands/health-check.md)</caption>
+      <thead>
+        <tr><th scope="col">Score</th><th scope="col">Grade</th><th scope="col">Status</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="num">160-200</span></td><td>A</td><td>HEALTHY - project is well configured</td></tr>
+        <tr><td><span class="num">120-159</span></td><td>B</td><td>GOOD - minor improvements recommended</td></tr>
+        <tr><td><span class="num">80-119</span></td><td>C</td><td>NEEDS ATTENTION - several gaps to fill</td></tr>
+        <tr><td><span class="num">40-79</span></td><td>D</td><td>POOR - serious configuration problems</td></tr>
+        <tr><td><span class="num">0-39</span></td><td>F</td><td>CRITICAL - initialization required</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    If the quality score (0-100) is a micro metric that measures the content of each individual
+    document, the health score (0-200) is a macro metric that measures the presence and consistency of
+    the harness as a whole. The two scores are linked: the health-check report also displays CLAUDE.md
+    quality in XX/100 form.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Usage in Practice</h2>
+  <p>
+    Installation is two steps: register the marketplace, then install the plugin. After installation,
+    the Claude Code session must be restarted for the commands to appear.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Run in a terminal - installation</div>
+    <pre><code>claude plugin marketplace add https://github.com/whchoi98/project-init
+claude plugin install project-init@project-init
+claude plugin list    <span class="cm"># verify installation</span></code></pre>
+  </div>
+
+  <p>
+    The execution order the README recommends is counterintuitive: run
+    <span class="mono">/init-project</span> not before implementing the code but <strong>after the
+    implementation</strong>. The reason is detection accuracy. With no code, CLAUDE.md becomes guesswork
+    based on user input, architecture.md an empty template, and the hooks' watch paths unclear. With
+    code present, real directories, real components, and exact test commands get filled in. The
+    recommended overall flow is brainstorm &rarr; plan &rarr; implement &rarr; /init-project &rarr;
+    /sync-docs.
+  </p>
+  <p>
+    The recurring routine in the operations phase is <span class="mono">/sync-docs</span>. Running it
+    proceeds from the doc-sync-checker subagent's gap analysis through README/CHANGELOG sync, and
+    prints a Before/After report at the end.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">/sync-docs sample output (README, Example Output)</div>
+    <pre><code>## Sync Report
+
+### Quality Scores (Before -&gt; After)
+| File                | Before | After  | Change |
+|---------------------|--------|--------|--------|
+| ./CLAUDE.md         | B (82) | B (87) | +5     |
+| ./src/api/CLAUDE.md | C (62) | C (69) | +7     |
+| ./src/auth/CLAUDE.md| F (28) | C (58) | +30    |
+
+### Changes Made
+- Files created: 2
+- Files updated: 3
+- ADRs suggested: 1
+- Runbooks missing: deploy-production, incident-response</code></pre>
+  </div>
+
+  <p>
+    The reliability of what gets generated is backed by the repository's own test suite. Running
+    <span class="mono">bash tests/run-all.sh</span> directly, <strong>all 169 tests passed</strong>
+    (hook script verification, secret-pattern TP/FP, plugin structure, version consistency). Generated
+    projects also receive a test framework of the same style (114+ tests per the README).
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Limitations</h2>
+  <p>
+    The limitations confirmed while reading the repository fall into four groups: numeric
+    inconsistencies between documents, non-determinism in scoring, a registration mismatch in the
+    secret-scan gate, and a migration gap.
+  </p>
+  <p>
+    First, some numbers disagree across documents. The nominal maximum of health-check is 200 points,
+    but summing every scoring item in the command definition file yields 195, and the per-category
+    totals in the README add up to 160. Likewise, the README's command details introduce /sync-docs as
+    "9-phase", while the actual command file defines Phase 0 through Phase 10 (CHANGELOG 2.1.0 records
+    the expansion to 11 phases). None of this affects behavior, but when setting team policy based on
+    the scores, take the command definition files as the source of truth.
+  </p>
+  <p>
+    Second, the entity computing the quality and health scores is not a script but Claude itself. The
+    command files are Markdown prompts that prescribe criteria and point values, so one can infer that
+    the same document may score slightly differently across runs. This is an inference from the command
+    structure, not something the repository states. Reading the scores primarily as Before/After deltas
+    reduces the impact of this variance.
+  </p>
+  <p>
+    Third, the secret-scan gate does not actually close. <span class="mono">secret-scan.sh</span>
+    itself returns exit 1 when a secret is found, but both the repository's and the generated
+    template's settings.json register the hook as
+    <span class="mono">bash .claude/hooks/secret-scan.sh 2&gt;/dev/null || true</span>, which turns the
+    exit code into an unconditional 0. This is a mismatch between the ADR-004 decision that gate hooks
+    must be strict and the actual registration; the current behavior is a warning, not a block. If you
+    need blocking, remove the <span class="mono">|| true</span>.
+  </p>
+  <p>
+    Fourth, two operational gaps. doc-sync-checker runs with model: opus and may time out on projects
+    with 50+ source directories (README troubleshooting section), and since plugin updates do not
+    overwrite <span class="mono">settings.json</span> automatically, projects initialized before v2.1
+    need manual migration.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - settings.json of projects initialized before v2.1</span>
+    <p>
+      If you see an "Invalid key in record" error at session start, the cause is the two bugs fixed in
+      v2.1. Manually change the <span class="mono">PreCommit</span> event to
+      <span class="mono">PreToolUse</span> (matcher: Bash), and the deny pattern
+      <span class="mono">Bash(python3 -c:*import os*)</span> to
+      <span class="mono">Bash(python3 -c*import os*)</span>. Updating the plugin does not fix this file
+      automatically.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Conclusion</h2>
+  <p>
+    project-init's contribution is turning harness engineering from individual know-how into a
+    procedure executable as commands. It automates not just creation (17-step scaffolding) but also
+    maintenance (4-layer sync) and measurement (0-100 quality score, 0-200 health score) in a single
+    plugin, and enforces secure defaults for what it generates through the secret scan and the deny
+    list.
+  </p>
+  <p>
+    Three adoption recommendations. First, run <span class="mono">/init-project</span> as a "project
+    maturation" step once the code has settled to some degree. Second, read the
+    <span class="mono">/sync-docs</span> scores as Before/After deltas rather than comparing absolute
+    values. Third, when adopting it in an existing project, run <span class="mono">/health-check</span>
+    first to understand the current harness state, and if pre-v2.1 structure remains, fix settings.json
+    before anything else.
+  </p>
+  <p class="lead-def">
+    <b>One-line verdict:</b> knowing how to write a good CLAUDE.md and keeping it in that state are two
+    different problems, and this plugin is a tool that made the latter its automation target.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="project-init-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary source</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/project-init">project-init - GitHub repository</a>
+      - whchoi98, v2.2.0 (2026-07-12). Figures in the body were verified against README.md,
+      CHANGELOG.md, docs/architecture.md, and the definition files under plugins/project-init/commands/.
+      <span class="url">https://github.com/whchoi98/project-init</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/plugins">Claude Code - Plugins</a>
+      <span class="url">https://code.claude.com/docs/en/plugins</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/hooks">Claude Code - Hooks reference</a>
+      <span class="url">https://code.claude.com/docs/en/hooks</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on the project-init repository (v2.2.0): README.md,
+    CHANGELOG.md, docs/architecture.md, and the command definition files. The test result (169 passing)
+    was verified by running the suite directly in the repository at the time of writing.
+    Command counts, scoring schemes, and pattern counts are as of the time of writing; check the
+    repository and official docs above for current values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== EN page (END) ===================== -->
+
 <script>
 /* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. KO/EN 페이지를 전환하고 선택을 localStorage 에 저장한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      /* Mermaid 다이어그램이 있으면 노출된 페이지 기준으로 재렌더한다. */
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
   });
 })();
 </script>

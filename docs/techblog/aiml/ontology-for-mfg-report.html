@@ -18,6 +18,16 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 언어도 첫 페인트 전에 확정한다. localStorage 값 위에 ?lang= 파라미터가 우선한다. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -82,6 +92,11 @@ body {
   margin: 0 auto;
   padding: 48px 28px 72px;
 }
+
+/* ---------- Language toggle ----------
+   문서는 KO/EN 두 개의 .page 를 나란히 담고, html[data-lang] 이 한쪽만 보여준다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
 a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
 a:hover { color: var(--navy); }
@@ -395,7 +410,7 @@ tbody th {
 }
 
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -519,7 +534,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle ===================== -->
 <div class="theme-bar">
@@ -540,6 +555,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -948,6 +964,8 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="ontology-for-mfg-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -998,27 +1016,558 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 
 </div>
 
+<!-- ===================== EN page ===================== -->
+<div class="page" data-lang="en">
+
+<!-- ===================== Theme toggle (EN) ===================== -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Architecture Deep Dive</p>
+  <h1>ontology-for-mfg: Architecture Analysis of a High-Tech Manufacturing Ontology PoC</h1>
+  <p class="subtitle">
+    A PoC that models the manufacturing domain (BOM, supply chain, standards/regulations, quality, operations)
+    as a knowledge graph with 22 ontology classes, then puts a Bedrock agent and 12 scenarios on top of it.
+    This analysis is grounded in the code and the schema.
+  </p>
+
+  <div class="meta">
+    <p>This document was written as of 2026-08-09.</p>
+    <p>The subject of the analysis is ontology-for-mfg v0.5.6 (released 2026-05-15).</p>
+    <p>The ontology definition file is <span class="mono">ontology/schema.ttl</span>; the agent entry point is <span class="mono">api/services/agent.py</span>.</p>
+    <p>The primary sources are the code, schema, and docs/ documentation of the GitHub repository whchoi98/ontology-for-mfg.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">Summary</h2>
+  <ul>
+    <li>ontology-for-mfg models the high-tech manufacturing domain as a Neptune knowledge graph with <strong>22 classes and 24 relationships</strong>, and layers 12 scenarios (A-L) and 5 personas on top. Every number here was verified directly against schema.ttl and the code.</li>
+    <li>A Bedrock <span class="mono">converse_stream</span>-based agent calls 5 tools (<span class="mono">search_semantic</span>, <span class="mono">neptune_query</span>, <span class="mono">kb_retrieve</span>, <span class="mono">compliance_check</span>, <span class="mono">memory_save</span>) for up to 8 rounds, and answers are streamed token by token over SSE.</li>
+    <li>What is distinctly manufacturing-specific: a 4-level BOM hierarchy (Product, Module, Component, RawMaterial), 4 standards/regulation classes (10 frameworks from JEDEC to CBAM), and a structure that reframes the same question in each persona's KPI language.</li>
+    <li>A live demo runs at https://mfg-ontology.whchoi.net (Cognito-protected). Note that it is a PoC built on roughly 10,644 nodes of synthetic data, so it contains no real supplier or component information.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">The Problem Ontology Solves in Manufacturing</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How It Works: the 22-Class Schema and AWS Architecture</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Deep Dive into the Core Mechanisms</a></li>
+    <li><span class="no">04</span><a href="#s4-en">The 12 Scenarios at a Glance</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Running It: Deployment, Auth, Live Demo</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Limitations</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>The Problem Ontology Solves in Manufacturing</h2>
+  <p>
+    Most data questions in high-tech manufacturing can only be answered by following relationships
+    across several hops. A single question like "which components in this product contain substances
+    regulated under REACH" requires a <strong>join of four or more hops</strong>:
+    product &rarr; module &rarr; component &rarr; substance &rarr; regulation.
+    Relational tables can answer it, but every new question forces the join path to be redesigned,
+    and it is hard for an LLM to compose such queries on its own.
+  </p>
+  <p>
+    The manufacturing-specific relationship chains this project makes explicit in its ontology come in three strands.
+    First, the BOM hierarchy: <span class="mono">Product -hasModule-&gt; Module -consistsOf-&gt; Component -madeOf-&gt; RawMaterial</span>
+    takes the product structure down into a 4-level graph. Second, regulatory tracing:
+    the <span class="mono">Component -containsSubstance-&gt; Substance -regulatedBy-&gt; Regulation</span> chain
+    lets you start from a component and determine REACH-SVHC or RoHS applicability with graph traversal alone.
+    Third, quality tracing: <span class="mono">QualityIncident -about-&gt; Component</span>,
+    <span class="mono">EightDReport -addresses-&gt; QualityIncident</span>, and
+    <span class="mono">EightDReport -identifies-&gt; RootCause -linkedTo-&gt; Supplier</span> connect
+    a quality incident to its root cause and the responsible supplier within a single graph.
+  </p>
+  <p>
+    Promoting standards and regulations from data to classes is where this project diverges from its
+    sibling retail project. Four classes (Standard, Certification, Regulation, Substance) exist in the schema,
+    and real standards-data subsets from 10 frameworks (JEDEC, IPC, AEC-Q, IATF 16949, ISO 9001,
+    REACH-SVHC, RoHS, CBAM, IRA, USMCA) are loaded from <span class="mono">data/public/</span>.
+    A component's certification status and trade-regulation exposure become graph-queryable.
+  </p>
+  <div class="callout note">
+    <span class="callout-title">Note - what "ontology" means in this document</span>
+    <p>
+      Here, ontology does not mean a heavyweight semantic-web stack with an OWL reasoner.
+      It means a pragmatic schema: class and relationship definitions written in OWL syntax in
+      <span class="mono">schema.ttl</span>, then carried over as labels and edge types in a Neptune
+      property graph. Queries are written in openCypher, not SPARQL.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How It Works: the 22-Class Schema and AWS Architecture</h2>
+
+  <h3>2.1 The 22-class schema</h3>
+  <p>
+    <span class="mono">ontology/schema.ttl</span> defines <strong>22 owl:Class and 24 owl:ObjectProperty</strong> entries.
+    The classes fall into five groups.
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 22 ontology classes (from ontology/schema.ttl)</caption>
+      <thead>
+        <tr><th scope="col">Group</th><th scope="col">Classes</th><th scope="col">Representative relationships</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">BOM hierarchy (4)</th>
+          <td>Product, Module, Component, RawMaterial</td>
+          <td><span class="mono">hasModule, consistsOf, madeOf</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Supply chain (7)</th>
+          <td>Manufacturer, Supplier, SubSupplier, CustomerAccount, Plant, Region, TradeLane</td>
+          <td><span class="mono">suppliedBy, subSupplies, operates, shipsVia, connects</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Standards/Regulations (4)</th>
+          <td>Standard, Certification, Regulation, Substance</td>
+          <td><span class="mono">conformsTo, certifiedBy, containsSubstance, regulatedBy, subjectTo</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Quality (3)</th>
+          <td>QualityIncident, EightDReport, RootCause</td>
+          <td><span class="mono">about, addresses, identifies, linkedTo</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Operations/ESG (4)</th>
+          <td>Telemetry, MaintenanceEvent, ESGIndicator, CarbonScope</td>
+          <td><span class="mono">from, on, measuredAt, emits</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    A synthetic-data generator (<span class="mono">data/synthetic/</span>) produces roughly 10,644 nodes
+    following this schema and exports them as ndjson; an in-VPC loader ingests them into
+    Neptune (openCypher bulk) and OpenSearch (<span class="mono">_bulk</span>).
+    The same schema also exists as Pydantic models (<span class="mono">data/schemas.py</span>),
+    so generation, loading, and API responses share a single type definition.
+  </p>
+
+  <h3>2.2 AWS architecture</h3>
+  <p>
+    The runtime environment is entirely AWS managed services. The knowledge graph is Amazon Neptune
+    (openCypher, VPC-internal only), semantic search is Amazon OpenSearch Serverless
+    (VECTORSEARCH collection, Korean Nori analyzer + k-NN HNSW), the LLM is the Amazon Bedrock Converse API,
+    compute is two ECS Fargate ARM64 services (api, web), the edge is CloudFront with an ACM custom domain,
+    and auth is Amazon Cognito. The entire infrastructure is defined as 6 AWS CDK v2 (TypeScript) stacks
+    (network, data, ai, compute, edge, observability).
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["Browser"] --> CF["CloudFront + Cognito auth"]
+  CF --> WEB["ECS Web - Next.js 14"]
+  CF --> ALB["ALB /api/*"]
+  ALB --> API["ECS API - FastAPI AgentRunner"]
+  API --> NEP["Neptune openCypher, 22 classes"]
+  API --> AOSS["OpenSearch Serverless BM25 + k-NN"]
+  API --> BR["Bedrock Sonnet 4.6 / Haiku 4.5 + KB + Guardrails"]
+    </div>
+    <figcaption>
+      Figure 1. Request flow. CloudFront splits static web and /api/* paths, and the FastAPI agent
+      combines the three engines (Neptune, OpenSearch, Bedrock) to stream responses over SSE.
+    </figcaption>
+  </figure>
+
+  <h3>2.3 Bedrock model routing</h3>
+  <p>
+    Models are split by purpose. Conversation and insights, which need long-form Korean reasoning and
+    multi-round tool use, go to Sonnet; structured output with a fixed schema goes to Haiku.
+    Model IDs are the defaults in <span class="mono">api/config.py</span>.
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Model routing (defaults in api/config.py)</caption>
+      <thead>
+        <tr><th scope="col">Purpose</th><th scope="col">Model ID</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Conversational agent, insights (tool-use orchestrator)</td><td><span class="mono">global.anthropic.claude-sonnet-4-6</span></td></tr>
+        <tr><td>8D drafting, follow-up question generation, code-graph community labeling</td><td><span class="mono">global.anthropic.claude-haiku-4-5-20251001-v1:0</span></td></tr>
+        <tr><td>Embeddings (1,024 dimensions)</td><td><span class="mono">amazon.titan-embed-text-v2:0</span></td></tr>
+        <tr><td>Reranker</td><td>Env var left empty - disabled, not available in ap-northeast-2</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Deep Dive into the Core Mechanisms</h2>
+  <h3>3.1 The agent tool-use loop: 5 tools</h3>
+  <p>
+    The heart of the conversational agent (scenario B) is the AgentRunner in <span class="mono">api/services/agent.py</span>.
+    It calls Bedrock <span class="mono">converse_stream</span> and, whenever the model requests a tool,
+    feeds the execution result back into the conversation, looping for <strong>up to 8 rounds</strong>
+    (<span class="mono">max_rounds=8</span>). Since v0.5.6, <span class="mono">contentBlockDelta</span> text chunks
+    are forwarded as SSE <span class="mono">delta</span> events the moment they arrive; per the repository CHANGELOG,
+    time to first token dropped from 2-5 seconds to around 300-600ms.
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The agent's 5 tools (_TOOLS in api/routers/chat.py)</caption>
+      <thead>
+        <tr><th scope="col">Tool</th><th scope="col">Role</th><th scope="col">Backend</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">search_semantic</span></td><td>Fuzzy concept search (e.g. automotive -40°C BGA)</td><td>OpenSearch hybrid search</td></tr>
+        <tr><td><span class="mono">neptune_query</span></td><td>Precise graph queries over BOM, Supplier, Plant, TradeLane</td><td>Neptune openCypher</td></tr>
+        <tr><td><span class="mono">kb_retrieve</span></td><td>Passage retrieval over datasheets, 8D reports, regulatory documents</td><td>Bedrock Knowledge Base</td></tr>
+        <tr><td><span class="mono">compliance_check</span></td><td>REACH, RoHS, AEC-Q verification by component ID</td><td>Deterministic rule engine</td></tr>
+        <tr><td><span class="mono">memory_save</span></td><td>Session-scoped fact storage</td><td>DynamoDB table (<span class="mono">ontology-mfg-dev-memory</span>) - the Aurora migration noted in code comments is not yet implemented</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    There are two layers of stability protection. First, synchronous Bedrock calls such as the 8D pipeline
+    (and ops evaluation runs) are bounded by a 25-second timeout via
+    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span> and fall back to a deterministic
+    template on expiry (ADR-003). Chat is handled separately as <span class="mono">converse_stream</span> streaming.
+    Second, so that the demo never renders an empty screen when a data path dies, most deterministic scenarios
+    (10 routers) carry a synthetic fallback and a <span class="mono">_synthetic</span> flag;
+    search (A) and chat (B) do not.
+  </p>
+  <div class="callout warn">
+    <span class="callout-title">Caution - the defenses you need when an LLM writes graph queries</span>
+    <p>
+      <span class="mono">neptune_query</span> is a tool where the model writes Cypher directly, so prompt
+      injection could smuggle in write queries. This project puts a read-only gateway in
+      <span class="mono">chat.py:_tool_neptune</span> that blocks CREATE, DELETE, SET, MERGE, DROP and similar
+      via a regex denylist (ADR-002), and passes user-supplied labels only through a 22-class allowlist.
+      If you build the same structure and omit this layer, you leave open a path for the agent to mutate the graph.
+    </p>
+  </div>
+
+  <h3>3.2 Hybrid search: BM25 + k-NN + RRF</h3>
+  <p>
+    Semantic search (scenario A) runs two searches in parallel and merges them. Korean Nori-analyzer-based BM25
+    and Titan 1,024-dimension embedding k-NN each fetch 50 hits, and Reciprocal Rank Fusion (k=60) fuses the
+    rankings to return the top 10. OpenSearch Serverless has no search pipeline module, so
+    <strong>the RRF fusion is performed directly in Python</strong>.
+  </p>
+  <div class="codeblock">
+    <div class="code-caption">api/services/search.py - RRF fusion (excerpt)</div>
+    <pre><code>@staticmethod
+def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
+    scores: dict[str, float] = {}
+    for hits in hit_lists:
+        for rank, h in enumerate(hits, start=1):
+            doc_id = h["_id"]
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (k + rank)
+    return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)</code></pre>
+  </div>
+  <p>
+    The design intent is complementarity. BM25 is strong on exact tokens like part numbers and standard names,
+    while k-NN is strong on differently-worded queries like "capacitor for automotive high-temperature environments".
+    A Bedrock reranker stage is prepared in the code but disabled in the current deployment because it is
+    not available in ap-northeast-2.
+  </p>
+
+  <h3>3.3 Per-persona framing</h3>
+  <p>
+    Same screen, same question - but each viewer has different KPIs. This project treats its five personas
+    (Buyer, Engineer, Quality, SCM, Plant) as <strong>runtime context</strong>, not routing.
+    On the web, a single <span class="mono">useActivePersona()</span> context changes the framing of all
+    12 scenario screens; in the API, the system prompt is formatted with the <span class="mono">persona</span> value.
+    CLAUDE.md records that per-persona route directories were built and then removed in v0.5.2.
+  </p>
+  <p>
+    At the end of every turn, <span class="mono">api/services/followups.py</span> uses Haiku
+    (300-token budget) to generate three Korean follow-up questions, emitted as an SSE
+    <span class="mono">suggested_followups</span> event. A per-persona tone map goes in at this point:
+    Buyer questions lean toward unit cost, lead time, and MOQ; Engineer toward specs and AEC-Q/JEDEC
+    certification; Quality toward 8D and REACH-SVHC; SCM toward TradeLane, IRA, and CBAM;
+    Plant toward OEE and telemetry. On generation failure it quietly falls back to an empty array.
+  </p>
+
+  <h3>3.4 A representative scenario pattern: 8D / RCA</h3>
+  <p>
+    The 8D report scenario (J) best illustrates how this architecture composes.
+    The graph holds the quality chain from QualityIncident through EightDReport and RootCause to Supplier,
+    and <span class="mono">api/services/eight_d_writer.py</span> drafts the report.
+    Haiku is forced to call the <span class="mono">emit_eight_d</span> tool exactly once, and the tool schema
+    requires <strong>8 mandatory string fields</strong> (D1-D8), so the output format is guaranteed by the
+    schema, not the prompt. <span class="mono">maxTokens=1500</span> keeps it inside the 25-second budget.
+  </p>
+  <p class="lead-def">
+    <b>Principle:</b> structured output goes to a small model plus a tool-use schema; free-form reasoning goes
+    to a large model plus a tool loop. This separation runs through the whole project (ADR-001).
+  </p>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>The 12 Scenarios at a Glance</h2>
+  <p>
+    Scenarios A through L cover the manufacturing lifecycle. Each scenario maps to one router in
+    <span class="mono">api/routers/</span> and one web page, and the core-engine column below reflects
+    the services each router actually imports. The LLM is involved only in the B and J family;
+    most of the rest are combinations of graph queries and deterministic domain engines.
+  </p>
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. The 12 scenarios A-L (based on api/routers/)</caption>
+      <thead>
+        <tr><th scope="col">Code</th><th scope="col">Scenario</th><th scope="col">Router</th><th scope="col">Core engine</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A</td><td>Semantic search</td><td><span class="mono">search.py</span></td><td>Hybrid search (BM25 + k-NN + RRF) + Neptune</td></tr>
+        <tr><td>B</td><td>Conversational agent</td><td><span class="mono">chat.py</span></td><td>AgentRunner (Sonnet 4.6) + 5 tools, SSE</td></tr>
+        <tr><td>C</td><td>Insights</td><td><span class="mono">insights.py</span></td><td>Neptune aggregation + deterministic templates (no LLM, plain POST)</td></tr>
+        <tr><td>D</td><td>Spec match</td><td><span class="mono">spec_match.py</span></td><td>Hybrid search + reranker interface</td></tr>
+        <tr><td>E</td><td>Compliance verification</td><td><span class="mono">compliance.py</span></td><td>compliance_engine + Neptune</td></tr>
+        <tr><td>F</td><td>Substitute parts</td><td><span class="mono">substitute.py</span></td><td>Neptune graph queries</td></tr>
+        <tr><td>G</td><td>Price/inventory comparison</td><td><span class="mono">price.py</span></td><td>Neptune graph queries</td></tr>
+        <tr><td>H</td><td>Global SCM lane rerouting</td><td><span class="mono">scm_lane.py</span></td><td>lane_router simulation + carbon_calc</td></tr>
+        <tr><td>I</td><td>Supplier RFM</td><td><span class="mono">supplier_rfm.py</span></td><td>rfm_scorer + Neptune</td></tr>
+        <tr><td>J</td><td>8D / RCA</td><td><span class="mono">eight_d.py</span></td><td>eight_d_writer (Haiku 4.5, 8-field tool use), SSE</td></tr>
+        <tr><td>K</td><td>ESG / CBAM</td><td><span class="mono">esg_cbam.py</span></td><td>carbon_calc + Neptune</td></tr>
+        <tr><td>L</td><td>PdM / IoT</td><td><span class="mono">pdm.py</span></td><td>Telemetry, MaintenanceEvent graph queries</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    The patterns compress into three. Search-type (A, D): hybrid search generates candidates and the graph
+    attaches context. Deterministic (C, E, F, G, H, I, K, L): openCypher queries and domain engines
+    (tariff lane simulation, RFM scoring, carbon calculation) compute values without an LLM.
+    Only the generative pair (B, J) involves Bedrock, and all of them have SSE streaming and timeout fallbacks.
+    One caveat: for insights (C), the repository documentation (ADR-001) describes LLM narrative generation
+    while the current code uses only Neptune aggregation and deterministic templates - a point where docs and
+    code diverge. Reading the 12 as combinations of these three patterns is more useful for understanding
+    the structure than reading them as a list.
+  </p>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Running It: Deployment, Auth, Live Demo</h2>
+
+  <h3>5.1 Deployment pipeline</h3>
+  <p>
+    CI is three parallel GitHub Actions jobs (api: pytest, web: tsc + next build, cdk: Jest invariant tests);
+    image deployment is manual. An ARM64 image is built, pushed to ECR, then the ECS service is force-redeployed.
+    As of v0.5.6 the pytest suite passes 175 tests.
+  </p>
+  <div class="codeblock">
+    <div class="code-caption">Deployment - run from the dev host (procedure from CLAUDE.md)</div>
+    <pre><code>docker build --platform linux/arm64 -f api/Dockerfile -t &lt;ecr&gt;/ontology-mfg-dev-api:latest .
+docker push &lt;ecr&gt;/ontology-mfg-dev-api:latest
+aws ecs update-service --cluster ontology-mfg-dev-cluster \
+  --service ontology-mfg-dev-api --force-new-deployment   <span class="cm"># rolling redeploy, ~3-5 min</span></code></pre>
+  </div>
+
+  <h3>5.2 Auth and guardrails</h3>
+  <p>
+    The whole site is protected by an Amazon Cognito User Pool (us-east-1), and API middleware validates JWTs.
+    Only paths like <span class="mono">/healthz</span> are exempt. On top of this, Bedrock Guardrails filters
+    four manufacturing-specific topics (confidential IP, competitor disparagement, regulatory violations,
+    hazardous chemicals) and surfaces intervention records in the ops console. Neptune and OpenSearch are
+    VPC-internal only - unreachable from outside and accessible only via the API task role.
+  </p>
+
+  <h3>5.3 Live demo and ops console</h3>
+  <p>
+    The live demo runs at https://mfg-ontology.whchoi.net and <strong>requires a Cognito login</strong>
+    (accounts are issued through the project owner). The ops console includes an evaluation board
+    (<span class="mono">/api/ops/eval</span>) that replays 30 manufacturing-domain queries and scores them,
+    and a trace ring buffer (<span class="mono">/api/ops/trace</span>) showing the last 200 tool_call events,
+    so you can see in the deployed environment exactly which tools the agent called and with which arguments.
+  </p>
+  <div class="callout note">
+    <span class="callout-title">Note - how SSE and CloudFront get along</span>
+    <p>
+      Token streaming collapses if any intermediate layer buffers. This project disables CloudFront origin
+      compression on the SSE path (ADR-007) and attaches Lambda@Edge only to viewer request (auth),
+      avoiding buffering at the origin response stage. If SSE arrives as one lump only in the deployed
+      environment, these are the two places to check first.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Limitations</h2>
+  <p>
+    This project is a PoC, and the repository says so itself. Before using this document as grounds for an
+    adoption decision, check the following boundaries.
+  </p>
+  <ul class="plain">
+    <li><strong>The data is synthetic.</strong> The roughly 10,644 nodes in the graph were produced by a generator and contain no real supplier or component information. Only the standards/regulation data is a subset of real frameworks. Neptune query performance at real-data scale (millions of nodes) has not been validated.</li>
+    <li>The reranker is disabled. Because it is not available in ap-northeast-2, search quality reflects only up to RRF fusion, and the rerank stage in the code is currently a pass-through in the deployment.</li>
+    <li>Image deployment is manual. CI runs tests only; ECR push and ECS redeploy are executed by a human.</li>
+    <li>The read-only Cypher gateway is based on a regex denylist. It is a valid defensive layer, but in production it would be safer to pair it with privilege separation (a read-only endpoint or IAM-policy-level constraints).</li>
+    <li>The demo is locked behind Cognito, so the screens cannot be verified from documentation alone. The code and the docs/ descriptions are the primary evidence.</li>
+    <li>No documentation/code mismatches were found while verifying the numbers. The 22 classes, 5 tools, 5 personas, and 12 scenarios all match the README, schema.ttl, and the code. One nuance: the "16 routers" statement in docs/architecture.md only adds up if you count the 15 router files plus the <span class="mono">/healthz</span> endpoint in <span class="mono">main.py</span>.</li>
+  </ul>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Conclusion</h2>
+  <p>
+    What ontology-for-mfg demonstrates is not the generic idea of "attaching manufacturing data to an LLM"
+    but a concrete arrangement of separated roles. Domain knowledge lives in the 22-class schema and the graph,
+    exact computation lives in deterministic engines, and only ambiguous query interpretation and narration
+    go to the LLM. As a result, only 2 of the 12 scenarios (B, J) need an LLM; the rest answer with
+    reproducible graph queries.
+  </p>
+  <p>
+    If you are evaluating an ontology-backed agent for a manufacturing domain, this repository offers four
+    reusable patterns: a schema design that promotes BOM and regulations to classes, a read-only Cypher gateway,
+    the Sonnet/Haiku role split with a 25-second timeout plus deterministic fallback, and a framing structure
+    that treats personas as runtime context rather than routing. The code is public on GitHub, so a good
+    starting point is to read schema.ttl and <span class="mono">api/services/agent.py</span> first.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="ontology-for-mfg-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ontology-for-mfg">whchoi98/ontology-for-mfg</a>
+      - GitHub repository, v0.5.6 (2026-05-15)
+      <span class="url">https://github.com/whchoi98/ontology-for-mfg</span>
+    </li>
+    <li>
+      <a href="https://mfg-ontology.whchoi.net">Live demo (Cognito-protected - account required)</a>
+      <span class="url">https://mfg-ontology.whchoi.net</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/neptune/latest/userguide/feature-overview-opencypher.html">Amazon Neptune - openCypher overview</a>
+      <span class="url">https://docs.aws.amazon.com/neptune/latest/userguide/feature-overview-opencypher.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html">Amazon Bedrock - Converse API</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-vector-search.html">Amazon OpenSearch Serverless - vector search collections</a>
+      <span class="url">https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-vector-search.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html">Amazon Cognito overview</a>
+      <span class="url">https://docs.aws.amazon.com/cognito/latest/developerguide/what-is-amazon-cognito.html</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of: 2026-08-09.
+    This document is a technical analysis based on the code, schema, and docs/ documentation of the
+    GitHub repository whchoi98/ontology-for-mfg (v0.5.6).
+    Numbers and configuration reflect the time of writing (작성 시점 기준); check the repository and the official
+    documentation above for current values.
+  </p>
+</footer>
+
+</div>
+<!-- /EN page -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. KO/EN 두 페이지의 버튼을 함께 묶는다.
+   저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = document.querySelectorAll(".theme-toggle:not(.lang-toggle)");
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    Array.prototype.forEach.call(btns, function (btn) {
+      var en = btn.closest ? !!btn.closest('.page[data-lang="en"]') : false;
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
+  Array.prototype.forEach.call(btns, function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+</script>
+
+<script>
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 가 있으면 themechange 를 함께 dispatch 해 새로 보이는 페이지의 다이어그램을 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = document.querySelectorAll(".lang-toggle");
+  if (!btns.length) return;
+
+  function toggle() {
+    var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+    root.setAttribute("data-lang", next);
     try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+  }
+  Array.prototype.forEach.call(btns, function (btn) {
+    btn.addEventListener("click", toggle);
+  });
+
+  document.addEventListener("langchange", function () {
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { reason: "langchange" } }));
+    }
   });
 })();
 </script>

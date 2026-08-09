@@ -23,6 +23,16 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 이 localStorage 보다 우선하며, 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -401,8 +411,13 @@ tbody th {
   line-height: 1.65;
 }
 
+/* ---------- Language toggle ----------
+   .page 가 언어별로 하나씩 있고, html[data-lang] 이 어느 쪽을 보여줄지 정한다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -556,7 +571,7 @@ html:not(.mermaid-ready) .diagram .mermaid {
 </noscript>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -579,6 +594,7 @@ html:not(.mermaid-ready) .diagram .mermaid {
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -952,6 +968,8 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   </div>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="claude-code-advisor-cost-analysis-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -997,28 +1015,523 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
 
 </div>
 
+<!-- ===================== EN page ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">CLAUDE CODE / COST BENCHMARK</p>
+  <h1>Claude Code Advisor Cost Analysis - Sonnet 5 + Opus 5 Advisor vs Fixed Opus 5</h1>
+  <p class="subtitle">
+    A measured token-cost comparison of the same tasks run under an advisor configuration and a
+    fixed-Opus configuration. Covers which configuration is cheaper by task size, and where the
+    break-even point falls.
+  </p>
+
+  <div class="stat" role="img" aria-label="Relative cost of the advisor configuration: 25% more expensive than fixed Opus on a short task, 15% cheaper on a large task">
+    <div class="stat-item old">
+      <span class="stat-num">+25<span class="unit">%</span></span>
+      <span class="stat-sub">Short task - vs fixed Opus with 1 advisor call</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">-15<span class="unit">%</span></span>
+      <span class="stat-sub">Large refactoring - still cheaper with 2 advisor calls</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>Written as of 2026-08-08.</p>
+    <p>Intended for engineers deciding on executor and advisor model configurations in Claude Code.</p>
+    <p>The measured metric is <span class="mono">modelUsage</span> as returned by <span class="mono">claude -p --output-format json</span>.</p>
+    <p>Primary sources are first-hand experiments (Claude Code v2.1.226, 2026-08-08) and official Anthropic documentation.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>The Sonnet 5 + Opus 5 advisor configuration was <strong>25% more expensive than fixed Opus 5 on a short task ($1.238 vs $0.993)</strong>, and 15% cheaper on a 435-line refactoring task ($3.094 vs $3.646).</li>
+    <li>Advisor cost comes from input, not from the response (output). Each call re-reads the entire conversation transcript <strong>with no caching</strong> (advisor-side <span class="mono">cache_read</span> was 0), so the longer the conversation, the more each call costs.</li>
+    <li>Attaching an advisor does not guarantee it gets called. When a short task finished with no calls, the overhead was zero and the run was 43% cheaper than fixed Opus - but in this measurement, a single call flipped the total cost.</li>
+    <li>Short, straightforward tasks were fine with Sonnet alone, while long multi-stage work favored the advisor configuration. In this measurement, as the task grew, the savings from generating most output at Sonnet rates outgrew the advisor's input cost. Note that this savings figure also mixes in differences in output volume between the two models.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Background - the advisor tool and experiment design</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How it works - the cost structure of an advisor call</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Experiment 1 - short task</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Experiment 2 - large refactoring</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Break-even analysis</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Recommendations by scenario</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations</a></li>
+    <li><span class="no">08</span><a href="#s8-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Background - the advisor tool and experiment design</h2>
+  <p>
+    Claude Code lets you designate an advisor model separate from the executor model.
+    You enable it with the <span class="mono">--advisor claude-opus-5</span> flag, the
+    <span class="mono">/advisor</span> command, or the <span class="mono">advisorModel</span> setting;
+    the executor calls the advisor tool when it judges that it needs advice from a stronger model.
+    Whether a call happens is up to the executor's judgment -
+    <strong>configuration alone does not guarantee a call.</strong>
+  </p>
+  <p>
+    At the API level, the advisor is implemented as the <span class="mono">advisor_20260301</span> tool,
+    and calls are recorded as <span class="mono">usage.iterations[].type == "advisor_message"</span>.
+    In Claude Code's JSON output, advisor usage is aggregated as a separate row for the advisor model
+    in <span class="mono">modelUsage</span>.
+  </p>
+  <p>
+    The experiment ran two tasks across five arms. Task 1 is a CLI expense tracker using only the
+    Python standard library, plus unittest coverage. Task 2 refactors a 435-line legacy monolith
+    into a package. All arms ran in an isolated environment
+    (<span class="mono">--setting-sources project --strict-mcp-config</span>) with identical prompts.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Experiment arms</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">Task</th><th scope="col">Configuration</th><th scope="col">Advisor calls</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">A</th><td>Task 1 - expense tracker CLI</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">0</span> (natural behavior)</td></tr>
+        <tr><th scope="row">A2</th><td>Task 1 - expense tracker CLI</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">1</span> (induced via system prompt)</td></tr>
+        <tr><th scope="row">B</th><td>Task 1 - expense tracker CLI</td><td>Fixed Opus 5, advisor disabled</td><td>-</td></tr>
+        <tr><th scope="row">C</th><td>Task 2 - large refactoring</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">2</span> (induced via system prompt)</td></tr>
+        <tr><th scope="row">D</th><td>Task 2 - large refactoring</td><td>Fixed Opus 5</td><td>-</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - advisor tokens are not added to the executor's totals</span>
+    <p>
+      Tokens spent by the advisor are recorded as a separate row for the advisor model in
+      <span class="mono">modelUsage</span>. If you tally cost from the executor row alone,
+      the advisor cost is missed entirely. Total cost must sum both rows.
+      The tables in this document omit the Haiku utility row (about $0.001).
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How it works - the cost structure of an advisor call</h2>
+  <p>
+    When the advisor is called, the entire conversation transcript up to that point is passed as
+    the advisor model's input. Claude Code does not use prompt caching on the advisor side, so this
+    whole input is <strong>billed as fresh, uncached input on every call</strong>. In our measurements,
+    advisor-side <span class="mono">cache_read</span> was 0 every time.
+  </p>
+  <p>
+    The single call in Experiment 1 makes the structure clear: 53,210 input tokens and 2,828 output
+    tokens, at $0.337 for the one call. The advisory response itself (2,828 output tokens) is small;
+    most of the cost comes from the input reading the transcript. In Experiment 2, the longer
+    conversation pushed average input per call to 77,611 tokens, and the two calls together cost $0.856.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Sonnet 5 executor
+  participant O as Opus 5 advisor
+  Note over S: Iterates on implementation and tests
+  S->>O: Advisor call - full transcript passed
+  Note over O: Reads 53,210 input tokens with no cache
+  O-->>S: Advisory response - 2,828 output tokens
+  Note over S: Continues work with the advice applied
+    </div>
+    <figcaption>
+      Figure 1. Token flow of a single advisor call (measured in Experiment 1). The center of
+      gravity of the cost lies in the transcript input, not the response - that is the starting
+      point of this document.
+    </figcaption>
+  </figure>
+
+  <p>
+    Two things follow from this structure. First, per-call cost grows in proportion to conversation
+    length. Second, the same advice costs more the later in the conversation it is requested.
+    A configuration that calls the advisor frequently accumulates overhead quickly as the
+    conversation grows.
+  </p>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Experiment 1 - short task</h2>
+  <p>
+    Task 1 is a CLI expense tracker using only the Python standard library, plus unittest coverage.
+    It includes add / list / summary / delete subcommands, JSON persistence, input validation, and
+    error-case tests, but it is a short, straightforward task that requires little design judgment.
+    All three arms ran to completion with passing tests.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Experiment 1 results (1 run per condition; K in cache read = 1,000 tokens)</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">Configuration</th><th scope="col">Turns</th><th scope="col">Time</th><th scope="col">Output tokens</th><th scope="col">Cache read</th><th scope="col">Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">A</th><td>Advisor configured, 0 calls</td><td><span class="num">22</span></td><td><span class="num">135s</span></td><td><span class="num">9,626</span></td><td><span class="num">959K</span></td><td><span class="num">$0.570</span></td></tr>
+        <tr><th scope="row">A2</th><td>Advisor configured, 1 call</td><td><span class="num">23</span></td><td><span class="num">213s</span></td><td><span class="num">14,516 + 2,828</span></td><td><span class="num">1,120K</span></td><td><span class="num">$1.238</span></td></tr>
+        <tr><th scope="row">B</th><td>Fixed Opus 5</td><td><span class="num">15</span></td><td><span class="num">213s</span></td><td><span class="num">18,052</span></td><td><span class="num">530K</span></td><td><span class="num">$0.993</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    In Arm A, Sonnet finished without asking for advice, in which case the advisor configuration's
+    overhead is zero. At $0.570, it was <strong>43% cheaper</strong> than fixed Opus ($0.993).
+    In contrast, A2 - where a system prompt induced one call - added $0.337 of advisor cost and
+    also grew the executor's own work (executor $0.900), for a total of $1.238.
+  </p>
+  <p>
+    Fixed Opus used fewer turns (15 vs 22) with roughly 2.8x the output per turn
+    (1,203 vs 438 tokens). It finishes in fewer attempts but at a higher token rate -
+    a predictable cost profile.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - on short tasks, a single call can flip the cost comparison</span>
+    <p>
+      Even if you attach the advisor expecting it to go unused, in this measurement a single call
+      on the short task pushed the total ($1.238) past fixed Opus ($0.993). About half of the
+      reversal came not from the call cost ($0.337) but from the extra executor work that
+      accompanied the call. Whether a call happens is the executor's judgment and cannot be
+      predicted in advance. If a predictable cost ceiling matters, this uncertainty is itself a cost.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Experiment 2 - large refactoring</h2>
+  <p>
+    Task 2 refactors a 435-line legacy monolith (8 instances of duplicated code, discount rules
+    implemented twice, manual argv parsing) into a single-responsibility package. It includes a
+    backward-compatibility constraint requiring the 26 original tests to pass <strong>unmodified</strong>,
+    a migration to argparse, added type hints, and a new top-customers feature with new tests.
+    Both arms started from the same seed and honored the unmodified-tests constraint (verified via diff).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. Experiment 2 results (1 run per condition; K in cache read = 1,000 tokens)</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">Configuration</th><th scope="col">Turns</th><th scope="col">Time</th><th scope="col">Output tokens</th><th scope="col">Cache read</th><th scope="col">Cost</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">C</th><td>Advisor configured, 2 calls</td><td><span class="num">85</span></td><td><span class="num">475s</span></td><td><span class="num">33,780 + 3,176</span></td><td><span class="num">4,351K</span></td><td><span class="num">$3.094</span></td></tr>
+        <tr><th scope="row">D</th><td>Fixed Opus 5</td><td><span class="num">45</span></td><td><span class="num">713s</span></td><td><span class="num">61,479</span></td><td><span class="num">2,531K</span></td><td><span class="num">$3.646</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    This time the advisor configuration won. C paid for two advisor calls ($0.856) and still
+    totaled $3.094 - <strong>15% cheaper</strong> than fixed Opus ($3.646). Advisor overhead as
+    a share of total cost was 28%, essentially the same as A2 in Experiment 1 (27%).
+    What decided the outcome was not the ratio but the absolute amounts - the next section
+    walks through that structure.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - output volumes differ, so this is not a pure price comparison</span>
+    <p>
+      C produced 685 lines / 38 tests; D produced 1,589 lines / 57 tests. Opus's working style of
+      producing more elaborate, larger deliverables is mixed into the cost, so this 15% should be
+      read not as "the price difference for the same work" but as "the difference in the bill
+      when given the same task."
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Break-even analysis</h2>
+  <p>
+    Overlaying the two experiments shows which way the break-even moves. The advisor configuration
+    contains two forces pulling in opposite directions. The savings come from generating most
+    output at Sonnet rates, and since output grows with task size, so do the savings.
+    The overhead is the input cost of re-reading the entire transcript, uncached, on every call -
+    and the longer the conversation, the more each call costs (input per call:
+    53,210 tokens &rarr; 77,611 tokens, a 46% increase).
+  </p>
+  <p>
+    In our measurements, the savings grew faster. Comparing the Sonnet executor cost
+    (A2 $0.900, C $2.238) against fixed Opus on the same task: in Experiment 1 the savings were
+    $0.093 (= $0.993 - $0.900), short of the $0.337 advisor overhead; in Experiment 2 the savings
+    were $1.408 (= $3.646 - $2.238), <strong>overtaking</strong> the $0.856 overhead.
+    Overhead as a share of total cost held steady at 27-28% in both experiments, so the reversal
+    came not from dilution of the ratio but from a race between absolute amounts.
+  </p>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">Exp 1 (A2) - savings $0.093 &lt; overhead $0.337</span>
+        <span class="flow-val">+$0.245 (+25%)</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">Exp 2 (C) - savings $1.408 &gt; overhead $0.856</span>
+        <span class="flow-val">-$0.552 (-15%)</span>
+      </div>
+    </div>
+    <figcaption>
+      Figure 2. Total-cost difference of the advisor configuration vs fixed Opus. The absolute
+      advisor overhead rose from $0.337 to $0.856, but the savings from generating output at
+      Sonnet rates grew faster, flipping a 25% deficit into a 15% advantage.
+    </figcaption>
+  </figure>
+
+  <p class="lead-def">
+    <b>Principle:</b> the bulk of advisor cost is not the advisory response but the input that
+    re-reads the entire transcript, uncached, on every call. The Sonnet-rate savings must outgrow
+    this overhead for the advisor configuration to win.
+  </p>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Recommendations by scenario</h2>
+  <p>
+    The first-order criterion is task size. Within the scope of this experiment, "Sonnet alone for
+    short and straightforward, advisor configuration for long" was the simplest rule consistent
+    with the measurements, with fixed Opus as the exception for short tasks that need design
+    judgment. The remaining axis is cost predictability. Table 4 is a tentative rule based on one
+    run per condition, and row 2 is a cost extrapolation for a scenario not directly tested.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. Configuration choice by operating scenario</caption>
+      <thead>
+        <tr><th scope="col">Scenario</th><th scope="col">Recommended configuration</th><th scope="col">Rationale</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Short, straightforward one-off task</th>
+          <td>Sonnet alone (no advisor)</td>
+          <td>Finished Experiment 1 without advice. With no calls, 43% cheaper than fixed Opus</td>
+        </tr>
+        <tr>
+          <th scope="row">Short task that needs design judgment</th>
+          <td>Fixed Opus 5</td>
+          <td>In this measurement, one call flipped the total cost. A fixed configuration is predictable. The advisor's design-quality contribution was not measured</td>
+        </tr>
+        <tr>
+          <th scope="row">Long multi-stage implementation / refactoring</th>
+          <td>Sonnet 5 + Opus 5 advisor</td>
+          <td>15% cheaper in Experiment 2 even with 2 calls (includes output-volume confound)</td>
+        </tr>
+        <tr>
+          <th scope="row">Pipelines where a cost ceiling matters</th>
+          <td>Fixed Opus or <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1</span></td>
+          <td>Advisor calls are probabilistic, making a ceiling hard to estimate. Disabling removes the variance</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Even if you choose the advisor configuration, it is worth knowing the kill switch.
+    The <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1</span> environment variable removes
+    the tool itself, which is the most reliable way to eliminate call variance in batch runs.
+  </p>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations</h2>
+  <p>
+    This experiment shows a direction but does not settle the question. Read it with the
+    following four caveats in mind.
+  </p>
+  <ul class="plain">
+    <li>One run per condition means variance was not controlled. Confirming the conclusion requires at least 3 runs per condition.</li>
+    <li>The advisor calls in A2 and C were induced via system prompt, not naturally occurring. Call frequency in real operation depends on the task and the model's judgment.</li>
+    <li>In Experiment 2, Opus produced 2.3x the code and 1.5x the tests. The difference in output volume is a confounding variable in the cost comparison.</li>
+    <li>Task 1 was too short to measure the advisor's stated purpose - improving design quality. Per the official docs, the advisor is a feature for long, multi-stage work.</li>
+  </ul>
+</section>
+
+<!-- ===================== 08 (EN) ===================== -->
+<section class="sec" id="s8-en">
+  <h2><span class="no">08</span>Conclusion</h2>
+  <p>
+    The advisor configuration is not a free upgrade but a trade-off whose winner depends on task
+    size. On a short task, one call can make it 25% more expensive than fixed Opus; on a large
+    task, it was 15% cheaper even with two calls. The pivot is <strong>a race between the
+    advisor's uncached-input overhead and the absolute savings from Sonnet rates</strong>,
+    and in this measurement the savings overtook the overhead as the task grew.
+  </p>
+  <p>
+    As practical defaults: Sonnet alone for one-off scripts and small fixes; fixed Opus for short
+    tasks that need design judgment (a cost extrapolation for a scenario not directly tested);
+    and the Sonnet + Opus advisor configuration for long refactorings and multi-stage
+    implementation. For automation pipelines where the cost ceiling matters, disable the advisor
+    to remove the variance.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Reproduction - Claude Code v2.1.226</div>
+    <pre><code><span class="cm"># Input: prompt.txt for Task 1 (Arms A/A2/B), prompt2.txt for Task 2 (Arms C/D)</span>
+
+<span class="cm"># Advisor configuration (Arms A/A2/C)</span>
+claude -p --model claude-sonnet-5 --advisor claude-opus-5 \
+  --setting-sources project --strict-mcp-config \
+  --output-format json --allowedTools "..." &lt; prompt.txt
+
+<span class="cm"># Fixed Opus (Arms B/D)</span>
+CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
+  --setting-sources project --strict-mcp-config \
+  --output-format json --allowedTools "..." &lt; prompt.txt</code></pre>
+  </div>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="claude-code-advisor-cost-analysis-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/advisor">Claude Code Docs - Advisor</a>
+      - Anthropic (2026). Source for <span class="mono">/advisor</span>, <span class="mono">--advisor</span>,
+      <span class="mono">advisorModel</span>, and <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL</span>
+      <span class="url">https://code.claude.com/docs/en/advisor</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool">Claude API Docs - Advisor tool</a>
+      - Source for <span class="mono">advisor_20260301</span>, <span class="mono">usage.iterations</span>, and caching behavior
+      <span class="url">https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool</span>
+    </li>
+  </ul>
+
+  <h3>Experiment data</h3>
+  <ul>
+    <li>
+      First-hand experiment records (cc-advisor-tools, 2026-08-08) - Claude Code v2.1.226,
+      1 run per condition, tallied from <span class="mono">modelUsage</span>. All figures in
+      Tables 1-3 come from this experiment.
+      <span class="url">Not public - see Section 08 for reproduction steps</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-08.
+    This document is a technical analysis based on first-hand experiments (Claude Code v2.1.226)
+    and official Anthropic documentation. Costs and token figures reflect model rates and behavior
+    at the time of writing; check the official documentation above for current values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== /EN page ===================== -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. 페이지(언어)마다 버튼이 하나씩 있으므로 모두 묶어서 동기화한다.
+   저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var en = btn.closest ? btn.closest('.page[data-lang="en"]') : null;
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
   });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 를 함께 쏴서 보이는 쪽을 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  function toggle() {
+    var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+    root.setAttribute("data-lang", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", {
+        detail: { theme: root.getAttribute("data-theme") }
+      }));
+    }
+  }
+
+  btns.forEach(function (btn) { btn.addEventListener("click", toggle); });
 })();
 </script>
 

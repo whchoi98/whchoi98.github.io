@@ -23,6 +23,21 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 이 localStorage 보다 우선. 기본 ko. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  if (!lang) {
+    try {
+      var s = localStorage.getItem(KEY);
+      if (s === "en" || s === "ko") lang = s;
+    } catch (e) {}
+  }
+  document.documentElement.setAttribute("data-lang", lang || "ko");
+})();
 </script>
 <style>
 :root {
@@ -402,7 +417,7 @@ tbody th {
 }
 
 /* ---------- Theme toggle ---------- */
-.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-bar { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 18px; }
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -425,6 +440,11 @@ tbody th {
 .theme-toggle .to-light { display: none; }
 [data-theme="dark"] .theme-toggle .to-dark { display: none; }
 [data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Language toggle ----------
+   문서 전체가 KO/EN 두 벌의 .page 로 존재하고, html[data-lang] 이 노출을 결정한다. */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
 /* ---------- Mermaid diagram ---------- */
 .diagram { margin-top: 22px; }
@@ -526,7 +546,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +569,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -913,6 +934,8 @@ flowchart LR
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="model-monitoring-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -959,27 +982,520 @@ flowchart LR
 
 </div>
 
+<!-- ===================== EN PAGE START ===================== -->
+<div class="page" data-lang="en" lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">Observability / Platform Deep Dive</p>
+  <h1>Amazon Bedrock LLM Monitor - Architecture Analysis of an Always-On Measurement Platform for 37 LLM Channels</h1>
+  <p class="subtitle">
+    A code-level analysis of the model-monitoring project (v2.19.2) - its probe pipeline, parity sweep mechanism,
+    and operations - which compares Bedrock inference profiles, Anthropic Claude Platform on AWS, and
+    OpenAI GPT via Bedrock Mantle on a single screen.
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The subject of this analysis is the model-monitoring repository at v2.19.2, per <span class="mono">frontend/src/lib/version.ts</span>.</p>
+    <p>The core catalog definitions are <span class="mono">backend/prober.py:AVAILABLE_MODELS</span> and <span class="mono">backend/parity/catalog.py</span>.</p>
+    <p>Primary sources are the GitHub repository whchoi98/model-monitoring plus docs/architecture.md and ADR-001 through ADR-024 in the repository.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>Fact - the platform continuously probes <strong>37 active LLM channels</strong> (17 Bedrock, 7 Anthropic CP on AWS, 13 OpenAI Mantle) with Fargate tasks that EventBridge Scheduler launches every 5 minutes, and stores the results in RDS PostgreSQL 16.</li>
+    <li>Mechanism - feature support is judged not by HTTP 200 but by <strong>execution evidence</strong> (tool canary round-trips, JSON validity, cached-token counts, stream deltas). A parity sweep across 6 API surfaces × 19 features every 12 hours backs this up.</li>
+    <li>Exposure - the same model family is called in parallel through the Bedrock Global / Bedrock US / Anthropic CP / OpenAI Mantle channels, so TTFT / TPS / cost differences by channel choice are captured directly as data.</li>
+    <li>Takeaway - if you want to decide "which model rides which channel" in multi-channel LLM operations from time-series measurements rather than gut feeling, this structure (scheduler separation + execution-evidence verdicts + a channel label convention) can be adopted as-is.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem definition - what is measured and why</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Architecture - the probe pipeline and 8 CDK stacks</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Metrics and workload presets</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Parity sweep deep dive - execution-evidence verdicts</a></li>
+    <li><span class="no">05</span><a href="#s5-en">The 9 analysis screens</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Operations in practice</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations</a></li>
+    <li><span class="no">08</span><a href="#s8-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem definition - what is measured and why</h2>
+  <p>
+    Even the same Claude model becomes a different service depending on the invocation path. The four paths -
+    Bedrock Global inference profiles (<span class="mono">global.*</span>), Bedrock US profiles (<span class="mono">us.*</span>),
+    Anthropic Claude Platform on AWS (vendor-hosted endpoint), and OpenAI GPT via Bedrock Mantle - each differ in
+    TTFT, throughput, pricing, and supported features, and those differences keep shifting with regional conditions
+    and model versions. The project starts from the premise that an operator deciding "which channel should carry
+    this workload" needs <strong>parallel measurement under identical conditions</strong>.
+  </p>
+  <p>
+    The second problem is the feature support matrix. Provider documentation does not spell out every per-channel
+    difference in whether a model supports tool use / caching / structured output on a given API surface, and
+    parameters are sometimes silently ignored. ADR-021 records that the manual screenshot-proof approach used
+    through v2.10.0 became unsustainable as the catalog grew. That is why a parity run was added that proves
+    support by actually executing it on a schedule.
+  </p>
+  <p>
+    The number of measured channels was adjusted from 42 to 37 in v2.19.1. The OpenAI 1P direct path (Path 5,
+    5 channels) was hidden from exposure by user decision while preserving the code and DB rows, implemented as a
+    triple switch (CDK <span class="mono">ENABLE_OPENAI_1P=false</span>, the backend <span class="mono">visibility.py</span>
+    query filter, and the frontend <span class="mono">EXCLUDED_FAMILIES</span>).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 37 active channels (per backend/prober.py and comments in frontend TrendChart.tsx)</caption>
+      <thead>
+        <tr><th scope="col">Channel group</th><th scope="col">Channels</th><th scope="col">Composition</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Bedrock inference profiles</td><td><span class="num">17</span></td><td>16 Global/US profiles across 8 Claude models + 1 Nova 2.0 Lite (US)</td></tr>
+        <tr><td>Anthropic CP on AWS</td><td><span class="num">7</span></td><td>Fable 5, Opus 5/4.8/4.7, Sonnet 5/4.6, Haiku 4.5 - auto-discovered at startup via <span class="mono">/v1/models</span></td></tr>
+        <tr><td>OpenAI via Bedrock Mantle</td><td><span class="num">13</span></td><td>GPT 5.4 (3 regions), 5.5 (2 regions), 5.6 Sol (2) / Terra (3) / Luna (3 regions)</td></tr>
+        <tr><td>OpenAI 1P direct</td><td><span class="num">5 (dormant)</span></td><td>Hidden since v2.19.1 - code/DB preserved, registration skipped</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Architecture - the probe pipeline and 8 CDK stacks</h2>
+  <p>
+    The serving path is CloudFront VPC Origin &rarr; internal ALB (HTTPS:443) &rarr; two ECS Fargate services
+    (FastAPI backend, Next.js standalone frontend) &rarr; RDS PostgreSQL 16 (t4g.micro, Single-AZ).
+    Wrapping the ALB behind a CloudFront VPC Origin instead of exposing it to the internet is the decision of
+    ADR-001, and all external ingress is HTTPS-only. The deployment region is ap-northeast-2 (Seoul).
+  </p>
+  <p>
+    The measurement pipeline is completely separated from the serving path. In v1 the auto-prober was a daemon
+    thread inside the backend process; in v2 it became a structure where EventBridge Scheduler launches a
+    <strong>one-shot Fargate task</strong> via RunTask on each period (ADR-003). The backend's
+    <span class="mono">auto_prober.py</span> exports only the <span class="mono">run_cycle()</span> function, and
+    <span class="mono">auto_prober_runner.py</span> owns the CLI entrypoint (<span class="mono">--once</span>).
+    The probe status API also uses the most recent <span class="mono">ProbeRun</span> row in the DB as the source
+    of truth rather than in-process state.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  EB["EventBridge Scheduler"] -->|"rate 5 min"| AP["AutoProber Task"]
+  EB -->|"rate 5 min"| IN["Insights Task"]
+  EB -->|"rate 12 h"| PR["ParityRun Task"]
+  EB -->|"rate 15 min"| GB["GptBench Task"]
+  AP --> CH["Probe 37 channels"]
+  CH --> B["Bedrock Runtime"]
+  CH --> A["Anthropic CP on AWS"]
+  CH --> M["Bedrock Mantle OpenAI"]
+  AP --> DB[("RDS PostgreSQL 16")]
+  IN --> DB
+  PR --> DB
+  GB --> DB
+  DB --> BE["FastAPI backend"]
+  BE --> FE["Next.js dashboard"]
+    </div>
+    <figcaption>
+      Figure 1. The probe pipeline. EventBridge Scheduler runs four kinds of one-shot Fargate tasks on schedule,
+      and the dashboard only reads the DB the tasks populate. The separation of measurement and reads is the core
+      of this design.
+    </figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. The four EventBridge schedules (per cdk/lib/stacks/scheduler-stack.ts)</caption>
+      <thead>
+        <tr><th scope="col">Schedule</th><th scope="col">Rate</th><th scope="col">Task command</th><th scope="col">Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>AutoProberSchedule</td><td><span class="num">rate(5 minutes)</span></td><td><span class="mono">python -m auto_prober_runner --once</span></td><td>Probes 37 channels × 1 workload category</td></tr>
+        <tr><td>InsightsSchedule</td><td><span class="num">rate(5 minutes)</span></td><td><span class="mono">python -m insights_runner --window 6h</span></td><td>Generates a summary of the last 6 hours with Sonnet 4.6</td></tr>
+        <tr><td>ParityRunSchedule</td><td><span class="num">rate(12 hours)</span></td><td><span class="mono">python -m parity_runner --once</span></td><td>Execution-evidence sweep across model × surface × feature</td></tr>
+        <tr><td>GptBenchSchedule</td><td><span class="num">rate(15 minutes)</span></td><td><span class="mono">python -m gptbench_runner --once</span></td><td>TTFB/TTFT bench: 8 Mantle GPT channels × 10 calls</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - where docs and code disagree, this document follows the code</span>
+    <p>
+      docs/architecture.md describes three EventBridge schedules, but <span class="mono">scheduler-stack.ts</span>
+      defines four, including GptBench added in v2.18.0. Also, <span class="mono">config.yaml</span> at the
+      repository root (4 models, SQLite, us-east-1) is a v1 leftover that no current backend / CDK code references.
+      The actual probe cadence is determined by the EventBridge schedule definitions, not by config.
+    </p>
+  </div>
+
+  <p>
+    The infrastructure is managed as eight CDK v2 TypeScript stacks, deployed in dependency order:
+    Network (VPC, NAT GW, 9+1 PrivateLink endpoints), Data (RDS, Secrets, SSM), Cluster (ECS cluster, ECR),
+    AgentCore (chatbot memory), AppServices (2 Fargate services, ALB), Edge (CloudFront, WAF),
+    Scheduler (schedules and task definitions), and Observability (7 alarms, dashboard, SNS).
+    Reusable L3 constructs (<span class="mono">fargate-service.ts</span>, <span class="mono">pinned-image.ts</span>)
+    share the service definitions.
+  </p>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Metrics and workload presets</h2>
+  <p>
+    A single probe cycle applies <strong>one workload category</strong> to all 37 channels. There are six
+    categories rotated round-robin per cycle, so the same category is measured again every 30 minutes (5 min × 6).
+    The definitions live in <span class="mono">WORKLOAD_PRESETS</span> in <span class="mono">backend/auto_prober.py</span>
+    as the source of truth, and each result row carries a <span class="mono">probe_results.category</span> column,
+    enabling per-category filtering.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The six workload categories (backend/auto_prober.py WORKLOAD_PRESETS)</caption>
+      <thead>
+        <tr><th scope="col">id</th><th scope="col">Label</th><th scope="col">Measurement intent</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">chat-short</span></td><td>Short chat</td><td>Short responses, TTFT-sensitive</td></tr>
+        <tr><td><span class="mono">reasoning</span></td><td>Reasoning</td><td>Complex reasoning, large max_tokens</td></tr>
+        <tr><td><span class="mono">code-gen</span></td><td>Code generation</td><td>Code output quality and throughput</td></tr>
+        <tr><td><span class="mono">summarize</span></td><td>Summarization</td><td>Long input &rarr; short output</td></tr>
+        <tr><td><span class="mono">structured</span></td><td>JSON extraction</td><td>Text &rarr; JSON-only extraction</td></tr>
+        <tr><td><span class="mono">translate</span></td><td>Translation</td><td>EN-KO technical translation, nuance preservation</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Six metrics are extracted from each call: TTFT (request &rarr; first token, ms), Total Latency
+    (request &rarr; last token, client-side, ms), Server Latency (Bedrock-reported internal processing time
+    excluding network overhead, ms), TPS (output throughput after the first token, tok/s), input/output token
+    counts, and stop reason (an enum such as <span class="mono">end_turn</span> / <span class="mono">max_tokens</span> /
+    <span class="mono">tool_use</span>). Token counts combine with the per-model price table in
+    <span class="mono">backend/pricing.py</span> as input to the 30-day cost projection.
+  </p>
+  <p class="lead-def">
+    <b>Principle:</b> keeping latency metrics split into client-side observations (TTFT / Total) and
+    server-reported values (Server Latency) lets the data tell whether inter-channel differences come from the
+    network path or from model processing.
+  </p>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Parity sweep deep dive - execution-evidence verdicts</h2>
+  <p>
+    The design question for the parity run was "what counts as proof of support". ADR-021's answer is that
+    HTTP 200 is insufficient as a verdict basis: parameters are often silently ignored, and a request can succeed
+    while the feature does not actually work. So the <span class="mono">backend/parity/</span> package calls the
+    real API and marks a feature as supported only when the response passes an
+    <strong>evidence check of its content</strong>.
+  </p>
+
+  <h3>4.1 Matrix size and evidence checks</h3>
+  <p>
+    The sweep spans model × 6 API surfaces × 19 features. The surfaces are <span class="mono">converse</span>,
+    <span class="mono">invoke_model</span>, <span class="mono">messages</span>, <span class="mono">messages_mantle</span>,
+    <span class="mono">chat_completions</span>, and <span class="mono">responses</span> (<span class="mono">catalog.py:SURFACES</span>),
+    and the 19 features are basic / streaming / system_instructions / tool_use / structured_output / reasoning /
+    caching / adaptive_thinking / count_tokens / batches / web_search / computer_use / reasoning_effort /
+    json_schema / url_sources / memory_tool / code_execution / files_api / models_api.
+    The initial ADR-021 design was 5 surfaces × 7 features; it reached the current size through ADR-022
+    (the Mantle Messages surface) and ADR-023 (the 19-feature expansion).
+  </p>
+  <ul class="plain">
+    <li>Tool canary round-trip - sends a tool definition and verifies the model actually calls that tool.</li>
+    <li>System instruction canary - verifies that a marker planted in the system prompt is reflected in the response.</li>
+    <li>JSON parsing + required keys - checks that structured output is valid JSON and contains the requested keys.</li>
+    <li>Cached-token count - proves caching works when the cached-token count is greater than 0 on repeated requests.</li>
+    <li>Two or more stream deltas - verifies that streaming actually arrives in incremental chunks.</li>
+  </ul>
+  <p>
+    The verdict logic is isolated as pure functions in <span class="mono">engine.py</span> and is unit-tested.
+    Results take one of four values: supported / unsupported / broken / skipped. If the provider returns a
+    "clean unsupported rejection" signature (<span class="mono">unsupported_parameter</span> etc.) the verdict is
+    unsupported; other errors or evidence failures are broken; not-applicable cases (such as the reasoning feature
+    on a non-reasoning model) are skipped. Distinguishing skipped from unsupported is what ADR-023 calls
+    "honest exclusion". Each run stores the verdicts along with evidence JSON, latency, and errors in the
+    <span class="mono">parity_runs</span> / <span class="mono">parity_results</span> tables, and clicking a cell
+    on the <span class="mono">/parity</span> screen opens an evidence modal with the raw material.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - a Broken verdict may be a probe defect</span>
+    <p>
+      An incident ADR-021 records about itself: on the first run, <span class="mono">max_tokens=64</span> truncation
+      turned every structured_output check into a false Broken, fixed in v2.11.1 with per-feature token budgets
+      (<span class="mono">max_tokens_for</span>). Before trusting a Broken cell, check the response_snippet in the
+      evidence to determine whether the defect is in the probe or the model.
+    </p>
+  </div>
+
+  <h3>4.2 What multi-channel comparison actually found</h3>
+  <p>
+    Running the same checks per channel reveals gaps the documentation does not mention. Measured findings recorded
+    in ADR-021 include the Mantle ChatCompletions surface being entirely unsupported (only the Responses API works),
+    GPT 5.4 not reporting reasoning_tokens, and per-surface differences in Claude Fable 5 caching. On the cost
+    side, the catalog reflects that the GPT 5.6 generation has Bedrock in-region price parity with OpenAI 1P,
+    while 5.4 / 5.5 carry a 10% markup.
+  </p>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>The 9 analysis screens</h2>
+  <p>
+    The frontend is Next.js 14 standalone, and a shared header (<span class="mono">AppHeader.tsx</span>) ties the
+    9 pages together. The project-structure section of the README still says "6 routes", but the actual
+    <span class="mono">src/app/</span> holds 10 routes (9 directories) including the root (/) and the chatbot-only
+    <span class="mono">/chat</span>, of which 9 are analysis screens. Based on the code, the 9 pages are:
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. The 9 analysis pages (per frontend/src/app/ routes)</caption>
+      <thead>
+        <tr><th scope="col">Path</th><th scope="col">Screen</th><th scope="col">What it shows</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">/</span></td><td>Dashboard</td><td>Probe status + 37 model cards + latency/TPS trends, workload filter</td></tr>
+        <tr><td><span class="mono">/models</span></td><td>Model Explorer</td><td>Per-model cards + Converse/InvokeModel/Messages/Responses code examples</td></tr>
+        <tr><td><span class="mono">/parity</span></td><td>Parity Run</td><td>Model × surface × feature matrix + evidence modal + manual trigger</td></tr>
+        <tr><td><span class="mono">/gpt-on-aws</span></td><td>GPT on AWS</td><td>TTFB/TTFT/GAP bench across 8 Mantle GPT channels, 15-minute cadence</td></tr>
+        <tr><td><span class="mono">/cost</span></td><td>Cost</td><td>30-day cost projection + per-model/per-channel comparison</td></tr>
+        <tr><td><span class="mono">/reliability</span></td><td>Reliability</td><td>Success rate by family/channel + error buckets</td></tr>
+        <tr><td><span class="mono">/efficiency</span></td><td>Efficiency</td><td>Category-weighted 0-100 token efficiency score</td></tr>
+        <tr><td><span class="mono">/analysis</span></td><td>Analysis</td><td>Stop reason distribution + output length histograms</td></tr>
+        <tr><td><span class="mono">/prompts</span></td><td>Prompts</td><td>Prompt set CRUD + Bedrock OptimizePrompt (auth required)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Beyond the screens there is a chatbot built on Claude Sonnet 4.6. It answers natural-language questions by
+    querying the time-series store through 4 custom tools, and conversation context is retained in AgentCore
+    Memory for 30 days. The bench on the GPT on AWS page uses a separate methodology: a fixed cached prompt of
+    about 55.8k tokens is called 10 times sequentially per channel, aggregating TTFB (first stream event),
+    TTFT (first text delta), and GAP (their difference, a thinking approximation) as median / p95.
+  </p>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Operations in practice</h2>
+  <p>
+    Deployment is governed by the runbook (<span class="mono">docs/runbooks/deploy.md</span>). After passing
+    <span class="mono">make verify</span> (CDK lint + typecheck + 71 Jest tests + cdk-nag + ruff + 91 pytest tests +
+    frontend tsc), an arm64 container image is built with an immutable tag (<span class="mono">v&lt;timestamp&gt;</span>),
+    pushed to ECR, and the image URI is passed to CDK deploy pinned all the way down to
+    <span class="mono">@sha256:&lt;digest&gt;</span>. The frontend image requires RUM-related
+    <span class="mono">--build-arg</span> values at build time.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - the :latest tag combined with the ECS image cache</span>
+    <p>
+      An incident this repository actually hit and recorded as ADR-010 / ADR-018. Pushing as
+      <span class="mono">:latest</span> lets Docker layer dedupe and the ECS image cache combine so that
+      <strong>a deployment looks successful while the new code was never picked up</strong>. The response was
+      immutable tags + digest pinning, and a repository whose cache was already poisoned was worked around by
+      renaming it (<span class="mono">bedrock-monitor-backend-v2</span>).
+    </p>
+  </div>
+
+  <p>
+    Silent failures of scheduled jobs are runbooked as well. The <span class="mono">ecs:RunTask</span> Resource in
+    the EventBridge Scheduler role must be a <span class="mono">:*</span> wildcard on the task definition family
+    (ADR-011). Pinning a revision number causes a permission denial and a silent fail after the next revision is
+    deployed, and empty EventBridge metrics make it hard to debug. The diagnostic markers are
+    <span class="mono">last_run_time</span> in <span class="mono">/api/auto-probe/status</span> being hours old,
+    or the <span class="mono">/ecs/autoprober</span> log group having no entries within 5 minutes.
+  </p>
+  <p>
+    Data lifecycle is handled by <span class="mono">retention.py</span>. Raw <span class="mono">probe_results</span>
+    older than <span class="mono">RETENTION_DAYS</span> (default 60 days) are migrated into hourly aggregate tables.
+    DB migrations run at backend startup in the lifespan, holding <span class="mono">pg_advisory_lock</span> with a
+    30-second statement_timeout and using only <span class="mono">ADD COLUMN IF NOT EXISTS</span>, so they stay
+    idempotent even when multiple tasks start concurrently. The observability layer consists of 7 CloudWatch alarms
+    (ALB 5xx / latency, ECS task count, RDS CPU / storage / connections) and self-hosted RUM (v2.16.5).
+  </p>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations</h2>
+  <ul class="plain">
+    <li>Measurement cost is real spend. Real calls to 37 channels every 5 minutes, a parity sweep every 12 hours (max_tokens capped at 256~8,000 per call (default 256, reasoning 2,048, adaptive_thinking 8,000); the caching feature makes 2 calls), and 80 GPT bench calls (8 channels × 10) every 15 minutes keep accruing charges.</li>
+    <li>It is single-region observation. Probes originate from Fargate in ap-northeast-2, so the network path differs from the latency perceived by users in other regions.</li>
+    <li>RDS is t4g.micro Single-AZ. As ADR-002 states, the design tolerates time-series data loss and does not fit environments with high-availability requirements as-is.</li>
+    <li>Parity verdicts depend on probe code quality. As the false-Broken case in section 4.1 shows, a probe defect can pollute the matrix, so a Broken cell requires evidence review first.</li>
+    <li>Documentation sync is incomplete. Prose lags the code in places, such as the README's "6 routes" and architecture.md describing 3 schedules, so numbers should be re-verified against the code.</li>
+  </ul>
+</section>
+
+<!-- ===================== 08 (EN) ===================== -->
+<section class="sec" id="s8-en">
+  <h2><span class="no">08</span>Conclusion</h2>
+  <p>
+    What this project demonstrates is a design that frames LLM observability as an
+    <strong>active probing problem</strong> rather than application log collection. It detaches the measuring
+    instrument from the serving process into EventBridge + one-shot Fargate tasks, puts 37 channels onto one
+    coordinate system with a channel label convention ("Bedrock / Anthropic / OpenAI
+    <span class="mono">family (channel)</span>"), and judges feature support only by execution evidence.
+  </p>
+  <p>
+    For a team building a similar platform, the order of adoption is as follows. First comes the separation of
+    measurement and reads (scheduler &rarr; one-shot task &rarr; DB); without it, a prober failure becomes a
+    dashboard failure. Second is workload preset round-robin, which reduces the illusion created by single-prompt
+    measurement. Third is the parity sweep - built without execution-evidence verdicts and the skipped /
+    unsupported distinction, the matrix loses trust. The operational traps (immutable tags, the Scheduler IAM
+    wildcard) can largely be avoided by reading this repository's ADRs first.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="model-monitoring-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary source</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/model-monitoring">whchoi98/model-monitoring</a>
+      - the analyzed repository, v2.19.2 (2026-08-01). README, docs/architecture.md, docs/decisions/ADR-001 through ADR-024, CHANGELOG.md
+      <span class="url">https://github.com/whchoi98/model-monitoring</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html">What is Amazon Bedrock? - Amazon Bedrock User Guide</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/what-is-bedrock.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html">Cross-Region inference - Amazon Bedrock User Guide</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html">What is Amazon EventBridge Scheduler? - EventBridge Scheduler User Guide</a>
+      <span class="url">https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html">AWS Fargate for Amazon ECS - Amazon ECS Developer Guide</a>
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on direct inspection of the code, configuration, and ADR documents
+    in the whchoi98/model-monitoring repository (v2.19.2). Figures such as channel counts, schedule rates, and
+    matrix sizes reflect the code at the time of writing; check the repository above for current values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== EN PAGE END ===================== -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. KO/EN 두 페이지의 버튼을 모두 동기화한다.
+   저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. html[data-lang] 이 KO/EN 페이지 노출을 결정한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+    });
+  });
+
+  /* 언어 전환으로 표시되는 다이어그램이 바뀌므로 Mermaid 를 다시 그린다. */
+  document.addEventListener("langchange", function () {
+    if (document.querySelector(".diagram .mermaid")) {
+      document.dispatchEvent(new CustomEvent("themechange", {
+        detail: { theme: root.getAttribute("data-theme") }
+      }));
+    }
   });
 })();
 </script>

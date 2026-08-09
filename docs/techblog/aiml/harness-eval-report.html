@@ -23,6 +23,17 @@
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 })();
+
+/* 첫 페인트 전에 언어를 확정한다. URL ?lang= 파라미터가 localStorage 보다 우선한다. */
+(function () {
+  var KEY = "techblogs-lang", lang = null;
+  try { lang = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") lang = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", lang === "en" ? "en" : "ko");
+})();
 </script>
 <style>
 :root {
@@ -426,6 +437,11 @@ tbody th {
 [data-theme="dark"] .theme-toggle .to-dark { display: none; }
 [data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ---------- Language toggle ---------- */
+.theme-bar { gap: 8px; }
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+
 /* ---------- Mermaid diagram ---------- */
 .diagram { margin-top: 22px; }
 .diagram .mermaid {
@@ -526,7 +542,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" data-lang="ko">
 
 <!-- ===================== Theme toggle =====================
      문서 흐름 안에 두어 본문과 겹치지 않게 한다.
@@ -549,6 +565,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       라이트
     </span>
   </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
 </div>
 
 <!-- ===================== Header ===================== -->
@@ -941,6 +958,8 @@ HARNESS_EVAL_ROOT=$(pwd) bash scripts/history.sh /path/to/target-project list
   </p>
 </section>
 
+<div class="callout note"><span class="callout-title">참고 - 인터랙티브 다이어그램</span><p><a href="harness-eval-archmap.html" target="_blank" rel="noopener">인터랙티브 아키텍처 맵 열기 ↗</a> - 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 별도 문서입니다.</p></div>
+
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
@@ -984,27 +1003,557 @@ HARNESS_EVAL_ROOT=$(pwd) bash scripts/history.sh /path/to/target-project list
 
 </div>
 
+<!-- ===================== EN page ===================== -->
+<div class="page" data-lang="en">
+
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header (EN) ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Tool Deep Dive</p>
+  <h1>harness-eval - A 3-Tier Evaluation Plugin That Turns Claude Code Harness Quality into a Score</h1>
+  <p class="subtitle">
+    An analysis of the structure and scoring mechanics of harness-eval, a plugin that grades the
+    engineering quality of a Claude Code harness (hooks, skills, commands, agents, CLAUDE.md)
+    through checklists, static analysis, and multi-agent review.
+  </p>
+
+  <div class="meta">
+    <p>Written as of 2026-08-09.</p>
+    <p>The analysis covers harness-eval v0.2.0 (released 2026-07-10).</p>
+    <p>Evaluation entry points are the <span class="mono">/harness-eval:quick</span>, <span class="mono">:standard</span>, <span class="mono">:full</span>, and <span class="mono">:compare</span> slash commands.</p>
+    <p>Primary sources are the README, CHANGELOG, harness-evaluation-framework.md, and source code of the GitHub repository whchoi98/harness-eval.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR (EN) ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>harness-eval is a plugin that evaluates the quality of a Claude Code harness configuration (hooks, skills, commands, agents, CLAUDE.md) in <strong>three tiers: Quick / Standard / Full</strong>. The current version is 0.2.0.</li>
+    <li>It combines deterministic scripts (4 tiers, 16 check items) with qualitative review by 5 subagents, aggregating 12 dimensions under 3 category weights (0.50 / 0.25 / 0.25) into a 1.0-10.0 score and a 7-level grade (A+ to F).</li>
+    <li>Standard mode's dynamic analysis <strong>actually executes</strong> the target project's hook scripts and tests (the Full mode implementation has no dynamic analysis phase). Untrusted repositories should be evaluated with static analysis only, via <span class="mono">--static-only</span>.</li>
+    <li>The recommended adoption path is to establish a baseline with quick, confirm deltas with compare after improvements, and run a comprehensive 12-dimension review with full before each release.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC (EN) ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Problem - No Way to Measure Harness Quality</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How It Works - The 3-Tier Evaluation Structure</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Scoring - 12 Dimensions, 16 Checks, 7 Grades</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Full Mode - Parallel Review by 5 Agents</a></li>
+    <li><span class="no">05</span><a href="#s5-en">History Tracking, Comparison, and Badges</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Practical Usage Flow</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Limitations</a></li>
+    <li><span class="no">08</span><a href="#s8-en">Conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 (EN) ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Problem - No Way to Measure Harness Quality</h2>
+  <p>
+    Once a team starts using Claude Code at scale, hooks, skills, commands, agents, and CLAUDE.md
+    files accumulate in each project's <span class="mono">.claude/</span> directory. This entire
+    configuration is called the harness, and unlike application code, the harness has
+    <strong>no standard tool for judging its quality</strong>. A hook script may contain a syntax
+    error, a hook file registered in settings.json may not actually exist, or the deny list may
+    block none of the dangerous commands - yet the session appears to run normally, so none of
+    these problems surface.
+  </p>
+  <p>
+    harness-eval is a Claude Code plugin aimed at this gap. It divides the harness into 5
+    components, inspects each from a different perspective, and synthesizes the results into a
+    single score and grade.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The 5 components under evaluation (harness-evaluation-framework.md, section 1)</caption>
+      <thead>
+        <tr><th scope="col">Component</th><th scope="col">Control model</th><th scope="col">Evaluation focus</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Hooks (<span class="mono">settings.json</span> + <span class="mono">.claude/hooks/</span>)</td><td>Event-driven automatic triggers</td><td>Correctness, safety, coverage</td></tr>
+        <tr><td>Skills (<span class="mono">.claude/skills/</span>)</td><td>Instructions for how to perform a role</td><td>Actionability, specificity</td></tr>
+        <tr><td>Commands (<span class="mono">.claude/commands/</span>)</td><td>Automation of repetitive tasks</td><td>Completeness, error recovery</td></tr>
+        <tr><td>Agents (<span class="mono">.claude/agents/</span>)</td><td>Independent parallel analysis</td><td>Output schema, tool scope</td></tr>
+        <tr><td>CLAUDE.md (root + per module)</td><td>Project context</td><td>Accuracy, freshness, actionability</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - What this tool measures</span>
+    <p>
+      What harness-eval scores is not the quality of the code itself but the quality of the
+      <em>configuration layer that controls Claude Code</em>. The same codebase scores low when its
+      hooks and permission settings are weak, and high when tests and a deny list are in place.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 (EN) ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>How It Works - The 3-Tier Evaluation Structure</h2>
+  <p>
+    The core design of harness-eval is a <strong>3-tier structure</strong> that lets users trade
+    evaluation depth for time. A fast checklist (Quick), static plus dynamic analysis (Standard),
+    and a multi-agent comprehensive review (Full) are each exposed as a separate skill and slash
+    command, and all three modes converge on the same 1.0-10.0 scale and grading scheme.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. The three evaluation modes compared (README, docs/architecture.md)</caption>
+      <thead>
+        <tr><th scope="col">Mode</th><th scope="col">Command</th><th scope="col">Duration</th><th scope="col">Method</th><th scope="col">Executes target code</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Quick</th><td><span class="mono">/harness-eval:quick</span></td><td><span class="num">~30 s</span></td><td>Checklist-based scoring (<span class="mono">scoring.sh</span>)</td><td>No</td></tr>
+        <tr><th scope="row">Standard</th><td><span class="mono">/harness-eval:standard</span></td><td><span class="num">~2-3 min</span></td><td>Static + dynamic analysis (runs hooks and tests)</td><td>Yes (confirmation gate)</td></tr>
+        <tr><th scope="row">Full</th><td><span class="mono">/harness-eval:full</span></td><td><span class="num">~5-10 min</span></td><td>5-agent parallel review + 12-dimension synthesis</td><td>No direct execution (deterministic scripts + read-only agents)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    What matters is that the three modes are layered rather than implemented separately.
+    Standard stacks <span class="mono">static-analysis.sh</span> (bash syntax, JSON validity, file
+    permissions, hook registration consistency) and dynamic analysis on top of Quick's scoring
+    engine, and Full takes Standard's output as the input to its collection phase and adds agent
+    review on top. In every mode the canonical scorer is the single
+    <span class="mono">scripts/scoring.sh</span>, so grades are never assigned by different
+    criteria across modes.
+  </p>
+  <p>
+    The comparison-only mode <span class="mono">/harness-eval:compare</span> performs no new
+    evaluation; it computes the delta between the latest and the previous result from stored
+    history. The history mechanism is covered in section 5.
+  </p>
+</section>
+
+<!-- ===================== 03 (EN) ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Scoring - 12 Dimensions, 16 Checks, 7 Grades</h2>
+  <p>
+    Since v0.2.0 the evaluation model has been unified into a single
+    <strong>weighted average that groups 12 dimensions into 3 categories</strong>.
+    The framework document as of v0.1.0 described a 6-dimension model, and the Full mode
+    synthesizer (<span class="mono">agents/synthesizer.md</span>) had drifted onto a different
+    model from the document; 0.2.0 aligned both on the canonical 12-dimension model.
+  </p>
+
+  <h3>3.1 The 12 dimensions and category weights</h3>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. The 12-dimension / 3-category evaluation model (harness-evaluation-framework.md, section 2)</caption>
+      <thead>
+        <tr><th scope="col">Category</th><th scope="col">Weight</th><th scope="col">Dimensions</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Basic Quality</th><td><span class="num">0.50</span></td><td>Correctness, safety, completeness, consistency</td></tr>
+        <tr><th scope="row">Operational</th><td><span class="num">0.25</span></td><td>Actionability, verifiability, cost efficiency, contract-based testing</td></tr>
+        <tr><th scope="row">Design Quality</th><td><span class="num">0.25</span></td><td>Agent communication, context management, feedback-loop maturity, evolvability</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The framework document states the rationale for giving half the weight to basic quality: "if
+    the harness is wrong or unsafe, nothing else matters." Within a category each dimension is
+    averaged with equal weight, and the three category averages are combined at 0.50 / 0.25 / 0.25
+    and rounded to one decimal place.
+  </p>
+
+  <h3>3.2 Checklist scoring in Quick / Standard</h3>
+  <p>
+    Quick and Standard do not score the 12 dimensions directly. Instead they convert the pass
+    ratio of 16 check items across 4 maturity tiers, defined in
+    <span class="mono">templates/checklist.json</span>, onto the same scale - summing per-tier
+    weights while letting a lower tier's pass ratio cap (attenuate) the contribution of higher
+    tiers. If the foundations are weak, filling in higher-tier items does not raise the score.
+    The checks are deterministic - file existence, glob matches, JSON field presence, grep
+    patterns - so the same project always receives the same score.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. The 4 tiers in checklist.json</caption>
+      <thead>
+        <tr><th scope="col">Tier</th><th scope="col">Weight</th><th scope="col">Items</th><th scope="col">Representative items</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">basic (6.0+)</th><td><span class="num">1.0</span></td><td><span class="num">4</span></td><td>CLAUDE.md exists, settings exist, at least 1 hook, at least 1 command</td></tr>
+        <tr><th scope="row">functional (7.0+)</th><td><span class="num">1.5</span></td><td><span class="num">4</span></td><td>PreToolUse / PostToolUse registered, secret-scanning hook, 2+ skills, 1+ agent</td></tr>
+        <tr><th scope="row">robust (8.0+)</th><td><span class="num">2.0</span></td><td><span class="num">5</span></td><td>Automated tests, command error-recovery sections, agent output schemas, deny list, 2+ module CLAUDE.md files</td></tr>
+        <tr><th scope="row">production (9.0+)</th><td><span class="num">2.5</span></td><td><span class="num">3</span></td><td>E2E / integration tests, CI/CD pipeline, migration guide</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="codeblock">
+    <div class="code-caption">scripts/scoring.sh - overall score and grade</div>
+    <pre><code>overall = (weighted_sum / total_weight) * 9.0 + 1.0   <span class="cm"># range 1.0-10.0</span>
+
+<span class="cm"># Grade mapping (single source of truth)</span>
+s &gt;= 9.5  A+        s &gt;= 8.0  B+        s &gt;= 6.0  C
+s &gt;= 9.0  A         s &gt;= 7.0  B         otherwise F
+s &gt;= 8.5  A-</code></pre>
+  </div>
+
+  <p>
+    There are <strong>7 grades</strong>: A+, A, A-, B+, B, C, F. The single source of truth for
+    these thresholds is <span class="mono">scripts/scoring.sh</span>; the copies in the
+    synthesizer agent and the framework document are explicitly required to follow it, and both
+    Full mode and the badge generator use these values. Before 0.2.0 Full mode carried its own
+    grade table, so grades could diverge across modes - one of the defects fixed in 0.2.0.
+  </p>
+  <p>
+    Scoring accuracy itself is verified against mock projects at 4 maturity levels in
+    <span class="mono">tests/fixtures/</span> (minimal, functional, robust, production).
+    24 scoring tests confirm that each fixture lands in its intended score band, and a separate
+    <span class="mono">nested-hooks-project</span> fixture covers nested-schema regressions.
+  </p>
+
+  <p class="lead-def">
+    <b>Principle:</b> quantitative checks (scripts) form the skeleton of the score, and
+    qualitative review (agents) only adjusts on top of it. The single source of truth for the
+    grade table and the scale is <span class="mono">scoring.sh</span>.
+  </p>
+</section>
+
+<!-- ===================== 04 (EN) ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Full Mode - Parallel Review by 5 Agents</h2>
+  <p>
+    Full mode orchestrates <strong>5 subagents</strong> across 3 phases to evaluate the qualities
+    grep cannot catch - whether tool scopes really follow least privilege, whether handoffs
+    between agents are clear, and other aspects of design quality. The skill
+    (<span class="mono">skills/full/SKILL.md</span>) acts as the orchestrator, and each agent is
+    dispatched through Claude Code's Task tool.
+  </p>
+
+  <ul class="plain">
+    <li><strong>Phase 1 - Collection (sequential)</strong> - runs <span class="mono">static-analysis.sh</span> and <span class="mono">scoring.sh</span> to obtain quantitative results, which the collector agent references to build a project inventory artifact.</li>
+    <li><strong>Phase 2 - Parallel evaluation</strong> - safety-evaluator (tool scope, secret safety), completeness-evaluator (coverage, error recovery), and design-evaluator (architecture quality) evaluate the same artifact concurrently.</li>
+    <li><strong>Phase 3 - Synthesis</strong> - the synthesizer combines the three evaluators' scores with the weighted formula from section 3.1 and generates a bilingual English / Korean report.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["/harness-eval:full"] --> SA["static-analysis.sh"]
+  U --> SC["scoring.sh"]
+  SA --> COL["collector"]
+  SC --> COL
+  COL --> SE["safety-evaluator"]
+  COL --> CE["completeness-evaluator"]
+  COL --> DE["design-evaluator"]
+  SE --> SY["synthesizer"]
+  CE --> SY
+  DE --> SY
+  SY --> R["Bilingual report en/ko"]
+    </div>
+    <figcaption>
+      Figure 1. The Full mode evaluation pipeline. Output from the deterministic scripts flows
+      through the collector to the three evaluator agents in parallel, and the synthesizer
+      combines everything into a single score.
+    </figcaption>
+  </figure>
+
+  <p>
+    The fallback design that decouples the phases stands out. If the collector fails, Phases 2
+    and 3 are skipped entirely and the report is produced from Standard results alone, with the
+    fallback explicitly noted in the report. Per-category scores from static analysis
+    (<span class="mono">categories.*.score</span>) come back as <span class="mono">null</span>
+    for categories that have no checks, and the skill instructions explicitly say "do not invent
+    values" in that case.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - How the read-only evaluators actually became read-only</span>
+    <p>
+      Before 0.2.0, all 5 agents restricted their tools via an
+      <span class="mono">allowed-tools</span> field in the frontmatter - but for subagents that
+      field is ignored, and the correct field is <span class="mono">tools</span>. In other words,
+      no tool restriction was in effect at all. A case of the harness evaluation tool carrying a
+      harness defect of its own; it was fixed in 0.2.0.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 05 (EN) ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>History Tracking, Comparison, and Badges</h2>
+  <p>
+    A one-off score does not drive improvement, so harness-eval accumulates evaluation results in
+    the target project's <span class="mono">.harness-eval/</span> directory. Report files are
+    saved under the <span class="mono">.harness-eval/reports/eval-{date}-{seq}-{mode}-{en|ko}.md</span>
+    convention, and the latest score is recorded in <span class="mono">latest.json</span>,
+    consumed by both the badge generator and the history manager.
+  </p>
+
+  <h3>5.1 history.sh - save / list / compare</h3>
+  <p>
+    <span class="mono">scripts/history.sh</span> provides three subcommands: save, list, and
+    compare. By default compare diffs the latest evaluation against the previous one, returning
+    the overall score delta, grade change, and per-tier passed-item deltas as JSON, and
+    <span class="mono">--eval-id</span> can pin a specific history entry as the comparison
+    baseline. The <span class="mono">/harness-eval:compare</span> skill takes this output and
+    tabulates the trend and the outlook for reaching the next grade, and reports that comparison
+    is not possible when there are fewer than 2 history entries.
+  </p>
+
+  <h3>5.2 badge.sh - from score to README badge</h3>
+  <p>
+    <span class="mono">scripts/badge.sh</span> reads the score from
+    <span class="mono">latest.json</span> and generates an A+-to-F grade badge as a Markdown
+    block containing a shields.io badge URL (the badge image itself is served as SVG by
+    shields.io). A plugin hook (<span class="mono">post-eval-badge.sh</span>, registered on the
+    Stop event in <span class="mono">hooks/hooks.json</span>) triggers badge generation when an
+    evaluation session ends.
+  </p>
+  <p>
+    Automatically writing the badge into the README, however, is opt-in. The README is modified
+    only when the <span class="mono">HARNESS_EVAL_AUTO_BADGE=1</span> environment variable or
+    <span class="mono">autoBadge:true</span> in <span class="mono">.harness-eval/config.json</span>
+    is present. Before 0.2.0 it silently rewrote the README at the end of every session - a hook
+    that implicitly modifies user files is itself a harness anti-pattern, so it was changed to
+    opt-in.
+  </p>
+</section>
+
+<!-- ===================== 06 (EN) ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Practical Usage Flow</h2>
+  <p>
+    Prerequisites are Bash 4+, jq 1.6+, Python 3.6+, Git, and the Claude Code CLI.
+    Installation takes two steps: registering the marketplace and installing the plugin.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Terminal - install and run</div>
+    <pre><code>claude plugin marketplace add https://github.com/whchoi98/harness-eval
+claude plugin install harness-eval@harness-eval
+
+<span class="cm"># Inside a Claude Code session</span>
+/harness-eval:quick              <span class="cm"># Checklist scoring (~30 s)</span>
+/harness-eval:standard           <span class="cm"># Static + dynamic analysis (~2-3 min)</span>
+/harness-eval:full               <span class="cm"># Multi-agent review (~5-10 min)</span>
+/harness-eval:compare            <span class="cm"># Compare with the previous evaluation</span></code></pre>
+  </div>
+
+  <p>
+    The scoring engine can also be used without Claude Code. The scripts emit JSON to stdout, so
+    they slot directly into a CI pipeline.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Run directly from plugins/harness-eval/</div>
+    <pre><code>HARNESS_EVAL_ROOT=$(pwd) bash scripts/scoring.sh /path/to/target-project --mode quick
+<span class="cm"># {"mode":"quick","scores":{"overall":7.2,"grade":"B"},"checklist":{...},...}</span>
+
+HARNESS_EVAL_ROOT=$(pwd) bash scripts/history.sh /path/to/target-project list
+<span class="cm"># [{"id":"eval-2026-04-06-001","mode":"quick","overall":7.2,"grade":"B"}]</span></code></pre>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - Standard mode's dynamic analysis executes target code</span>
+    <p>
+      The dynamic analysis phase of Standard mode actually runs the target project's
+      <span class="mono">.claude/hooks/</span> scripts and test suite on your machine. The skill
+      goes through an explicit confirmation gate before execution, but when evaluating an
+      untrusted repository, use <span class="mono">--static-only</span> (or
+      <span class="mono">--no-dynamic</span>) to perform only static analysis and scoring. Quick
+      and Full modes do not execute target code directly (the README attaches this warning to
+      both Standard and Full, but the Full skill implementation has no dynamic analysis phase).
+    </p>
+  </div>
+
+  <p>
+    The recommended cycle is spelled out in section 6 of the framework document: after the
+    initial evaluation, re-evaluate immediately once critical issues are fixed, then re-evaluate
+    after major feature additions and at every version release. The repository's own measured
+    convergence record shows gains of +0.6-0.7 points per round, from 7.2 in round 1 to 8.5 in
+    round 3; beyond 8.5, improvement slows because it requires infrastructure investment such as
+    integration tests and CI/CD - a documented diminishing-returns pattern.
+  </p>
+</section>
+
+<!-- ===================== 07 (EN) ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Limitations</h2>
+  <p>
+    Checklist scoring is a proxy measurement of quality. Most of the 16 items are file-existence
+    and grep-pattern checks, so a perfunctory error-recovery section that merely contains the
+    word "Error" still passes the <span class="mono">robust-error-recovery</span> check. The
+    framework document itself classifies items such as least-privilege tool scope, performance
+    benchmarks, and SLA documentation as <em>manual review</em>, excluding them from automated
+    scoring.
+  </p>
+  <p>
+    Full mode's design-quality scores are qualitative agent judgments and thus not deterministic.
+    Evaluating the same project twice can yield identical quantitative parts but different
+    design-category scores, and a run costs 5-10 minutes plus a corresponding token bill. The
+    code-execution risk of dynamic analysis is exactly as warned in section 6; the confirmation
+    gate does not remove the execution itself.
+  </p>
+  <p>
+    There are also project-maturity caveats. 0.2.0 is a hardening release that fixed 61 confirmed
+    defects and 5 design gaps in one pass - a sign the tool is stabilizing quickly, but also that
+    outputs from the 0.1.0 era had low reliability. The README also notes that the remote
+    <span class="mono">main</span> and <span class="mono">master</span> branches have diverged,
+    so contributors should verify the default branch.
+  </p>
+</section>
+
+<!-- ===================== 08 (EN) ===================== -->
+<section class="sec" id="s8-en">
+  <h2><span class="no">08</span>Conclusion</h2>
+  <p>
+    The value of harness-eval lies less in the score itself than in turning harness quality into
+    a <strong>repeatable measurement target</strong>. Deterministic scripts guarantee a
+    consistent scale, multi-agent review supplements the design quality that scripts cannot see,
+    and history plus badges connect measurement to an improvement cycle. Keeping the grade table
+    in <span class="mono">scoring.sh</span> as the single source of truth, with every mode
+    following it, is a pattern worth borrowing when building tools like this.
+  </p>
+  <p>
+    Adoption is most sensible starting with Quick, which costs almost nothing. Check within 30
+    seconds whether the team's harness passes the basic tier, improve toward the robust tier
+    (tests, deny list, error recovery), and reserve Full for pre-release checks - that yields the
+    best return on time and token cost. The unpassed items per tier in an evaluation become the
+    improvement backlog, so progress can be tracked with compare deltas without writing a
+    separate roadmap.
+  </p>
+</section>
+
+<div class="callout note"><span class="callout-title">Note - Interactive diagram</span><p><a href="harness-eval-archmap.html" target="_blank" rel="noopener">Open the interactive architecture map ↗</a> - a standalone page with node search, route tracing, and dark/light themes.</p></div>
+
+<!-- ===================== References (EN) ===================== -->
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary source</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/harness-eval">harness-eval - GitHub repository</a>
+      - WooHyung Choi, v0.2.0 (2026-07-10)
+      <span class="url">https://github.com/whchoi98/harness-eval</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/plugins">Claude Code - Plugins</a>
+      <span class="url">https://code.claude.com/docs/en/plugins</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/sub-agents">Claude Code - Subagents</a>
+      <span class="url">https://code.claude.com/docs/en/sub-agents</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/hooks">Claude Code - Hooks reference</a>
+      <span class="url">https://code.claude.com/docs/en/hooks</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-09.
+    This document is a technical analysis based on the README, CHANGELOG,
+    harness-evaluation-framework.md, and source code of the GitHub repository
+    whchoi98/harness-eval (v0.2.0).
+    Figures and behavior reflect the time of writing; check the repository and official
+    documentation above for the latest values.
+  </p>
+</footer>
+
+</div>
+<!-- ===================== /EN page ===================== -->
+
 <script>
-/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO/EN 페이지에 버튼이 하나씩 있으므로 lang-toggle 을 제외한 전부를 묶는다. */
 (function () {
   var KEY = "techblogs-theme";
   var root = document.documentElement;
-  var btn = document.querySelector(".theme-toggle");
-  if (!btn) return;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
 
   function sync() {
     var dark = root.getAttribute("data-theme") === "dark";
-    btn.setAttribute("aria-pressed", String(dark));
-    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
   }
   sync();
 
-  btn.addEventListener("click", function () {
-    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem(KEY, next); } catch (e) {}
-    sync();
-    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 을 전환하고 저장한 뒤 langchange 를 알린다.
+   Mermaid 재렌더는 themechange 리스너에 걸려 있으므로 함께 dispatch 한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { lang: next } }));
+    });
   });
 })();
 </script>
