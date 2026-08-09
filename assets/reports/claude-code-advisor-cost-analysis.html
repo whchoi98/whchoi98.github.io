@@ -514,6 +514,22 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
 /* ---------- Print ---------- */
 @media print {
+  /* 다크 상태로 인쇄해도 라이트 팔레트로 강제한다. 목록은 :root 와 일치해야 한다. */
+  html[data-theme="dark"] {
+    --paper: #ffffff;
+    --paper-2: #f5f6f8;
+    --ink: #1c232b;
+    --ink-2: #48535f;
+    --muted: #6b7684;
+    --line: #dde2e8;
+    --line-strong: #c2cad2;
+    --navy: #232f3e;
+    --accent: #c2540a;
+    --accent-bg: #fdf4ec;
+    --note-bg: #f2f5f8;
+    --code-bg: #f4f6f8;
+    --link: #0f5c8c;
+  }
   body { border-top: none; font-size: 11.5pt; }
   .theme-bar { display: none; }
   .page { max-width: none; padding: 0; }
@@ -523,6 +539,20 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   section.sec { margin-top: 36px; }
 }
 </style>
+<noscript>
+<style>
+/* JS 비활성 환경에서는 Mermaid 소스를 코드로 그대로 노출한다. */
+html:not(.mermaid-ready) .diagram .mermaid {
+  visibility: visible;
+  min-height: 0;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+</style>
+</noscript>
 </head>
 <body>
 <div class="page">
@@ -583,10 +613,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>Sonnet 5 + Opus 5 advisor 구성은 짧은 과제에서 Opus 5 고정보다 <strong>25% 비쌌고($1.24 vs $0.99)</strong>, 435줄 리팩토링 과제에서는 15% 저렴했습니다($3.09 vs $3.65).</li>
-    <li>advisor 비용은 응답(output)이 아니라 입력에서 나옵니다. 호출할 때마다 전체 대화 트랜스크립트를 <strong>캐시 없이 새로 읽기 때문</strong>(advisor측 cache_read 0)에, 대화가 길수록 호출당 비용이 커집니다.</li>
-    <li>advisor는 붙여놔도 호출이 보장되지 않습니다. 짧은 과제에서 미호출로 끝나면 오버헤드 0으로 Opus 고정 대비 43% 저렴하지만, 호출이 1회라도 발생하면 총비용이 역전됩니다.</li>
-    <li>짧고 평이한 과제는 Sonnet 단독으로 충분하고, 장기 다단계 작업은 advisor 구성이 유리합니다. 과제가 클수록 output 대부분을 Sonnet 단가로 생성하는 절약분이 advisor의 입력 비용을 추월합니다.</li>
+    <li>Sonnet 5 + Opus 5 advisor 구성은 짧은 과제에서 Opus 5 고정보다 <strong>25% 비쌌고($1.238 vs $0.993)</strong>, 435줄 리팩토링 과제에서는 15% 저렴했습니다($3.094 vs $3.646).</li>
+    <li>advisor 비용은 응답(output)이 아니라 입력에서 나옵니다. 호출할 때마다 전체 대화 트랜스크립트를 <strong>캐시 없이 새로 읽기 때문</strong>(advisor 측 <span class="mono">cache_read</span> 0)에, 대화가 길수록 호출당 비용이 커집니다.</li>
+    <li>advisor는 붙여놔도 호출이 보장되지 않습니다. 짧은 과제에서 미호출로 끝나면 오버헤드 0으로 Opus 고정 대비 43% 저렴했지만, 이번 실측에서는 호출이 1회 발생하자 총비용이 역전됐습니다.</li>
+    <li>짧고 평이한 과제는 Sonnet 단독으로 충분했고, 장기 다단계 작업은 advisor 구성이 유리했습니다. 이번 실측에서는 과제가 커지자 output 대부분을 Sonnet 단가로 생성하는 절약분이 advisor의 입력 비용을 넘어섰습니다. 다만 이 절약분에는 두 모델의 산출물 규모 차이가 섞여 있습니다.</li>
   </ul>
 </section>
 
@@ -662,8 +692,8 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <h2><span class="no">02</span>동작 원리 - advisor 호출의 비용 구조</h2>
   <p>
     advisor가 호출되면 그 시점까지의 전체 대화 트랜스크립트가 advisor 모델의 입력으로 전달됩니다.
-    Claude Code는 advisor측 프롬프트 캐싱을 사용하지 않으므로, 이 입력 전체가
-    <strong>매 호출마다 uncached input으로 새로 과금</strong>됩니다. 실측에서 advisor측
+    Claude Code는 advisor 측 프롬프트 캐싱을 사용하지 않으므로, 이 입력 전체가
+    <strong>매 호출마다 uncached input으로 새로 과금</strong>됩니다. 실측에서 advisor 측
     <span class="mono">cache_read</span>는 매번 0이었습니다.
   </p>
   <p>
@@ -709,7 +739,7 @@ sequenceDiagram
 
   <div class="tbl-wrap">
     <table>
-      <caption>표 2. 1차 실험 결과 (각 조건 1회 실행)</caption>
+      <caption>표 2. 1차 실험 결과 (각 조건 1회 실행, cache read의 K는 1,000토큰)</caption>
       <thead>
         <tr><th scope="col">Arm</th><th scope="col">구성</th><th scope="col">턴</th><th scope="col">시간</th><th scope="col">output 토큰</th><th scope="col">cache read</th><th scope="col">비용</th></tr>
       </thead>
@@ -725,18 +755,19 @@ sequenceDiagram
     Arm A에서 Sonnet은 자문 없이 완주했고, 이 경우 advisor 구성의 오버헤드는 0입니다.
     비용은 $0.570으로 Opus 고정($0.993) 대비 <strong>43% 저렴</strong>했습니다.
     반면 시스템 프롬프트로 호출을 유도한 A2는 advisor 비용 $0.337이 더해지고
-    Sonnet 본체 작업도 늘어나 총 $1.238이 되었습니다.
+    Sonnet 본체 작업도 늘어나(본체 $0.900) 총 $1.238이 되었습니다.
   </p>
   <p>
-    Opus 고정은 턴 수가 적고(15 vs 22) 턴당 output이 약 2배였습니다.
+    Opus 고정은 턴 수가 적고(15 vs 22턴) 턴당 output이 약 2.8배였습니다(1,203 vs 438토큰).
     더 적은 시도로 끝내지만 토큰 단가가 높은, 예측 가능한 비용 프로파일입니다.
   </p>
 
   <div class="callout warn">
-    <span class="callout-title">주의 - 짧은 과제에서 호출 1회면 비용이 역전됩니다</span>
+    <span class="callout-title">주의 - 짧은 과제에서는 호출 1회로도 비용이 역전될 수 있습니다</span>
     <p>
-      advisor 미호출을 기대하고 붙여둔 구성이라도, 짧은 과제에서 호출이 1회 발생하는 순간
-      총비용($1.238)이 Opus 고정($0.993)을 넘어섭니다. 호출 여부는 실행 모델의 판단이라
+      advisor 미호출을 기대하고 붙여둔 구성이라도, 이번 실측에서는 짧은 과제에서 호출이 1회 발생하자
+      총비용($1.238)이 Opus 고정($0.993)을 넘어섰습니다. 역전분의 약 절반은 호출 비용($0.337)이 아니라
+      호출에 동반된 executor 작업 증가에서 나왔습니다. 호출 여부는 실행 모델의 판단이라
       사전에 예측할 수 없습니다. 비용 상한 예측이 중요하면 이 불확실성 자체가 비용입니다.
     </p>
   </div>
@@ -754,7 +785,7 @@ sequenceDiagram
 
   <div class="tbl-wrap">
     <table>
-      <caption>표 3. 2차 실험 결과 (각 조건 1회 실행)</caption>
+      <caption>표 3. 2차 실험 결과 (각 조건 1회 실행, cache read의 K는 1,000토큰)</caption>
       <thead>
         <tr><th scope="col">Arm</th><th scope="col">구성</th><th scope="col">턴</th><th scope="col">시간</th><th scope="col">output 토큰</th><th scope="col">cache read</th><th scope="col">비용</th></tr>
       </thead>
@@ -767,9 +798,9 @@ sequenceDiagram
 
   <p>
     이번에는 advisor 구성이 이겼습니다. C는 advisor 호출 2회($0.856)를 치르고도 총 $3.094로,
-    Opus 고정($3.646)보다 <strong>15% 저렴</strong>했습니다. Sonnet 본체 비용은 $2.238로
-    전체의 72%를 차지하고, advisor 오버헤드 비율은 28%로 내려갔습니다.
-    1차 A2에서 이 비율은 59%였습니다.
+    Opus 고정($3.646)보다 <strong>15% 저렴</strong>했습니다. 총비용에서 advisor 오버헤드가
+    차지하는 비율은 28%로, 1차 A2(27%)와 사실상 같았습니다.
+    승부를 가른 것은 비율이 아니라 절대액입니다. 다음 섹션에서 이 구조를 봅니다.
   </p>
 
   <div class="callout note">
@@ -789,34 +820,40 @@ sequenceDiagram
     두 실험을 겹쳐 보면 손익분기의 방향이 보입니다. advisor 구성에는 서로 반대로 움직이는
     두 힘이 있습니다. 절약분은 output 대부분을 Sonnet 단가로 생성하는 데서 나오고,
     과제가 클수록 output이 늘어나므로 절약분도 커집니다. 오버헤드는 호출마다 트랜스크립트 전체를
-    캐시 없이 읽는 input 비용이고, 대화가 길수록 호출당 비용이 커집니다.
+    캐시 없이 읽는 input 비용이고, 대화가 길수록 호출당 비용이 커집니다(호출당 input
+    53,210토큰 &rarr; 77,611토큰, 46% 증가).
   </p>
   <p>
-    실측에서는 절약분이 더 빨리 자랐습니다. 호출당 input이 53K에서 77.6K로 46% 늘어나는 동안,
-    과제 규모가 커지며 총비용에서 advisor가 차지하는 비율은 오히려 절반 이하로 희석되었습니다.
+    실측에서는 절약분이 더 빨리 자랐습니다. Sonnet 본체 비용(A2 $0.900, C $2.238)을 같은 과제의
+    Opus 고정 비용과 비교하면, 1차 절약분은 $0.093(= $0.993 - $0.900)으로 advisor 오버헤드 $0.337에
+    못 미쳤고, 2차 절약분은 $1.408(= $3.646 - $2.238)로 오버헤드 $0.856을 <strong>추월</strong>했습니다.
+    총비용 대비 오버헤드 비율은 두 실험 모두 27~28%로 일정했으므로, 역전은 비율의 희석이 아니라
+    절대액의 경주에서 나왔습니다.
   </p>
 
   <figure class="flow">
     <div class="flow-row">
       <div class="flow-box">
-        <span class="flow-label">1차 - 짧은 과제 (A2, 호출 1회)</span>
-        <span class="flow-val">오버헤드 59%</span>
+        <span class="flow-label">1차 (A2) - 절약 $0.093 &lt; 오버헤드 $0.337</span>
+        <span class="flow-val">+$0.245 (+25%)</span>
       </div>
       <div class="flow-sep" aria-hidden="true">&gt;</div>
       <div class="flow-box emph">
-        <span class="flow-label">2차 - 대형 리팩토링 (C, 호출 2회)</span>
-        <span class="flow-val">오버헤드 28%</span>
+        <span class="flow-label">2차 (C) - 절약 $1.408 &gt; 오버헤드 $0.856</span>
+        <span class="flow-val">-$0.552 (-15%)</span>
       </div>
     </div>
     <figcaption>
-      그림 2. 총비용 대비 advisor 오버헤드 비율. 과제가 커질수록 오버헤드가 희석되어
-      Opus 고정 대비 열세(+25%)가 우세(-15%)로 뒤집힙니다.
+      그림 2. Opus 고정 대비 advisor 구성의 총비용 차이. advisor 오버헤드 절대액은 $0.337에서
+      $0.856으로 늘었지만, output을 Sonnet 단가로 생성하는 절약분이 더 빨리 커져
+      열세(+25%)가 우세(-15%)로 뒤집혔습니다.
     </figcaption>
   </figure>
 
   <p class="lead-def">
     <b>원칙:</b> advisor 비용의 본체는 자문 응답이 아니라, 호출마다 전체 트랜스크립트를
-    캐시 없이 읽는 input입니다. 이 오버헤드를 희석할 만큼 과제가 커야 advisor 구성이 이깁니다.
+    캐시 없이 읽는 input입니다. 이 오버헤드를 넘어설 만큼 Sonnet 단가 절약분이 커야
+    advisor 구성이 이길 수 있습니다.
   </p>
 </section>
 
@@ -824,8 +861,10 @@ sequenceDiagram
 <section class="sec" id="s6">
   <h2><span class="no">06</span>상황별 권고</h2>
   <p>
-    1순위 기준은 과제 규모입니다. 이 실험 범위에서는 "짧으면 Sonnet 계열, 길면 advisor 구성"이
-    가장 단순하고 실측과 일치하는 규칙이었습니다. 나머지 축은 비용 예측 가능성입니다.
+    1순위 기준은 과제 규모입니다. 이 실험 범위에서는 "짧고 평이하면 Sonnet 단독, 길면 advisor 구성"이
+    가장 단순하고 실측과 일치하는 규칙이었고, 짧아도 설계 판단이 필요하면 Opus 고정이 예외입니다.
+    나머지 축은 비용 예측 가능성입니다. 표 4는 조건당 1회 실측에 기반한 잠정 규칙이며,
+    2행은 직접 실험하지 않은 시나리오에 대한 비용 외삽입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -843,12 +882,12 @@ sequenceDiagram
         <tr>
           <th scope="row">짧지만 설계 판단이 필요한 과제</th>
           <td>Opus 5 고정</td>
-          <td>짧은 과제에서 advisor 호출 1회면 총비용 역전. 고정 구성이 더 싸고 예측 가능</td>
+          <td>이번 실측에서는 호출 1회 발생 시 총비용 역전. 고정 구성이 예측 가능. advisor의 설계 품질 기여는 미측정</td>
         </tr>
         <tr>
           <th scope="row">장기 다단계 구현 / 리팩토링</th>
           <td>Sonnet 5 + Opus 5 advisor</td>
-          <td>2차 실험에서 호출 2회에도 15% 저렴. 과제가 클수록 격차 확대 방향</td>
+          <td>2차 실험에서 호출 2회에도 15% 저렴 (산출물 규모 차이 교란 포함)</td>
         </tr>
         <tr>
           <th scope="row">비용 상한 예측이 중요한 파이프라인</th>
@@ -886,18 +925,21 @@ sequenceDiagram
   <p>
     advisor 구성은 공짜 업그레이드가 아니라 과제 규모에 따라 유불리가 갈리는 트레이드오프입니다.
     짧은 과제에서는 호출 1회로 Opus 고정보다 25% 비싸질 수 있고, 큰 과제에서는 호출 2회에도
-    15% 저렴했습니다. 갈림길은 <strong>advisor의 uncached input 오버헤드가 총비용에서 차지하는
-    비율</strong>이며, 과제가 클수록 이 비율이 희석됩니다.
+    15% 저렴했습니다. 갈림길은 <strong>advisor의 uncached input 오버헤드와 Sonnet 단가
+    절약분의 절대액 경주</strong>이며, 이번 실측에서는 과제가 커지자 절약분이 오버헤드를 추월했습니다.
   </p>
   <p>
     실무 기본값으로는 이렇게 정리할 수 있습니다. 단발성 스크립트나 소규모 수정은 Sonnet 단독,
-    설계 판단이 필요한 짧은 과제는 Opus 고정, 장기 리팩토링과 다단계 구현은 Sonnet + Opus advisor
-    구성입니다. 비용 상한이 중요한 자동화 파이프라인이라면 advisor를 비활성화해 변동 요인을 제거합니다.
+    설계 판단이 필요한 짧은 과제는 Opus 고정(직접 실험하지 않은 시나리오에 대한 비용 외삽),
+    장기 리팩토링과 다단계 구현은 Sonnet + Opus advisor 구성입니다.
+    비용 상한이 중요한 자동화 파이프라인이라면 advisor를 비활성화해 변동 요인을 제거합니다.
   </p>
 
   <div class="codeblock">
     <div class="code-caption">재현 방법 - Claude Code v2.1.226</div>
-    <pre><code><span class="cm"># advisor 구성 (Arm A/A2/C)</span>
+    <pre><code><span class="cm"># 입력: 1차 과제(Arm A/A2/B)는 prompt.txt, 2차 과제(Arm C/D)는 prompt2.txt</span>
+
+<span class="cm"># advisor 구성 (Arm A/A2/C)</span>
 claude -p --model claude-sonnet-5 --advisor claude-opus-5 \
   --setting-sources project --strict-mcp-config \
   --output-format json --allowedTools "..." &lt; prompt.txt
