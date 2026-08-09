@@ -343,6 +343,27 @@ tbody th {
 }
 .codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
 .codeblock .cm { color: var(--muted); }
+/* techblogs-codecopy: 맥 터미널 스타일 코드블록 + 복사 버튼 */
+.codeblock { position: relative; }
+.code-caption { position: relative; padding-left: 60px; padding-right: 46px; }
+.code-caption::before {
+  content: ""; position: absolute; left: 14px; top: 50%; margin-top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff5f56; box-shadow: 18px 0 0 #febc2e, 36px 0 0 #28c840;
+}
+.code-copy {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 24px; padding: 0; cursor: pointer;
+  color: var(--ink-2); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px;
+  -webkit-appearance: none; appearance: none;
+}
+.code-copy:hover { color: var(--ink); border-color: var(--line-strong); }
+.code-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-copy svg { width: 15px; height: 15px; display: block; }
+.code-copy.copied { color: #28a35b; border-color: #28a35b; }
+@media print { .code-copy { display: none; } }
 
 /* ---------- Callouts ---------- */
 .callout {
@@ -1777,6 +1798,56 @@ if (blocks.length) {
     reveal();
   }
 }
+</script>
+
+
+<!-- techblogs-codecopy: 코드블록 복사 버튼 (아이콘 전용, execCommand 폴백 포함) -->
+<script>
+(function () {
+  var CLIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+  function fallback(txt, cb) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = txt; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta); cb(ok);
+    } catch (e) { cb(false); }
+  }
+  function copyText(txt, cb) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { cb(true); },
+                                              function () { fallback(txt, cb); });
+    } else { fallback(txt, cb); }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".codeblock"), function (block) {
+    var pre = block.querySelector("pre");
+    if (!pre || block.querySelector(".code-copy")) return;
+    block.style.position = block.style.position || "relative";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy";
+    btn.setAttribute("aria-label", "코드 복사");
+    btn.innerHTML = CLIP;
+    block.appendChild(btn);
+    var t;
+    btn.addEventListener("click", function () {
+      copyText(pre.innerText, function (ok) {
+        btn.innerHTML = ok ? OK : CLIP;
+        btn.classList.toggle("copied", ok);
+        btn.setAttribute("aria-label", ok ? "복사됨" : "코드 복사");
+        clearTimeout(t);
+        t = setTimeout(function () {
+          btn.innerHTML = CLIP;
+          btn.classList.remove("copied");
+          btn.setAttribute("aria-label", "코드 복사");
+        }, 1600);
+      });
+    });
+  });
+})();
 </script>
 
 </body>
