@@ -1,7 +1,7 @@
 ---
 title: "Gemma-4-31B vLLM 서빙 PoC 벤치마크"
 layout: report
-report_src: /assets/reports/gemma4-vllm-serving-benchmark.html
+report_src: /docs/techblog/aiml/gemma4-vllm-serving-benchmark-report.html
 date: 2026-08-09
 category: AIML
 tags: [vLLM, EKS, Karpenter, NVFP4, FP8, Benchmark]

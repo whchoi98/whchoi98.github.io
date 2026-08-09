@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>tui-aws 분석 - AWS 인프라 전체를 다루는 단일 바이너리 터미널 UI</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aws-core/tui-aws/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AWS Core / Tool Deep Dive</p>
+  <h1>tui-aws: 22개 뷰와 로컬 연결성 검사기를 갖춘 AWS 인프라 터미널 UI</h1>
+  <p class="subtitle">
+    AWS 콘솔 탭 왕복과 CLI 명령 암기를 터미널 하나로 대체하는 Go 단일 바이너리 TUI를 코드 수준에서 분석합니다.
+    특히 SG / Route / NACL 규칙을 로컬에서 5단계로 평가하는 연결성 검사기의 동작 방식과 한계를 다룹니다.
+  </p>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-09입니다.</p>
+    <p>분석 대상은 tui-aws v0.1.0(2026-04-05 릴리스, Go 1.25, MIT 라이선스)입니다.</p>
+    <p>검증 기준은 저장소 코드이며, 핵심 파일은 <span class="mono">internal/ui/tab_troubleshoot/checker.go</span>와 <span class="mono">internal/aws/k8s.go</span>입니다.</p>
+    <p>주 출처는 GitHub 저장소 whchoi98/tui-aws의 README, CHANGELOG, ADR 문서입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>tui-aws는 EC2, VPC 네트워킹, 컨테이너, 서버리스, 보안을 <strong>22개 탭</strong>으로 통합한 Go 단일 바이너리 TUI입니다. 콘솔 화면 왕복과 CLI 명령 암기를 터미널 하나로 대체하는 것이 목적입니다.</li>
+    <li>핵심 기능인 연결성 검사기는 SG, Route, NACL 데이터를 한 번 읽어온 뒤 <strong>5단계 평가를 전부 로컬에서</strong> 수행하고, 차단 지점의 규칙과 수정 제안까지 출력합니다. README의 "AWS API 호출 없이"는 평가 단계 기준의 서술이며, 검사 데이터 수집은 Describe 계열 API 4회로 이뤄집니다.</li>
+    <li>SSM 세션과 ECS Exec은 TUI를 일시 중지하고 AWS CLI에 위임하며, EKS는 kubectl 없이 K8s REST API를 직접 호출하고 인증 토큰을 <strong>14분간 캐싱</strong>합니다.</li>
+    <li>네트워크 트러블슈팅 빈도가 높은 운영자라면 콘솔 왕복을 줄이는 1순위 도구로 검토할 만합니다. 다만 검사기는 SG 참조 규칙과 NACL 리턴 경로를 평가하지 않으므로, 정밀 판정은 Reachability Analyzer로 보완해야 합니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">문제 정의 - 콘솔 탭 왕복과 CLI 암기의 비용</a></li>
+    <li><span class="no">02</span><a href="#s2">동작 원리 - 단일 바이너리 TUI 아키텍처</a></li>
+    <li><span class="no">03</span><a href="#s3">딥다이브 - 로컬 연결성 검사기 5단계</a></li>
+    <li><span class="no">04</span><a href="#s4">딥다이브 - 세션 위임과 EKS 직접 호출</a></li>
+    <li><span class="no">05</span><a href="#s5">22개 뷰 개관</a></li>
+    <li><span class="no">06</span><a href="#s6">실제 운영 흐름과 IAM 권한</a></li>
+    <li><span class="no">07</span><a href="#s7">한계와 결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>문제 정의 - 콘솔 탭 왕복과 CLI 암기의 비용</h2>
+  <p>
+    "인스턴스 A에서 B로 왜 안 붙지"라는 질문 하나를 풀기 위해 AWS 콘솔에서는 최소 네 개의 화면을 오가야 합니다.
+    EC2 인스턴스 상세에서 보안 그룹을 확인하고, VPC 콘솔로 넘어가 라우트 테이블을 찾고, 다시 NACL 화면에서 서브넷 연결을 대조합니다.
+    각 화면은 리소스 단위로 분리되어 있어서, 트래픽이 실제로 통과해야 하는 <strong>경로 전체를 한 화면에서 보는 방법이 없습니다.</strong>
+  </p>
+  <p>
+    CLI로 내려가도 비용은 형태만 바뀝니다. <span class="mono">aws ec2 describe-security-groups</span>,
+    <span class="mono">describe-route-tables</span>, <span class="mono">describe-network-acls</span>를
+    <span class="mono">--filters</span> 문법과 함께 조합해야 하고, 출력된 JSON을 눈으로 대조하는 일은 콘솔 왕복만큼 느립니다.
+    셸 접속은 또 별개의 문제라서, SSH 키 관리를 피하려면 <span class="mono">aws ssm start-session</span> 명령과 인스턴스 ID를 매번 찾아 입력해야 합니다.
+  </p>
+  <p>
+    tui-aws는 이 반복 비용을 터미널 하나로 흡수하는 접근입니다. 조회는 aws-sdk-go-v2로 직접 호출하고,
+    셸 접속과 ECS Exec은 AWS CLI에 위임하며, 네트워크 경로 판정은 로컬 평가기로 해결합니다.
+    v0.1.0 기준 macOS와 Linux의 amd64 / arm64 4개 플랫폼을 지원하고, TUI 프레임워크는 Bubble Tea v2입니다.
+  </p>
+  <div class="callout note">
+    <span class="callout-title">참고 - 프로젝트 계보</span>
+    <p>
+      이 프로젝트는 SSM 세션 관리 전용 도구였던 tui-ssm에서 출발했습니다. ADR-005에 따르면 TUI와 콘솔을 오가는 마찰이
+      확장의 직접 동기였고, 탭 아키텍처 리팩터링(Phase 0)부터 VPC / 네트워킹(Phase 1~2), 연결성 검사기(Phase 3)를 거쳐
+      현재의 22개 탭 구성에 도달했습니다. 설정 디렉터리도 <span class="mono">~/.tui-ssm/</span>에서
+      <span class="mono">~/.tui-aws/</span>로 이관되며, 첫 실행 시 <span class="mono">main.go</span>가 자동 마이그레이션합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>동작 원리 - 단일 바이너리 TUI 아키텍처</h2>
+
+  <h3>2.1 RootModel과 22개 탭 패키지</h3>
+  <p>
+    구조는 Bubble Tea의 Elm 아키텍처를 그대로 따릅니다. <span class="mono">RootModel</span>이 탭 바와 전역 키를 소유하고,
+    22개 탭은 각각 <span class="mono">TabModel</span> 인터페이스를 구현하는 독립 패키지입니다.
+    탭 목록은 <span class="mono">internal/ui/shared/tab.go</span>의 <span class="mono">TabID</span> 열거형에
+    <span class="mono">TabEC2</span>부터 <span class="mono">TabCheck</span>까지 22개가 정의되어 있어, README의 "22개 통합 탭" 서술과 코드가 일치합니다.
+    저장소 전체는 Go 파일 115개, 23,091줄입니다(2026-08-09 직접 계측, 테스트 포함).
+  </p>
+  <p>
+    AWS 호출은 <span class="mono">internal/aws/session.go</span>의 클라이언트 팩토리 하나로 모입니다.
+    <span class="mono">Clients</span> 구조체가 EC2, SSM, STS, ELBv2, Classic ELB, ASG, CloudWatch, CloudWatch Logs,
+    IAM, CloudFront, WAFv2, ACM, Route 53, RDS, S3, ECS, EKS, Lambda의 <strong>18개 SDK 클라이언트</strong>를 한 번에 생성합니다.
+    각 탭은 첫 진입 시에만 데이터를 조회하는 lazy loading 방식이고, ADR-005는 이 구성의 바이너리 크기를 약 25MB로 기록하고 있습니다.
+  </p>
+
+  <h3>2.2 프로필 / 리전 전환과 캐시 격리</h3>
+  <p>
+    <span class="mono">p</span> 키는 <span class="mono">~/.aws/credentials</span>와 <span class="mono">~/.aws/config</span>의
+    명명된 프로파일에 EC2 인스턴스 역할을 더해 선택기를 띄우고, <span class="mono">r</span> 키는 리전 선택기를 띄웁니다.
+    전환하면 현재 탭의 데이터가 리로드되며, 탭 캐시는 <span class="mono">profile::region</span> 형태의 키로 저장되므로
+    프로파일이나 리전이 다른 데이터가 화면에 섞이지 않습니다.
+    자격 증명은 사용 전에 <span class="mono">sts:GetCallerIdentity</span>로 검증하고, 실패하면 인스턴스 역할로 폴백합니다.
+  </p>
+  <p>
+    검색과 탐색도 전 탭 공통입니다. <span class="mono">/</span>로 이름, ID, IP를 검색하고,
+    EC2 탭에서는 한 번의 키 입력으로 해당 인스턴스의 VPC, Subnet, Route Table, Security Group 탭으로 건너뜁니다.
+    이 크로스 리소스 탐색이 콘솔에서 URL을 오가던 동선을 대체합니다.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>딥다이브 - 로컬 연결성 검사기 5단계</h2>
+  <p>
+    Check 탭에서 Source / Destination 인스턴스와 프로토콜(tcp / udp / all), 포트를 지정하면
+    <span class="mono">CheckConnectivity</span> 함수가 5단계 평가를 수행합니다.
+    이 함수는 라우트 테이블, 보안 그룹, NACL, 서브넷 목록을 인자로 받는 순수 함수라서
+    <strong>평가 자체는 네트워크 왕복 없이 즉시</strong> 끝납니다. 검사에 필요한 데이터는 검사 실행 시점에
+    <span class="mono">DescribeRouteTables</span>, <span class="mono">DescribeSecurityGroups</span>,
+    <span class="mono">DescribeNetworkAcls</span>, <span class="mono">DescribeSubnets</span>의 Describe 계열 호출 4회로 읽어옵니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - "AWS API 호출 없이"의 정확한 의미</span>
+    <p>
+      README는 이 기능을 "AWS API 호출 없이 SG + Route + NACL 규칙을 검증"이라고 서술합니다.
+      코드 기준으로 정확히 말하면 규칙 평가 로직이 로컬에서 돈다는 뜻이고, 평가 대상 데이터의 수집은 위의 Describe 호출로 이뤄집니다.
+      Reachability Analyzer처럼 검사마다 분석 리소스를 만들고 비용이 발생하는 구조가 아니라는 것이 실질적인 차이입니다.
+    </p>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  L["검사 데이터 로드 - Describe 호출 4회"] --> S1["1단계 Source SG Outbound"]
+  S1 -->|"통과"| S2["2단계 Source NACL Outbound"]
+  S2 -->|"통과"| S3["3단계 Source Route"]
+  S3 -->|"통과"| S4["4단계 Dest NACL Inbound"]
+  S4 -->|"통과"| S5["5단계 Dest SG Inbound"]
+  S5 -->|"통과"| R["Reachable"]
+  S1 -->|"실패"| B["BLOCKED - 차단 규칙과 수정 제안 출력, 이후 단계 Skipped"]
+  S2 -->|"실패"| B
+  S3 -->|"실패"| B
+  S4 -->|"실패"| B
+  S5 -->|"실패"| B
+    </div>
+    <figcaption>
+      그림 1. 연결성 검사 흐름. 한 단계라도 실패하면 이후 단계는 Skipped로 표시되고, 차단 지점과 수정 제안이 결과에 남습니다.
+    </figcaption>
+  </figure>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 연결성 검사 5단계 (checker.go 기준)</caption>
+      <thead>
+        <tr><th scope="col">단계</th><th scope="col">검사 내용</th><th scope="col">실패 시 수정 제안</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">1. Source SG Outbound</th><td>출발지 인스턴스에 연결된 SG의 아웃바운드 규칙 중 프로토콜, 포트, 목적지 IP를 모두 허용하는 규칙 탐색</td><td>출발지 SG에 목적지 <span class="mono">/32</span> 아웃바운드 규칙 추가</td></tr>
+        <tr><th scope="row">2. Source NACL Outbound</th><td>출발지 서브넷에 연결된 NACL의 아웃바운드 규칙을 번호 오름차순으로 평가, 첫 매치의 ALLOW / DENY 판정</td><td>아웃바운드 NACL 허용 규칙 추가</td></tr>
+        <tr><th scope="row">3. Source Route</th><td>출발지 서브넷의 라우트 테이블(명시 연결 우선, 없으면 main)에서 목적지 IP를 포함하는 active 라우트 탐색</td><td>출발지 라우트 테이블에 경로 추가</td></tr>
+        <tr><th scope="row">4. Dest NACL Inbound</th><td>목적지 서브넷 NACL의 인바운드 규칙을 같은 방식으로 평가</td><td>인바운드 NACL 허용 규칙 추가</td></tr>
+        <tr><th scope="row">5. Dest SG Inbound</th><td>목적지 인스턴스 SG의 인바운드 규칙에서 출발지 IP 허용 여부 탐색</td><td>목적지 SG에 출발지 <span class="mono">/32</span> 인바운드 규칙 추가</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    단계 순서가 실제 패킷의 이동 순서를 재현한다는 점이 이 검사기의 요지입니다.
+    NACL 평가는 규칙 번호 오름차순으로 정렬한 뒤 첫 번째로 매치되는 규칙의 ALLOW / DENY를 그대로 판정에 쓰는데,
+    이는 AWS가 NACL을 평가하는 first-match 방식과 같습니다. 라우트 평가는 <span class="mono">local</span> 라우트의
+    VPC CIDR 포함 여부를 먼저 보고, 그 외 라우트는 상태가 <span class="mono">active</span>인 경우에만 인정하므로
+    TGW나 피어링을 경유하는 크로스 VPC 경로도 라우트 단계에서 걸러집니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Check 탭 실행 결과 예시 (README 발췌)</div>
+    <pre><code>Connectivity: web-server → db-primary  TCP/443
+══════════════════════════════════════════════
+
+✓ Source SG Outbound     sg-0abc: TCP 443 → 0.0.0.0/0 ALLOW
+✓ Source NACL Outbound   acl-xxx: Rule 100 All ALLOW
+✓ Source Route           rtb-xxx: 10.2.0.0/16 → tgw-xxx (active)
+✗ Dest SG Inbound        sg-0def: TCP 443 ← 10.1.0.0/16 NOT FOUND
+
+Result: ✗ BLOCKED at Destination SG Inbound
+Suggestion: Add inbound rule TCP 443 from 10.1.88.66/32</code></pre>
+  </div>
+
+  <p>
+    검사기와 별도로 EC2 탭에는 네트워크 경로 시각화가 있습니다. 인스턴스 액션 메뉴의 Network Path를 선택하면
+    해당 인스턴스의 VPC, Subnet, Route Table, Security Group, NACL을 하나의 스크롤 오버레이로 렌더링합니다.
+    검사기가 "두 지점 사이의 판정"이라면 이 오버레이는 "한 인스턴스의 네트워크 문맥 전체"를 보여주는 조회 도구입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - R 키는 로컬 검사가 아닙니다</span>
+    <p>
+      Check 탭에서 <span class="mono">R</span>을 누르면 AWS Reachability Analyzer가 실행됩니다.
+      이 경로는 <span class="mono">CreateNetworkInsightsPath</span>와 분석 실행 API를 실제로 호출하므로 비용이 발생할 수 있고,
+      별도의 IAM 권한 4개가 필요합니다. tui-aws는 실행 전에 비용 확인 프롬프트를 띄웁니다.
+    </p>
+  </div>
+
+  <p class="lead-def">
+    <b>원칙:</b> 연결성 검사기는 AWS의 평가 규칙(SG 허용 탐색, NACL first-match, 라우트 최장 일치 경로의 active 여부)을
+    로컬에서 재현하는 도구이며, 판정의 정확도는 재현된 규칙의 범위를 넘지 못합니다.
+  </p>
+
+  <!-- 다이어그램 선택 위계: 아키텍처는 Eraser 를 먼저 검토하고,
+       맞지 않을 때 Mermaid 로 내려온다. 기준은 references/diagrams.md 참고.
+
+       Eraser 로 그린 경우 아래 형태로 SVG 를 인라인한다.
+       scripts/inline_svg.py 가 id 접두어와 반응형 처리를 해준다.
+
+       <figure class="diagram static">
+         <div class="diagram-frame">
+           <svg viewBox="0 0 900 420" role="img" aria-label="...">...</svg>
+         </div>
+         <figcaption>
+           그림 N. 설명. (<a href="https://app.eraser.io/workspace/xxxx">Eraser 원본</a>)
+         </figcaption>
+       </figure>
+
+       아래 Mermaid figure 는 아키텍처가 아닌 흐름도에 쓴다.
+       다이어그램이 없으면 이 figure 와 문서 끝의 mermaid 모듈 스크립트를
+       함께 삭제한다. -->
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  C["클라이언트"] --> LB["Network Load Balancer"]
+  LB --> ENI["Elastic Network Interface"]
+  ENI --> APP["Application"]
+  APP --> DB[("Database")]
+    </div>
+    <figcaption>
+      그림 2. 커넥션 경로. 각 계층이 어디서 커넥션을 끊는지가 이 문서의 핵심입니다.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://example.com/post">문서 제목</a>
+      - 저자, 발행처 (YYYY-MM-DD)
+      <span class="url">https://example.com/post</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://docs.example.com/page">API Reference 제목</a>
+      <span class="url">https://docs.example.com/page</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: YYYY-MM-DD.
+    본 문서는 (주 출처)를 기반으로 작성한 기술 분석 자료입니다.
+    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  }
+  sync();
+
+  btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>

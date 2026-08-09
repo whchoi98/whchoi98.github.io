@@ -49,6 +49,18 @@ blog_categories:
     icon: cloudwatch
     desc: CloudWatch, OTel, Grafana
     url: /docs/techblog/observability/
+  - name: Networking
+    icon: vpc
+    desc: VPC, TGW, DNS, 하이브리드
+    url: /docs/techblog/networking/
+  - name: Database
+    icon: database
+    desc: RDS, Aurora, DynamoDB, Valkey
+    url: /docs/techblog/database/
+  - name: Data Analytics
+    icon: analytics
+    desc: Kinesis, Glue, Athena, Redshift
+    url: /docs/techblog/data-analytics/
   - name: Workshop
     icon: step-functions
     desc: 핸즈온 랩 모음

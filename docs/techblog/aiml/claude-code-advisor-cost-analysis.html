@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Claude Code advisor 구성 비용 분석 - Sonnet 5 + Opus 5 advisor vs Opus 5 고정</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-advisor-cost/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  /* 다크 상태로 인쇄해도 라이트 팔레트로 강제한다. 목록은 :root 와 일치해야 한다. */
+  html[data-theme="dark"] {
+    --paper: #ffffff;
+    --paper-2: #f5f6f8;
+    --ink: #1c232b;
+    --ink-2: #48535f;
+    --muted: #6b7684;
+    --line: #dde2e8;
+    --line-strong: #c2cad2;
+    --navy: #232f3e;
+    --accent: #c2540a;
+    --accent-bg: #fdf4ec;
+    --note-bg: #f2f5f8;
+    --code-bg: #f4f6f8;
+    --link: #0f5c8c;
+  }
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+<noscript>
+<style>
+/* JS 비활성 환경에서는 Mermaid 소스를 코드로 그대로 노출한다. */
+html:not(.mermaid-ready) .diagram .mermaid {
+  visibility: visible;
+  min-height: 0;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+</style>
+</noscript>
+</head>
+<body>
+<div class="page">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">CLAUDE CODE / COST BENCHMARK</p>
+  <h1>Claude Code advisor 구성 비용 분석 - Sonnet 5 + Opus 5 advisor vs Opus 5 고정</h1>
+  <p class="subtitle">
+    같은 과제를 advisor 구성과 Opus 고정 구성으로 각각 실행해 실측한 토큰 비용 비교입니다.
+    과제 규모에 따라 어느 구성이 저렴한지, 그 손익분기가 어디서 갈리는지를 다룹니다.
+  </p>
+
+  <div class="stat" role="img" aria-label="advisor 구성의 상대 비용: 짧은 과제에서는 Opus 고정보다 25% 비싸고, 큰 과제에서는 15% 저렴합니다">
+    <div class="stat-item old">
+      <span class="stat-num">+25<span class="unit">%</span></span>
+      <span class="stat-sub">짧은 과제 - advisor 호출 1회 시 Opus 고정 대비</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">-15<span class="unit">%</span></span>
+      <span class="stat-sub">대형 리팩토링 - advisor 호출 2회에도 더 저렴</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-08입니다.</p>
+    <p>적용 대상은 Claude Code에서 실행 모델과 자문 모델 구성을 고민하는 엔지니어입니다.</p>
+    <p>측정 지표는 <span class="mono">claude -p --output-format json</span>이 반환하는 <span class="mono">modelUsage</span>입니다.</p>
+    <p>주 출처는 직접 수행한 실험(Claude Code v2.1.226, 2026-08-08)과 Anthropic 공식 문서입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>Sonnet 5 + Opus 5 advisor 구성은 짧은 과제에서 Opus 5 고정보다 <strong>25% 비쌌고($1.238 vs $0.993)</strong>, 435줄 리팩토링 과제에서는 15% 저렴했습니다($3.094 vs $3.646).</li>
+    <li>advisor 비용은 응답(output)이 아니라 입력에서 나옵니다. 호출할 때마다 전체 대화 트랜스크립트를 <strong>캐시 없이 새로 읽기 때문</strong>(advisor 측 <span class="mono">cache_read</span> 0)에, 대화가 길수록 호출당 비용이 커집니다.</li>
+    <li>advisor는 붙여놔도 호출이 보장되지 않습니다. 짧은 과제에서 미호출로 끝나면 오버헤드 0으로 Opus 고정 대비 43% 저렴했지만, 이번 실측에서는 호출이 1회 발생하자 총비용이 역전됐습니다.</li>
+    <li>짧고 평이한 과제는 Sonnet 단독으로 충분했고, 장기 다단계 작업은 advisor 구성이 유리했습니다. 이번 실측에서는 과제가 커지자 output 대부분을 Sonnet 단가로 생성하는 절약분이 advisor의 입력 비용을 넘어섰습니다. 다만 이 절약분에는 두 모델의 산출물 규모 차이가 섞여 있습니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">사실 관계 - advisor 도구와 실험 설계</a></li>
+    <li><span class="no">02</span><a href="#s2">동작 원리 - advisor 호출의 비용 구조</a></li>
+    <li><span class="no">03</span><a href="#s3">1차 실험 - 짧은 과제</a></li>
+    <li><span class="no">04</span><a href="#s4">2차 실험 - 대형 리팩토링</a></li>
+    <li><span class="no">05</span><a href="#s5">손익분기 분석</a></li>
+    <li><span class="no">06</span><a href="#s6">상황별 권고</a></li>
+    <li><span class="no">07</span><a href="#s7">한계</a></li>
+    <li><span class="no">08</span><a href="#s8">결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>사실 관계 - advisor 도구와 실험 설계</h2>
+  <p>
+    Claude Code는 실행 모델(executor)과 별도로 자문 모델(advisor)을 지정할 수 있습니다.
+    <span class="mono">--advisor claude-opus-5</span> 플래그, <span class="mono">/advisor</span> 명령,
+    <span class="mono">advisorModel</span> 설정으로 활성화하며, 실행 모델이 스스로 필요하다고 판단할 때
+    advisor 도구를 호출해 더 강한 모델의 자문을 받습니다. 호출 여부는 실행 모델의 판단에 달려 있고,
+    <strong>구성만으로 호출이 보장되지 않습니다.</strong>
+  </p>
+  <p>
+    API 레벨에서 advisor는 <span class="mono">advisor_20260301</span> 도구로 구현되고,
+    호출 기록은 <span class="mono">usage.iterations[].type == "advisor_message"</span>로 남습니다.
+    Claude Code의 JSON 출력에서는 <span class="mono">modelUsage</span>에 advisor 모델의 별도 행으로 집계됩니다.
+  </p>
+  <p>
+    실험은 두 개의 과제를 다섯 개의 arm으로 실행했습니다. 1차 과제는 Python 표준 라이브러리만 쓰는
+    CLI 가계부(expense tracker)와 unittest 작성이고, 2차 과제는 435줄 레거시 모놀리스를
+    패키지로 리팩토링하는 작업입니다. 모든 arm은 격리 환경
+    (<span class="mono">--setting-sources project --strict-mcp-config</span>)에서 동일 프롬프트로 실행했습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 실험 arm 구성</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">과제</th><th scope="col">구성</th><th scope="col">advisor 호출</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">A</th><td>1차 - 가계부 CLI</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">0회</span> (자연 상태)</td></tr>
+        <tr><th scope="row">A2</th><td>1차 - 가계부 CLI</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">1회</span> (시스템 프롬프트로 유도)</td></tr>
+        <tr><th scope="row">B</th><td>1차 - 가계부 CLI</td><td>Opus 5 고정, advisor 비활성화</td><td>-</td></tr>
+        <tr><th scope="row">C</th><td>2차 - 대형 리팩토링</td><td>Sonnet 5 + Opus 5 advisor</td><td><span class="num">2회</span> (시스템 프롬프트로 유도)</td></tr>
+        <tr><th scope="row">D</th><td>2차 - 대형 리팩토링</td><td>Opus 5 고정</td><td>-</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - advisor 토큰은 executor 합계에 합산되지 않습니다</span>
+    <p>
+      advisor가 쓴 토큰은 <span class="mono">modelUsage</span>에 advisor 모델의 별도 행으로 기록됩니다.
+      executor 행만 보고 비용을 집계하면 advisor 비용이 통째로 빠집니다. 총비용은 두 행을 더해야 합니다.
+      이 문서의 표에서는 Haiku 유틸리티 행(약 $0.001)을 생략했습니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>동작 원리 - advisor 호출의 비용 구조</h2>
+  <p>
+    advisor가 호출되면 그 시점까지의 전체 대화 트랜스크립트가 advisor 모델의 입력으로 전달됩니다.
+    Claude Code는 advisor 측 프롬프트 캐싱을 사용하지 않으므로, 이 입력 전체가
+    <strong>매 호출마다 uncached input으로 새로 과금</strong>됩니다. 실측에서 advisor 측
+    <span class="mono">cache_read</span>는 매번 0이었습니다.
+  </p>
+  <p>
+    1차 실험의 호출 1회를 보면 구조가 분명합니다. input 53,210토큰, output 2,828토큰으로
+    호출 1회에 $0.337이 들었습니다. 자문 응답 자체(output 2,828토큰)는 소량이고,
+    비용 대부분이 트랜스크립트를 읽는 input에서 나옵니다. 2차 실험에서는 대화가 길어져
+    호출당 평균 input이 77,611토큰으로 늘었고, 호출 2회 합계가 $0.856이었습니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Sonnet 5 executor
+  participant O as Opus 5 advisor
+  Note over S: 구현과 테스트를 반복
+  S->>O: advisor 호출 - 전체 트랜스크립트 전달
+  Note over O: input 53,210토큰을 캐시 없이 새로 읽음
+  O-->>S: 자문 응답 - output 2,828토큰
+  Note over S: 자문을 반영해 작업 계속
+    </div>
+    <figcaption>
+      그림 1. advisor 호출 1회의 토큰 흐름(1차 실험 실측). 비용의 무게중심이 응답이 아니라
+      트랜스크립트 입력에 있다는 점이 이 문서의 출발점입니다.
+    </figcaption>
+  </figure>
+
+  <p>
+    이 구조에서 두 가지가 따라 나옵니다. 첫째, 호출당 비용은 대화 길이에 비례해 커집니다.
+    둘째, 같은 자문이라도 대화 후반에 호출될수록 비쌉니다. advisor를 자주 부르는 구성은
+    대화가 길어질수록 오버헤드가 빠르게 누적됩니다.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>1차 실험 - 짧은 과제</h2>
+  <p>
+    1차 과제는 Python 표준 라이브러리만 쓰는 CLI 가계부와 unittest 작성입니다.
+    add / list / summary / delete 서브커맨드, JSON 영속화, 입력 검증, 에러 케이스 테스트까지
+    포함하지만, 설계 판단이 크게 필요하지 않은 짧고 평이한 과제입니다.
+    세 arm 모두 테스트 통과까지 완주했습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 1차 실험 결과 (각 조건 1회 실행, cache read의 K는 1,000토큰)</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">구성</th><th scope="col">턴</th><th scope="col">시간</th><th scope="col">output 토큰</th><th scope="col">cache read</th><th scope="col">비용</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">A</th><td>advisor 구성, 호출 0회</td><td><span class="num">22</span></td><td><span class="num">135초</span></td><td><span class="num">9,626</span></td><td><span class="num">959K</span></td><td><span class="num">$0.570</span></td></tr>
+        <tr><th scope="row">A2</th><td>advisor 구성, 호출 1회</td><td><span class="num">23</span></td><td><span class="num">213초</span></td><td><span class="num">14,516 + 2,828</span></td><td><span class="num">1,120K</span></td><td><span class="num">$1.238</span></td></tr>
+        <tr><th scope="row">B</th><td>Opus 5 고정</td><td><span class="num">15</span></td><td><span class="num">213초</span></td><td><span class="num">18,052</span></td><td><span class="num">530K</span></td><td><span class="num">$0.993</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Arm A에서 Sonnet은 자문 없이 완주했고, 이 경우 advisor 구성의 오버헤드는 0입니다.
+    비용은 $0.570으로 Opus 고정($0.993) 대비 <strong>43% 저렴</strong>했습니다.
+    반면 시스템 프롬프트로 호출을 유도한 A2는 advisor 비용 $0.337이 더해지고
+    Sonnet 본체 작업도 늘어나(본체 $0.900) 총 $1.238이 되었습니다.
+  </p>
+  <p>
+    Opus 고정은 턴 수가 적고(15 vs 22턴) 턴당 output이 약 2.8배였습니다(1,203 vs 438토큰).
+    더 적은 시도로 끝내지만 토큰 단가가 높은, 예측 가능한 비용 프로파일입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 짧은 과제에서는 호출 1회로도 비용이 역전될 수 있습니다</span>
+    <p>
+      advisor 미호출을 기대하고 붙여둔 구성이라도, 이번 실측에서는 짧은 과제에서 호출이 1회 발생하자
+      총비용($1.238)이 Opus 고정($0.993)을 넘어섰습니다. 역전분의 약 절반은 호출 비용($0.337)이 아니라
+      호출에 동반된 executor 작업 증가에서 나왔습니다. 호출 여부는 실행 모델의 판단이라
+      사전에 예측할 수 없습니다. 비용 상한 예측이 중요하면 이 불확실성 자체가 비용입니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>2차 실험 - 대형 리팩토링</h2>
+  <p>
+    2차 과제는 435줄 레거시 모놀리스(중복 코드 8회, 할인 규칙 2중화, 수동 argv 파싱)를
+    단일 책임 패키지로 리팩토링하는 작업입니다. 원본 테스트 26개를 <strong>무수정 통과</strong>시키는
+    하위 호환 제약, argparse 전환, 타입 힌트 추가, top-customers 신기능과 신규 테스트 작성까지
+    포함합니다. 두 arm 모두 동일 시드에서 시작했고, 원본 테스트 무수정 제약을 지켰습니다(diff로 검증).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 2차 실험 결과 (각 조건 1회 실행, cache read의 K는 1,000토큰)</caption>
+      <thead>
+        <tr><th scope="col">Arm</th><th scope="col">구성</th><th scope="col">턴</th><th scope="col">시간</th><th scope="col">output 토큰</th><th scope="col">cache read</th><th scope="col">비용</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">C</th><td>advisor 구성, 호출 2회</td><td><span class="num">85</span></td><td><span class="num">475초</span></td><td><span class="num">33,780 + 3,176</span></td><td><span class="num">4,351K</span></td><td><span class="num">$3.094</span></td></tr>
+        <tr><th scope="row">D</th><td>Opus 5 고정</td><td><span class="num">45</span></td><td><span class="num">713초</span></td><td><span class="num">61,479</span></td><td><span class="num">2,531K</span></td><td><span class="num">$3.646</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    이번에는 advisor 구성이 이겼습니다. C는 advisor 호출 2회($0.856)를 치르고도 총 $3.094로,
+    Opus 고정($3.646)보다 <strong>15% 저렴</strong>했습니다. 총비용에서 advisor 오버헤드가
+    차지하는 비율은 28%로, 1차 A2(27%)와 사실상 같았습니다.
+    승부를 가른 것은 비율이 아니라 절대액입니다. 다음 섹션에서 이 구조를 봅니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 산출물 규모가 달라 순수한 가격 비교는 아닙니다</span>
+    <p>
+      C는 685줄 / 38개 테스트, D는 1,589줄 / 57개 테스트를 냈습니다. Opus가 더 정교하고 방대한
+      결과물을 내는 작업 스타일 차이가 비용에 섞여 있으므로, 이 15%는 "같은 일의 가격 차이"가 아니라
+      "같은 과제를 맡겼을 때의 청구액 차이"로 읽어야 합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>손익분기 분석</h2>
+  <p>
+    두 실험을 겹쳐 보면 손익분기의 방향이 보입니다. advisor 구성에는 서로 반대로 움직이는
+    두 힘이 있습니다. 절약분은 output 대부분을 Sonnet 단가로 생성하는 데서 나오고,
+    과제가 클수록 output이 늘어나므로 절약분도 커집니다. 오버헤드는 호출마다 트랜스크립트 전체를
+    캐시 없이 읽는 input 비용이고, 대화가 길수록 호출당 비용이 커집니다(호출당 input
+    53,210토큰 &rarr; 77,611토큰, 46% 증가).
+  </p>
+  <p>
+    실측에서는 절약분이 더 빨리 자랐습니다. Sonnet 본체 비용(A2 $0.900, C $2.238)을 같은 과제의
+    Opus 고정 비용과 비교하면, 1차 절약분은 $0.093(= $0.993 - $0.900)으로 advisor 오버헤드 $0.337에
+    못 미쳤고, 2차 절약분은 $1.408(= $3.646 - $2.238)로 오버헤드 $0.856을 <strong>추월</strong>했습니다.
+    총비용 대비 오버헤드 비율은 두 실험 모두 27~28%로 일정했으므로, 역전은 비율의 희석이 아니라
+    절대액의 경주에서 나왔습니다.
+  </p>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">1차 (A2) - 절약 $0.093 &lt; 오버헤드 $0.337</span>
+        <span class="flow-val">+$0.245 (+25%)</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">2차 (C) - 절약 $1.408 &gt; 오버헤드 $0.856</span>
+        <span class="flow-val">-$0.552 (-15%)</span>
+      </div>
+    </div>
+    <figcaption>
+      그림 2. Opus 고정 대비 advisor 구성의 총비용 차이. advisor 오버헤드 절대액은 $0.337에서
+      $0.856으로 늘었지만, output을 Sonnet 단가로 생성하는 절약분이 더 빨리 커져
+      열세(+25%)가 우세(-15%)로 뒤집혔습니다.
+    </figcaption>
+  </figure>
+
+  <p class="lead-def">
+    <b>원칙:</b> advisor 비용의 본체는 자문 응답이 아니라, 호출마다 전체 트랜스크립트를
+    캐시 없이 읽는 input입니다. 이 오버헤드를 넘어설 만큼 Sonnet 단가 절약분이 커야
+    advisor 구성이 이길 수 있습니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>상황별 권고</h2>
+  <p>
+    1순위 기준은 과제 규모입니다. 이 실험 범위에서는 "짧고 평이하면 Sonnet 단독, 길면 advisor 구성"이
+    가장 단순하고 실측과 일치하는 규칙이었고, 짧아도 설계 판단이 필요하면 Opus 고정이 예외입니다.
+    나머지 축은 비용 예측 가능성입니다. 표 4는 조건당 1회 실측에 기반한 잠정 규칙이며,
+    2행은 직접 실험하지 않은 시나리오에 대한 비용 외삽입니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. 운영 상황별 구성 선택</caption>
+      <thead>
+        <tr><th scope="col">상황</th><th scope="col">권고 구성</th><th scope="col">근거</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">짧고 평이한 단발 과제</th>
+          <td>Sonnet 단독 (advisor 없이)</td>
+          <td>1차 실험에서 자문 없이 완주. 미호출 시 Opus 고정 대비 43% 저렴</td>
+        </tr>
+        <tr>
+          <th scope="row">짧지만 설계 판단이 필요한 과제</th>
+          <td>Opus 5 고정</td>
+          <td>이번 실측에서는 호출 1회 발생 시 총비용 역전. 고정 구성이 예측 가능. advisor의 설계 품질 기여는 미측정</td>
+        </tr>
+        <tr>
+          <th scope="row">장기 다단계 구현 / 리팩토링</th>
+          <td>Sonnet 5 + Opus 5 advisor</td>
+          <td>2차 실험에서 호출 2회에도 15% 저렴 (산출물 규모 차이 교란 포함)</td>
+        </tr>
+        <tr>
+          <th scope="row">비용 상한 예측이 중요한 파이프라인</th>
+          <td>Opus 고정 또는 <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1</span></td>
+          <td>advisor 호출은 확률적이라 상한 추정이 어려움. 비활성화로 변동 요인 제거</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    advisor 구성을 선택한 경우에도 비활성화 스위치는 알아둘 필요가 있습니다.
+    <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1</span> 환경 변수는 도구 자체를 내리므로,
+    배치 실행에서 호출 변동성을 제거하는 가장 확실한 방법입니다.
+  </p>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>한계</h2>
+  <p>
+    이 실험은 방향을 보여주지만 결론을 확정하지는 않습니다. 다음 네 가지를 감안하고 읽어야 합니다.
+  </p>
+  <ul class="plain">
+    <li>조건당 1회 실행이라 변동성이 통제되지 않았습니다. 결론 확정에는 조건당 3회 이상이 필요합니다.</li>
+    <li>A2와 C의 advisor 호출은 시스템 프롬프트로 유도된 것으로, 자연 발생한 호출이 아닙니다. 실제 운영에서의 호출 빈도는 과제와 모델 판단에 따라 달라집니다.</li>
+    <li>2차에서 Opus는 2.3배 분량의 코드와 1.5배의 테스트를 냈습니다. 산출물 규모 차이가 비용 비교에 교란 변수로 섞여 있습니다.</li>
+    <li>1차 과제가 짧아 advisor의 본래 목적인 설계 품질 개선 효과는 측정되지 않았습니다. 공식 문서상 advisor는 장기 다단계 작업을 위한 기능입니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8">
+  <h2><span class="no">08</span>결론</h2>
+  <p>
+    advisor 구성은 공짜 업그레이드가 아니라 과제 규모에 따라 유불리가 갈리는 트레이드오프입니다.
+    짧은 과제에서는 호출 1회로 Opus 고정보다 25% 비싸질 수 있고, 큰 과제에서는 호출 2회에도
+    15% 저렴했습니다. 갈림길은 <strong>advisor의 uncached input 오버헤드와 Sonnet 단가
+    절약분의 절대액 경주</strong>이며, 이번 실측에서는 과제가 커지자 절약분이 오버헤드를 추월했습니다.
+  </p>
+  <p>
+    실무 기본값으로는 이렇게 정리할 수 있습니다. 단발성 스크립트나 소규모 수정은 Sonnet 단독,
+    설계 판단이 필요한 짧은 과제는 Opus 고정(직접 실험하지 않은 시나리오에 대한 비용 외삽),
+    장기 리팩토링과 다단계 구현은 Sonnet + Opus advisor 구성입니다.
+    비용 상한이 중요한 자동화 파이프라인이라면 advisor를 비활성화해 변동 요인을 제거합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">재현 방법 - Claude Code v2.1.226</div>
+    <pre><code><span class="cm"># 입력: 1차 과제(Arm A/A2/B)는 prompt.txt, 2차 과제(Arm C/D)는 prompt2.txt</span>
+
+<span class="cm"># advisor 구성 (Arm A/A2/C)</span>
+claude -p --model claude-sonnet-5 --advisor claude-opus-5 \
+  --setting-sources project --strict-mcp-config \
+  --output-format json --allowedTools "..." &lt; prompt.txt
+
+<span class="cm"># Opus 고정 (Arm B/D)</span>
+CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
+  --setting-sources project --strict-mcp-config \
+  --output-format json --allowedTools "..." &lt; prompt.txt</code></pre>
+  </div>
+</section>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/advisor">Claude Code Docs - Advisor</a>
+      - Anthropic (2026). <span class="mono">/advisor</span>, <span class="mono">--advisor</span>,
+      <span class="mono">advisorModel</span>, <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL</span>의 근거 문서
+      <span class="url">https://code.claude.com/docs/en/advisor</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool">Claude API Docs - Advisor tool</a>
+      - <span class="mono">advisor_20260301</span>, <span class="mono">usage.iterations</span>, 캐싱 동작의 근거 문서
+      <span class="url">https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool</span>
+    </li>
+  </ul>
+
+  <h3>실험 데이터</h3>
+  <ul>
+    <li>
+      직접 수행한 실험 원본 (cc-advisor-tools, 2026-08-08) - Claude Code v2.1.226,
+      조건당 1회 실행, <span class="mono">modelUsage</span> 기준 집계. 표 1~3의 모든 수치가 이 실험에서 나왔습니다.
+      <span class="url">비공개 - 재현 방법은 08 결론 참조</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-08.
+    본 문서는 직접 수행한 실험(Claude Code v2.1.226)과 Anthropic 공식 문서를 기반으로 작성한 기술 분석 자료입니다.
+    비용과 토큰 수치는 작성 시점의 모델 단가와 동작 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  }
+  sync();
+
+  btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>

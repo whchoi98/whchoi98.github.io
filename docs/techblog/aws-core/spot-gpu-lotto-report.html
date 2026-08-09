@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>GPU Spot Lotto 아키텍처 분석 - 멀티 리전 GPU Spot 가격 모니터링과 워크로드 디스패치</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aws-core/spot-gpu-lotto/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AWS Core / Architecture Deep Dive</p>
+  <h1>GPU Spot Lotto 아키텍처 분석 - 멀티 리전 GPU Spot 가격 모니터링과 워크로드 디스패치</h1>
+  <p class="subtitle">
+    서울 컨트롤 플레인이 3개 미국 리전의 GPU Spot 가격을 감시하고 최저가 리전 EKS에
+    워크로드를 배치하는 시스템의 구조를 소스 코드와 IaC 설정 기준으로 분석합니다.
+  </p>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-09입니다.</p>
+    <p>분석 대상은 spot-gpu-lotto 저장소(GitHub whchoi98/spot-gpu-lotto)의 소스 코드, Terraform, Helm, Kubernetes 매니페스트입니다.</p>
+    <p>핵심 설정은 <span class="mono">poll_interval</span>, <span class="mono">dispatch_mode</span>, <span class="mono">k8s_mode</span>입니다.</p>
+    <p>주 출처는 위 저장소의 코드와 설정 파일이며, README 서술과 다른 지점은 본문에 명시한 코드 기준 값입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>서울(ap-northeast-2) 컨트롤 플레인이 3개 미국 리전(us-east-1, us-east-2, us-west-2)의 GPU Spot 가격을 수집해 Redis Sorted Set에 저장하고, 디스패처가 최저가 리전 EKS에 GPU Pod를 생성합니다. 폴링 주기는 코드 기본값 <strong>60초</strong>, 배포 설정(Helm values) 기준 30초입니다.</li>
+    <li>데이터는 서울 S3 허브와 리전별 FSx Lustre의 자동 가져오기/내보내기(Hub-and-Spoke)로 동기화되고, Spot 중단 시 Reaper가 10초 주기로 Pod 상태를 확인해 실패 리전을 제외하고 최대 2회 재배치합니다.</li>
+    <li>Strands Agents SDK 기반 에이전트(도구 5개)가 Bedrock AgentCore Runtime에서 실행되고, AgentCore Gateway가 REST API 6개 오퍼레이션을 MCP 도구로 노출해 외부 에이전트가 이 시스템을 도구로 쓸 수 있습니다.</li>
+    <li>운영 values 파일의 <span class="mono">k8sMode: "real"</span>은 코드가 인식하는 값(<span class="mono">live</span>)과 달라 그대로 배포하면 <strong>Pod가 실제로 생성되지 않습니다</strong>. 배포 전 이 값을 먼저 교정해야 합니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">문제 정의 - Spot 가격 변동성과 리전 간 격차</a></li>
+    <li><span class="no">02</span><a href="#s2">동작 원리 - 서울 컨트롤 플레인과 3개 스팟 리전</a></li>
+    <li><span class="no">03</span><a href="#s3">딥다이브 1 - 최저가 리전 선택과 디스패치</a></li>
+    <li><span class="no">04</span><a href="#s4">딥다이브 2 - Hub-and-Spoke 스토리지</a></li>
+    <li><span class="no">05</span><a href="#s5">딥다이브 3 - Spot 중단 대응</a></li>
+    <li><span class="no">06</span><a href="#s6">에이전트 인터페이스 - AgentCore와 MCP Gateway</a></li>
+    <li><span class="no">07</span><a href="#s7">실제 운영 흐름</a></li>
+    <li><span class="no">08</span><a href="#s8">한계와 결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>문제 정의 - Spot 가격 변동성과 리전 간 격차</h2>
+  <p>
+    EC2 Spot 인스턴스는 온디맨드 대비 저렴하지만 두 가지 비용이 따라옵니다.
+    가격이 리전과 가용 영역마다 다르게 움직이고, EC2가 용량을 회수할 때
+    <strong>2분 중단 통지</strong> 후 인스턴스가 종료됩니다(EC2 공식 문서 기준).
+    GPU 학습 워크로드를 한 리전에 고정하면 더 싼 리전의 가격을 놓치고,
+    중단이 발생하면 체크포인트 복구와 재배치를 사람이 처리해야 합니다.
+  </p>
+  <p>
+    GPU Spot Lotto는 이 두 문제를 겨냥합니다. 여러 리전의 가격을 상시 비교해
+    제출 시점의 최저가 리전에 작업을 배치하고, 중단이 감지되면 다른 리전으로
+    자동 재스케줄링합니다. 감시 대상은 <span class="mono">src/common/config.py</span>에
+    정의된 6개 GPU 인스턴스 타입입니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 감시 대상 GPU 인스턴스 타입 (src/common/config.py, GPU 정보는 src/agent/system_prompt.py의 매핑 기준)</caption>
+      <thead>
+        <tr><th scope="col">인스턴스 타입</th><th scope="col">GPU</th><th scope="col">VRAM</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">g6.xlarge</span></td><td>L4</td><td><span class="num">24GB</span></td></tr>
+        <tr><td><span class="mono">g5.xlarge</span></td><td>A10G</td><td><span class="num">24GB</span></td></tr>
+        <tr><td><span class="mono">g6e.xlarge</span></td><td>L40S</td><td><span class="num">48GB</span></td></tr>
+        <tr><td><span class="mono">g6e.2xlarge</span></td><td>L40S x2</td><td><span class="num">96GB</span></td></tr>
+        <tr><td><span class="mono">g5.12xlarge</span></td><td>A10G x4</td><td><span class="num">96GB</span></td></tr>
+        <tr><td><span class="mono">g5.48xlarge</span></td><td>A10G x8</td><td><span class="num">192GB</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 프로젝트 이름의 의미</span>
+    <p>
+      "Lotto"라는 이름처럼 Spot 가격은 매 순간 어느 리전이 저렴할지 예측하기 어렵습니다.
+      이 시스템은 예측 대신 감시 주기마다 실제 가격을 조회해 그 시점의 최저가를 고르는
+      접근을 택합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>동작 원리 - 서울 컨트롤 플레인과 3개 스팟 리전</h2>
+  <p>
+    컨트롤 플레인 전체가 서울 리전에 있습니다. 사용자는 CloudFront와 WAF, ALB를 거쳐
+    FastAPI 기반 API 서버에 도달하고, API 서버는 Redis(ElastiCache)를 가격 저장소이자
+    작업 큐로 사용합니다. 가격 수집(Price Watcher), 큐 소비(Dispatcher),
+    완료 정리(Reaper)가 각각 독립 프로세스로 돌면서 하나의 파이프라인을 이룹니다.
+    GPU가 실제로 도는 곳은 3개 미국 리전의 EKS 클러스터이고, 노드는 Karpenter가
+    Spot으로만 프로비저닝합니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph Seoul["서울 ap-northeast-2 컨트롤 플레인"]
+    API["API Server<br/>FastAPI"] --> RD[("Redis<br/>가격 Sorted Set + 작업 큐")]
+    PW["Price Watcher<br/>EC2 Spot 가격 폴링"] --> RD
+    RD --> DP["Dispatcher<br/>BRPOP + 최저가 선택"]
+    S3["S3 허브 버킷"]
+  end
+  U["사용자"] --> CF["CloudFront + WAF + ALB"] --> API
+  DP --> EKS["최저가 리전 EKS<br/>us-east-1 / us-east-2 / us-west-2"]
+  S3 <--> FSX["FSx Lustre<br/>리전별 auto-sync"]
+  FSX --> EKS
+    </div>
+    <figcaption>
+      그림 1. 가격 감시 &rarr; 큐 &rarr; 디스패치 파이프라인. 제어와 데이터 허브는 서울에,
+      GPU 실행은 3개 미국 리전에 분리되어 있습니다.
+    </figcaption>
+  </figure>
+
+  <p>
+    상태 저장소는 Redis 하나로 통일되어 있습니다. 가격, 큐, 작업 레코드, 리전별 용량
+    카운터가 모두 Redis 자료구조 하나씩에 대응하므로, 컴포넌트 간 통신에 별도의
+    메시지 브로커가 없습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. Redis 데이터 구조 (ARCHITECTURE.md 4장, 소스 코드에서 키 사용 확인)</caption>
+      <thead>
+        <tr><th scope="col">키</th><th scope="col">타입</th><th scope="col">역할</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">gpu:spot:prices</span></td><td>Sorted Set</td><td>{region}:{instance_type} 멤버를 가격 점수로 자동 정렬</td></tr>
+        <tr><td><span class="mono">gpu:job:queue</span></td><td>List</td><td>작업 페이로드 큐, 디스패처가 BRPOP으로 소비</td></tr>
+        <tr><td><span class="mono">gpu:jobs:{job_id}</span></td><td>Hash</td><td>작업 레코드(상태, 리전, Pod 이름, 재시도 횟수)</td></tr>
+        <tr><td><span class="mono">gpu:active_jobs</span></td><td>Set</td><td>활성 작업 ID 목록, Reaper 순회 대상</td></tr>
+        <tr><td><span class="mono">gpu:capacity:{region}</span></td><td>String</td><td>리전별 GPU 슬롯 카운터, 원자적 DECR/INCR</td></tr>
+        <tr><td><span class="mono">gpu:jobs:{job_id}:status</span></td><td>Pub/Sub</td><td>SSE 실시간 상태 스트리밍 채널</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    API 표면은 <span class="mono">openapi.json</span> 기준으로 <strong>17개 경로, 19개 오퍼레이션</strong>입니다.
+    작업 CRUD와 SSE 스트림, 가격 조회, S3 presigned 업로드, 템플릿, 관리자 6종,
+    헬스 체크와 Prometheus 메트릭으로 구성됩니다. README는 "18개 엔드포인트"로
+    기술하고 있으나 이 문서는 OpenAPI 스펙에서 센 값을 기준으로 합니다.
+    인프라는 Terraform 모듈 13개(vpc, eks, karpenter, elasticache, cognito, alb,
+    cloudfront, ecr, fsx, s3, pod_identity, github_oidc, monitoring)와
+    Helm 차트(templates 디렉터리 20개 파일)로 정의됩니다.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>딥다이브 1 - 최저가 리전 선택과 디스패치</h2>
+
+  <h3>3.1 가격 수집</h3>
+  <p>
+    Price Watcher는 리전별로 <span class="mono">describe_spot_price_history</span> API를
+    병렬 호출해 Linux/UNIX 기준 Spot 가격을 가져오고, 리전 안에서는 인스턴스 타입별
+    최저가 하나만 남깁니다. 결과는 <span class="mono">ZADD</span> upsert로 Sorted Set에
+    기록되므로 저장하는 순간 가격순 정렬이 끝나 있습니다. 수집 주기는
+    <span class="mono">poll_interval</span>로 제어되며 코드 기본값은 60초입니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 문서의 60초와 배포 설정의 30초</span>
+    <p>
+      README와 ARCHITECTURE.md는 60초 폴링으로 서술하지만, 실제 배포에 쓰이는
+      <span class="mono">helm/gpu-lotto/values.yaml</span>, <span class="mono">values-dev.yaml</span>,
+      <span class="mono">values-prod.yaml</span>과 <span class="mono">.env.example</span>은 모두
+      <span class="mono">POLL_INTERVAL=30</span>을 지정합니다. 코드 기본값이 60초,
+      배포 환경의 유효값이 30초입니다.
+    </p>
+  </div>
+
+  <h3>3.2 리전 선택</h3>
+  <p>
+    디스패처의 리전 선택은 30줄 남짓한 함수 하나입니다. Sorted Set 전체를 가격
+    오름차순으로 읽고, 요청된 인스턴스 타입과 일치하는 후보를 앞에서부터 순회하면서
+    용량 확보에 성공하는 첫 리전을 반환합니다. 용량 확보는 리전별 카운터의 원자적
+    감소이므로 디스패처가 여럿이어도 초과 배치가 없습니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">src/dispatcher/region_selector.py</div>
+    <pre><code>all_prices = await r.zrange("gpu:spot:prices", 0, -1, withscores=True)  <span class="cm"># 가격 오름차순</span>
+
+candidates = []
+for member, score in all_prices:
+    region, itype = member.rsplit(":", 1)
+    if itype == instance_type and region not in exclude:
+        candidates.append((region, score))
+
+for region, price in candidates:
+    acquired = await acquire_capacity(r, region)   <span class="cm"># 원자적 슬롯 확보</span>
+    if acquired:
+        return (region, price)</code></pre>
+  </div>
+
+  <p>
+    <span class="mono">exclude_regions</span> 인자가 이 함수의 두 번째 역할입니다.
+    Spot 중단으로 실패한 작업을 재배치할 때 직전 실패 리전을 제외 목록에 넣어
+    "차순위로 저렴한 리전"이 자연스럽게 선택되게 합니다.
+  </p>
+
+  <h3>3.3 큐 소비와 배치</h3>
+  <p>
+    디스패처 본체는 <span class="mono">BRPOP</span>(타임아웃 5초) 무한 루프입니다.
+    작업을 꺼내면 리전을 선택하고, Kubernetes API로 대상 리전 EKS의
+    <span class="mono">gpu-jobs</span> 네임스페이스에 Pod를 생성한 뒤 작업 레코드를
+    기록하고 webhook과 Pub/Sub으로 사용자에게 알립니다. 가용 리전이 하나도 없으면
+    작업을 다시 큐에 넣으며, 재시도 한도는 <span class="mono">max_retries</span> 기본값
+    <strong>2회</strong>입니다. 리전별 용량 기본값은 16슬롯입니다.
+  </p>
+
+  <p class="lead-def">
+    <b>원칙:</b> 가격 정렬은 Redis Sorted Set이 수행하고, 디스패처는 정렬된 결과를
+    앞에서부터 소비하며 용량을 원자적으로 확보할 뿐입니다.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>딥다이브 2 - Hub-and-Spoke 스토리지</h2>
+  <p>
+    작업이 매번 다른 리전에 떨어지는 구조에서는 "데이터를 어느 리전에 둘 것인가"가
+    핵심 설계 문제가 됩니다. 이 시스템의 답은 서울 S3 버킷을 단일 허브로 두고,
+    각 스팟 리전에 FSx for Lustre 파일시스템을 스포크로 배치하는 것입니다.
+    모델, 데이터셋, 체크포인트, 결과물이 모두 허브에 모이고, GPU Pod는 자기 리전의
+    FSx만 바라봅니다.
+  </p>
+  <p>
+    동기화는 애플리케이션 코드가 아니라 FSx의 Data Repository Association이
+    담당합니다. Terraform 모듈이 S3 경로와 파일시스템의 <span class="mono">/data</span>
+    경로를 연결하고, 생성/변경/삭제 이벤트에 대해 양방향 자동 동기화를 설정합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">terraform/modules/fsx/main.tf</div>
+    <pre><code>resource "aws_fsx_lustre_file_system" "this" {
+  deployment_type = "SCRATCH_2"        <span class="cm"># Spot 워크로드 수명주기에 맞춘 스크래치형</span>
+  storage_type    = "SSD"
+  ...
+}
+
+resource "aws_fsx_data_repository_association" "this" {
+  data_repository_path = var.s3_import_path   <span class="cm"># 서울 S3 허브</span>
+  file_system_path     = "/data"
+  s3 {
+    auto_export_policy { events = ["NEW", "CHANGED", "DELETED"] }
+    auto_import_policy { events = ["NEW", "CHANGED", "DELETED"] }
+  }
+}</code></pre>
+  </div>
+
+  <p>
+    Kubernetes 쪽에서는 FSx CSI 드라이버 기반 PersistentVolume(용량 1,200Gi,
+    ReadWriteMany)이 각 리전 클러스터에 배포되어 GPU Pod가 <span class="mono">/data</span>
+    아래에서 모델을 읽고 체크포인트를 씁니다. 짧은 추론처럼 반복 읽기가 없는 작업은
+    작업 제출 시 <span class="mono">storage_mode</span> 파라미터로 FSx 대신
+    S3 Mountpoint CSI 마운트를 선택할 수 있어, 파일시스템 비용 없이 S3에 직접
+    접근합니다.
+  </p>
+  <p>
+    이 구조의 효과는 Spot 중단 시나리오에서 드러납니다. us-east-1에서 쓴 체크포인트가
+    자동 내보내기로 서울 허브에 올라가고, 재배치된 us-west-2의 FSx가 같은 파일을
+    자동 가져오기로 받아오므로, <strong>리전을 옮겨도 체크포인트 경로가 동일</strong>합니다.
+    애플리케이션은 리전 이동을 인지할 필요가 없습니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>딥다이브 3 - Spot 중단 대응</h2>
+
+  <h3>5.1 Reaper의 상태 감시와 재배치</h3>
+  <p>
+    중단 감지의 주체는 디스패처 안에서 함께 도는 Reaper 루프입니다.
+    <span class="mono">reap_interval</span> 기본값 <strong>10초</strong>마다 활성 작업
+    집합을 순회하며 각 Pod의 phase를 조회합니다. Succeeded면 Pod를 삭제하고 용량을
+    반환하며, Failed면 재시도 횟수가 한도(2회) 미만일 때 실패 리전을 제외 조건으로
+    붙여 다시 큐에 넣습니다. 생성 후 7,200초(2시간)가 지난 작업은 타임아웃으로
+    정리합니다. Spot 중단으로 노드가 사라져 Pod가 Failed로 떨어지는 경우가 바로
+    이 재큐잉 경로를 타고, 3.2절의 <span class="mono">exclude_regions</span>와 결합해
+    차순위 저렴 리전으로 이동합니다.
+  </p>
+
+  <h3>5.2 Karpenter NodePool</h3>
+  <p>
+    노드 계층에서는 Karpenter NodePool이 GPU Spot 전용으로 제한되어 있습니다.
+    용량 타입은 spot만, 인스턴스 카테고리는 g 계열, 세대는 4 초과(g5, g6, g6e),
+    크기는 xlarge와 2xlarge로 좁혀져 있고 GPU 총량 한도는 16개입니다.
+    AMI는 GPU 드라이버가 내장된 Bottlerocket입니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">k8s/karpenter-gpu-spot.yaml</div>
+    <pre><code>requirements:
+  - karpenter.sh/capacity-type: ["spot"]
+  - karpenter.k8s.aws/instance-category: ["g"]
+  - karpenter.k8s.aws/instance-generation: &gt; "4"   <span class="cm"># g5, g6, g6e</span>
+taints:
+  - nvidia.com/gpu: NoSchedule
+limits:
+  nvidia.com/gpu: "16"
+disruption:
+  consolidationPolicy: WhenEmptyOrUnderutilized
+  consolidateAfter: 30s        <span class="cm"># 유휴 30초 후 노드 축소</span>
+spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2시간</span></code></pre>
+  </div>
+
+  <p>
+    중단 대응은 계층별로 분담됩니다. Karpenter가 대체 Spot 노드를 프로비저닝하고,
+    애플리케이션은 <span class="mono">/data/checkpoints/</span>에 주기적으로 체크포인트를
+    남기며, 디스패처(Reaper)가 Pod 실패를 감지해 다른 리전으로 재시도합니다.
+    ARCHITECTURE.md는 여기에 EKS Auto Mode의 Node Monitoring Agent가 GPU 장애 노드를
+    복구하는 계층을 추가로 서술합니다. 노드 최대 수명 2시간은 오래된 Spot 가격
+    조건에 노드가 묶이는 것을 막는 비용 장치이기도 합니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>에이전트 인터페이스 - AgentCore와 MCP Gateway</h2>
+
+  <h3>6.1 Strands 에이전트 (AgentCore Runtime)</h3>
+  <p>
+    규칙 기반 디스패치와 별개로, 자연어로 작업을 관리하는 AI 에이전트 경로가
+    있습니다. <span class="mono">src/agent/app.py</span>가 Bedrock AgentCore Runtime의
+    엔트리포인트이고, Strands Agents SDK의 Agent가 도구 5개와 시스템 프롬프트를
+    갖고 생성됩니다. 모델은 <span class="mono">agent_model</span> 설정의
+    <span class="mono">global.anthropic.claude-sonnet-4-6</span>입니다. 시스템 프롬프트는
+    표 1의 VRAM-인스턴스 매핑과 "최저가이면서 용량이 있는 리전 선호, 최저가 리전에
+    최근 선점 실패가 2회 이상이면 차순위 권고" 같은 판단 지침을 담습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 에이전트 도구 5개 (src/agent/tools.py)</caption>
+      <thead>
+        <tr><th scope="col">도구</th><th scope="col">동작</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="mono">check_spot_prices</span></td><td>가격 Sorted Set 조회, 리전별 가용 용량을 붙여 가격 오름차순 반환</td></tr>
+        <tr><td><span class="mono">submit_gpu_job</span></td><td>작업 페이로드를 큐에 LPUSH</td></tr>
+        <tr><td><span class="mono">get_job_status</span></td><td>작업 Hash 조회</td></tr>
+        <tr><td><span class="mono">list_active_jobs</span></td><td>활성 작업 Set 조회</td></tr>
+        <tr><td><span class="mono">get_failure_history</span></td><td>완료 작업에서 실패를 리전별, 원인별로 집계</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    각 도구는 async <span class="mono">_impl</span> 함수와 동기 <span class="mono">@tool</span>
+    래퍼로 나뉩니다. <span class="mono">_impl</span>은 Redis 클라이언트를 인자로 받아
+    fakeredis로 단위 테스트가 가능하고, 래퍼는 호출 시점에 의존성을 해석해
+    <span class="mono">asyncio.run</span>으로 실행합니다. 디스패치 경로 전환은
+    <span class="mono">dispatch_mode</span> 설정(rule 또는 agent)으로 제어합니다.
+  </p>
+
+  <h3>6.2 MCP Gateway</h3>
+  <p>
+    반대 방향의 통합도 있습니다. AgentCore Gateway가 OpenAPI 스펙을 읽어 REST API를
+    MCP Protocol 도구로 노출하므로, 외부 AI 에이전트가 GPU Spot Lotto 자체를 도구로
+    호출할 수 있습니다. Gateway에 주입되는 스펙은 전체 API가 아니라 에이전트에게
+    유의미한 것만 추린 <span class="mono">openapi-gateway.json</span>이며,
+    5개 경로에 <strong>6개 오퍼레이션</strong>(가격 조회, 작업 제출/조회/취소,
+    관리자 작업 목록, 통계)을 담습니다. 인증은 Gateway가 프로비저닝하는
+    Cognito JWT를 사용한다고 ARCHITECTURE.md가 서술합니다.
+  </p>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>실제 운영 흐름</h2>
+  <p>
+    배포 단위는 Helm 차트 하나입니다. api-server, dispatcher, price-watcher,
+    frontend 네 서비스가 같은 차트에서 나오고, dev와 prod의 차이는 values 파일로
+    갈립니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. dev와 prod 배포 구성 차이 (helm/gpu-lotto/values-dev.yaml, values-prod.yaml)</caption>
+      <thead>
+        <tr><th scope="col">항목</th><th scope="col">dev</th><th scope="col">prod</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">k8sMode</th><td><span class="mono">dry-run</span> (Pod 미생성)</td><td><span class="mono">real</span> (8.1절의 문제 지점)</td></tr>
+        <tr><th scope="row">인증</th><td>비활성</td><td>Cognito JWT 활성</td></tr>
+        <tr><th scope="row">API 서버 스케일</th><td>레플리카 1</td><td>HPA 2~6, CPU 70% 기준</td></tr>
+        <tr><th scope="row">Ingress / NetworkPolicy</th><td>비활성</td><td>활성</td></tr>
+        <tr><th scope="row">폴링 주기</th><td><span class="num">30초</span></td><td><span class="num">30초</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    한 작업의 수명주기는 다음과 같이 흐릅니다. 사용자가 S3 presigned URL로 학습
+    데이터를 허브 버킷에 직접 올리고, <span class="mono">POST /api/jobs</span>로 작업을
+    제출합니다. 디스패처가 최저가 리전에 Pod를 만들면 FSx가 데이터를 가져오고,
+    학습 중 체크포인트와 결과물이 다시 허브로 내보내집니다. 사용자는
+    <span class="mono">/api/jobs/{job_id}/stream</span> SSE로 상태 변화를 실시간
+    수신하거나 webhook 알림을 받습니다. 이 흐름은 저장소의 데모 스크립트 4종
+    (비용 최적화 배치, Spot 중단 복구, 전체 수명주기, AI 에이전트 배치)이 실제 API
+    호출로 재연합니다.
+  </p>
+  <p>
+    관측은 Prometheus 중심입니다. API 서버 <span class="mono">/metrics</span>와
+    디스패처의 별도 메트릭 포트에서 <span class="mono">JOBS_DISPATCHED</span>,
+    <span class="mono">QUEUE_DEPTH</span>, <span class="mono">SPOT_PRICE</span> 등의 지표를
+    노출하고, ServiceMonitor와 Grafana 대시보드 ConfigMap이 차트에 포함됩니다.
+    로그는 structlog 기반 JSON입니다. 테스트는 fakeredis 기반 단위 테스트 11개 모듈,
+    testcontainers Redis 기반 통합 테스트 5개 모듈로 구성됩니다.
+  </p>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8">
+  <h2><span class="no">08</span>한계와 결론</h2>
+
+  <h3>8.1 설정과 코드의 불일치</h3>
+  <div class="callout warn">
+    <span class="callout-title">주의 - values의 k8sMode "real"은 코드가 인식하지 못합니다</span>
+    <p>
+      <span class="mono">queue_processor.py</span>는 <span class="mono">k8s_mode == "live"</span>일
+      때만 실제 Kubernetes API로 Pod를 생성합니다. 그런데
+      <span class="mono">values.yaml</span>과 <span class="mono">values-prod.yaml</span>은
+      <span class="mono">k8sMode: "real"</span>을 지정하므로, 이 값으로 배포하면 운영
+      환경에서도 dry-run 분기를 타서 <strong>Pod가 생성되지 않습니다</strong>.
+      <span class="mono">priceMode: "real"</span>은 코드가 mock 여부만 검사하기 때문에
+      우연히 실가격 수집으로 동작하지만, k8sMode는 배포 전 교정이 필요합니다.
+    </p>
+  </div>
+  <p>
+    문서와 코드의 어긋남도 몇 곳 있습니다. README의 환경 변수 표는
+    <span class="mono">AUTH_ENABLED</span> 기본값을 false, <span class="mono">K8S_MODE</span>
+    기본값을 dry-run으로 적지만 <span class="mono">config.py</span>의 실제 기본값은
+    각각 <span class="mono">True</span>와 <span class="mono">live</span>입니다.
+    ARCHITECTURE.md가 에이전트 런타임 설정으로 참조하는
+    <span class="mono">.bedrock_agentcore.yaml</span> 파일은 저장소에 존재하지 않습니다.
+    폴링 주기(60초 대 30초)와 엔드포인트 수(18 대 19 오퍼레이션)의 차이는 앞
+    섹션에서 다뤘습니다.
+  </p>
+
+  <h3>8.2 구조적 한계</h3>
+  <ul class="plain">
+    <li>규칙 기반 디스패치는 가격과 용량만 봅니다. 리전별 선점 이력은
+      <span class="mono">get_failure_history</span> 도구를 통해 agent 모드에서만 판단에
+      반영되고, rule 모드의 <span class="mono">region_selector</span>에는 들어가지 않습니다.</li>
+    <li>중단 감지가 Pod phase 폴링(10초 주기) 기반입니다. EC2의 2분 중단 통지나
+      리밸런스 권고를 직접 구독하는 경로는 소스에 없습니다.</li>
+    <li>ADR-001이 기록하듯 AgentCore Runtime의 PUBLIC 모드는 VPC 내부의
+      ElastiCache Redis에 접근할 수 없어, 에이전트 경로의 운영 사용에는 VPC 구성이
+      선행되어야 합니다.</li>
+    <li>가격 비교 대상이 3개 미국 리전으로 고정 배포되어 있습니다. 설정상 리전
+      목록은 바꿀 수 있지만 FSx와 EKS를 리전마다 추가로 프로비저닝해야 합니다.</li>
+  </ul>
+
+  <h3>8.3 결론</h3>
+  <p>
+    GPU Spot Lotto는 "Redis 자료구조에 문제를 정확히 대응시키는" 설계가 돋보이는
+    시스템입니다. 가격 정렬은 Sorted Set, 큐는 List와 BRPOP, 동시성 제어는 원자적
+    카운터로 풀고, 리전 간 데이터 문제는 애플리케이션이 아니라 FSx의 S3 자동
+    동기화에 위임합니다. 그 결과 디스패치 핵심 로직이 수십 줄 단위로 유지되고
+    fakeredis만으로 검증 가능합니다. 멀티 리전 Spot 운영을 검토하는 팀이라면
+    최저가 선택과 제외 목록 기반 재배치, Hub-and-Spoke 스토리지 패턴을 그대로
+    참고할 만하며, 적용 전에는 8.1절의 k8sMode 값 교정이 첫 번째 할 일입니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/spot-gpu-lotto">whchoi98/spot-gpu-lotto</a>
+      - GitHub 저장소. 본문 수치의 근거인 README.md, ARCHITECTURE.md, src/, terraform/, helm/, k8s/, openapi.json (2026-08-09 접근 확인)
+      <span class="url">https://github.com/whchoi98/spot-gpu-lotto</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-spot-instances.html">Amazon EC2 Spot Instances - User Guide</a>
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-spot-instances.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-interruptions.html">Spot Instance interruptions - Amazon EC2</a>
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-interruptions.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html">What is Amazon FSx for Lustre?</a>
+      <span class="url">https://docs.aws.amazon.com/fsx/latest/LustreGuide/what-is.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/fsx/latest/LustreGuide/create-dra-linked-data-repo.html">FSx for Lustre - Data Repository Association</a>
+      <span class="url">https://docs.aws.amazon.com/fsx/latest/LustreGuide/create-dra-linked-data-repo.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/eks/latest/userguide/automode.html">Amazon EKS Auto Mode</a>
+      <span class="url">https://docs.aws.amazon.com/eks/latest/userguide/automode.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html">What is Amazon Bedrock AgentCore?</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html</span>
+    </li>
+    <li>
+      <a href="https://karpenter.sh/docs/">Karpenter Documentation</a>
+      <span class="url">https://karpenter.sh/docs/</span>
+    </li>
+    <li>
+      <a href="https://strandsagents.com/">Strands Agents SDK</a>
+      <span class="url">https://strandsagents.com/</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-09.
+    본 문서는 spot-gpu-lotto 저장소(GitHub whchoi98/spot-gpu-lotto)의 소스 코드와
+    Terraform / Helm / Kubernetes 설정을 직접 확인해 작성한 기술 분석 자료입니다.
+    수치와 기본값은 작성 시점의 저장소 상태 기준이며, 최신 값은 저장소와 위 공식
+    문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  }
+  sync();
+
+  btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>

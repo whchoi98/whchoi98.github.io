@@ -1,7 +1,7 @@
 ---
 title: "MCP Tool Forge - MCP 도구를 코드로 변환하는 CLI"
 layout: report
-report_src: /assets/reports/mcp-tool-forge.html
+report_src: /docs/techblog/aiml/mcp-tool-forge-report.html
 date: 2026-03-19
 category: AIML
 tags: [MCP, Claude Code, Kiro CLI]

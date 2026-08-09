@@ -1,7 +1,7 @@
 ---
 title: "Claude Code Advisor 구성 비용 분석"
 layout: report
-report_src: /assets/reports/claude-code-advisor-cost-analysis.html
+report_src: /docs/techblog/aiml/claude-code-advisor-cost-analysis.html
 date: 2026-08-08
 category: AIML
 tags: [Claude Code, Advisor, FinOps]

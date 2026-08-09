@@ -594,6 +594,43 @@ tbody th {
     <li>UDP는 원래 짧습니다. <span class="mono">udpTimeout</span> 기본 30초(최대 60초), <span class="mono">udpStreamTimeout</span> 기본 180초(최소 60초)입니다.</li>
   </ul>
 
+  <p>
+    어떤 인스턴스가 영향권인지는 EC2 공식 문서의 Nitro 세대별 목록으로 확인할 수 있습니다.
+    350초 기본값이 적용되는 것은 아래 표의 <strong>Nitro v6 행</strong>이고, v5 이하는 기존
+    432,000초(5일)를 유지합니다. 최신 목록은 참고 자료의 Nitro 인스턴스 문서에서 확인하세요.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. Nitro 세대별 가상화 인스턴스 패밀리 (EC2 공식 문서, 2026-08-09 조회)</caption>
+      <thead>
+        <tr><th scope="col">Nitro 세대</th><th scope="col">기본 타임아웃</th><th scope="col">인스턴스 패밀리</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Nitro v6</th>
+          <td><span class="num">350초</span></td>
+          <td>범용 M8a / M8azn / M8gb / M8gn / M8i / M8id / M8i-flex / M8in / M8idn / M8ine / M8ib / M8idb / M9g / M9gd,
+              컴퓨팅 C8a / C8gb / C8gn / C8i / C8id / C8i-flex / C8in / C8ine / C8ib / C9g / C9gd,
+              메모리 R8a / R8gb / R8gn / R8i / R8id / R8i-flex / R8in / R8idn / R8ib / R8idb / X8aedz / X8i,
+              스토리지 I8ge, 가속 G7 / G7e / P6-B200 / P6-B300, HPC Hpc8a</td>
+        </tr>
+        <tr>
+          <th scope="row">Nitro v5</th>
+          <td><span class="num">432,000초(5일)</span></td>
+          <td>M8g / M8gd, C7gn / C8g / C8gd, R8g / R8gd / X8g, I7ie / I8g,
+              P5en / P6e-GB200 / Trn2 / Trn2u, Hpc7g</td>
+        </tr>
+        <tr>
+          <th scope="row">Nitro v4 이하</th>
+          <td><span class="num">432,000초(5일)</span></td>
+          <td>M7 / C7 / R7 / M6 / C6 / R6 계열, G6 / P5 / Inf2, M5 / C5 / R5 / T3 / T4g 계열 등
+              (전체 목록은 공식 문서 참조)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
   <div class="callout note">
     <span class="callout-title">용어 주의 - 커널 conntrack이 아닙니다</span>
     <p>
@@ -738,7 +775,7 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 
   <div class="tbl-wrap">
     <table>
-      <caption>표 2. 애플리케이션별 keepalive 설정</caption>
+      <caption>표 3. 애플리케이션별 keepalive 설정</caption>
       <thead>
         <tr><th scope="col">대상</th><th scope="col">파라미터</th></tr>
       </thead>
@@ -845,7 +882,7 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 
   <div class="tbl-wrap">
     <table>
-      <caption>표 3. conntrack 관련 ENA 메트릭</caption>
+      <caption>표 4. conntrack 관련 ENA 메트릭</caption>
       <thead>
         <tr><th scope="col">메트릭</th><th scope="col">의미</th><th scope="col">해석</th></tr>
       </thead>
@@ -877,7 +914,7 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 
   <div class="tbl-wrap">
     <table>
-      <caption>표 4. 운영 상황별 필요 조치</caption>
+      <caption>표 5. 운영 상황별 필요 조치</caption>
       <thead>
         <tr><th scope="col">상황</th><th scope="col">필요 조치</th></tr>
       </thead>

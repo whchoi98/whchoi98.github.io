@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ontology-for-assembly 기술 분석: 국회 OpenAPI 기반 언론사 Agentic AI 지식그래프 PoC</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/ontology-for-assembly/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AIML / Architecture Deep Dive</p>
+  <h1>국회 OpenAPI 위의 언론사 Agentic AI 지식그래프: ontology-for-assembly 아키텍처 분석</h1>
+  <p class="subtitle">
+    실제 국회 열린데이터광장 공공 데이터를 31개 클래스 온톨로지로 적재하고, 그 위에서 23개 Agentic AI 시나리오를 시연하는
+    PoC 저장소를 코드 기준으로 분석합니다. 공공 데이터 기반 지식그래프와 다중 에이전트 설계를 검토하는 엔지니어를 위한 문서입니다.
+  </p>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-09입니다.</p>
+    <p>적용 대상은 공공 데이터 기반 Agentic AI 지식그래프 PoC를 설계하는 아키텍트와 엔지니어입니다.</p>
+    <p>분석 대상 저장소는 <span class="mono">whchoi98/ontology-for-assembly</span>입니다.</p>
+    <p>주 출처는 저장소의 README, CLAUDE.md, CHANGELOG, docs/, 코드(2026-08-09 로컬 체크아웃)입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>ontology-for-assembly는 국회 열린데이터광장 OpenAPI의 실 데이터(22대 의원 286명, 약 74,000개 그래프 엣지)를 <strong>31개 클래스</strong> 온톨로지로 Neptune에 적재하고, 23개 시나리오와 6개 페르소나를 30-60분에 시연하는 언론사 Agentic AI PoC입니다.</li>
+    <li>모든 그래프 노드는 Pydantic base 클래스에서 <span class="mono">source &isin; {real, synthetic, external}</span> 필드를 강제 받아, 실 데이터와 합성 데이터가 UI 출처 배지(<span class="mono">DataSourceBadge</span>)로 항상 구분됩니다.</li>
+    <li>차별점은 두 가지입니다. 같은 질문을 Chatbot(RAG), Agent(Tool Use), Agentic AI(Planner-Graph-Analyst-Editor 4 에이전트)로 나란히 비교하는 3단계 진화 비교와, Agent 모드만 민감 콘텐츠에서 광고 노출을 생략하고 근거를 <span class="mono">AdMatchDecision</span> 노드에 남기는 광고 매칭 거버넌스입니다.</li>
+    <li>정치라는 민감 도메인을 다루기 위해 ADR-0004가 6개 레이어의 중립성 가드레일(Bedrock Guardrails, 프롬프트 suffix, balance score, 필드 저장 금지, 사전 검증 질문 풀, 광고 거버넌스)을 정의하며, 이 패턴은 다른 민감 도메인 PoC에 그대로 재사용할 수 있습니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">문제 정의: 공공 데이터 위의 뉴스룸 Agentic AI</a></li>
+    <li><span class="no">02</span><a href="#s2">동작 원리: 31클래스 온톨로지와 데이터 코호트</a></li>
+    <li><span class="no">03</span><a href="#s3">딥다이브 1: 3단계 진화 비교</a></li>
+    <li><span class="no">04</span><a href="#s4">딥다이브 2: AI 거버넌스, 광고 매칭과 중립성</a></li>
+    <li><span class="no">05</span><a href="#s5">23개 시나리오 개관</a></li>
+    <li><span class="no">06</span><a href="#s6">실제 운영 흐름</a></li>
+    <li><span class="no">07</span><a href="#s7">한계와 결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>문제 정의: 공공 데이터 위의 뉴스룸 Agentic AI</h2>
+  <p>
+    이 프로젝트가 푸는 문제는 "한국 언론사가 국회 공공 데이터를 실제 업무 도구로 쓸 수 있는가"입니다.
+    국회 열린데이터광장(open.assembly.go.kr)은 의안, 의원, 표결, 위원회, 정당 데이터를 OpenAPI로 공개하지만,
+    원천 데이터만으로는 편집국의 취재 판단, 독자 서비스, 정책 인텔리전스 같은 뉴스룸 업무와 연결되지 않습니다.
+    ontology-for-assembly는 이 간극을 <strong>지식그래프 + Agentic AI</strong> 조합으로 메우는 30-60분 PoC 데모입니다.
+  </p>
+  <p>
+    설계 스펙(docs/superpowers/specs/2026-05-13-ontology-assembly-design.md)이 명시한 목표는 세 가지입니다.
+    편집국 생산성(내부), 독자 서비스 차별화(B2C), 정책 인텔리전스(B2B)를 하나의 데이터 기반 위에서 동시에 시연하는 것입니다.
+    그래서 페르소나가 내부 3개(편집국, 데이터/AI, 광고/세일즈)와 대고객 3개(일반 독자, 유료 구독자, 기업/B2B 정책 인텔리전스)로
+    나뉘어 있고, 같은 그래프를 페르소나마다 다른 KPI 가중치와 어조로 봅니다.
+    페르소나 정의의 단일 진실원은 <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>이며 6개 항목이 등록되어 있습니다.
+  </p>
+  <p>
+    저장소는 자매 프로젝트 <span class="mono">ontology-for-gcc</span>(plan1-foundation 브랜치)를 차용 베이스로 삼았습니다.
+    README와 CLAUDE.md 모두 디렉토리 구조, 6-stack CDK, 프로젝트 하니스를 그대로 가져오고 도메인만 국회/언론으로
+    교체했다고 명시합니다. 이 문서는 차용된 골격이 아니라 이 프로젝트만의 차별점, 즉 실제 국회 OpenAPI 데이터,
+    3단계 진화 비교, 광고 매칭 거버넌스, 출처 프로버넌스 배지를 중심으로 분석합니다.
+  </p>
+  <p class="lead-def">
+    <b>핵심:</b> 이 PoC의 주제는 모델 성능이 아니라, 민감한 공공 데이터를 다루는 Agentic AI에 출처 투명성과 거버넌스를
+    코드 레벨에서 강제하는 방법입니다.
+  </p>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>동작 원리: 31클래스 온톨로지와 데이터 코호트</h2>
+
+  <h3>2.1 31개 클래스, 코드가 스키마의 단일 진실원</h3>
+  <p>
+    온톨로지 클래스는 <span class="mono">data/schemas.py</span>에 Pydantic 모델로 정의되어 있습니다.
+    <span class="mono">GraphNode</span> base를 상속하는 클래스가 정확히 <strong>31개</strong>이며,
+    Object Explorer가 쓰는 <span class="mono">api/services/objects_catalog.py:CLASS_GROUPS</span>의 그룹 합계도 31로 일치합니다.
+    도메인 그룹 구성은 아래와 같습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 31개 온톨로지 클래스 그룹 (api/services/objects_catalog.py:CLASS_GROUPS 기준)</caption>
+      <thead>
+        <tr><th scope="col">그룹</th><th scope="col">클래스 수</th><th scope="col">클래스</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">인물, 조직</th><td><span class="num">6</span></td><td><span class="mono">Person, Party, Staff, Committee, District, Term</span></td></tr>
+        <tr><th scope="row">입법</th><td><span class="num">7</span></td><td><span class="mono">Bill, Law, Amendment, Vote, Statement, Session, Budget</span></td></tr>
+        <tr><th scope="row">주제, 외부</th><td><span class="num">6</span></td><td><span class="mono">Topic, Policy, Agency, ElectionResult, PollResult, SocialSignal</span></td></tr>
+        <tr><th scope="row">미디어</th><td><span class="num">2</span></td><td><span class="mono">Article, Tag</span></td></tr>
+        <tr><th scope="row">독자 측</th><td><span class="num">5</span></td><td><span class="mono">Reader, ReaderProfile, SubscriptionTier, ReadingEvent, Bookmark</span></td></tr>
+        <tr><th scope="row">광고</th><td><span class="num">4</span></td><td><span class="mono">Advertisement, AdInventory, AdImpression, AdMatchDecision</span></td></tr>
+        <tr><th scope="row">분석 메타</th><td><span class="num">1</span></td><td><span class="mono">Cluster</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - ontology/ 디렉토리는 스캐폴드입니다</span>
+    <p>
+      저장소의 <span class="mono">ontology/classes</span>, <span class="mono">ontology/relations</span> 디렉토리는 현재 비어 있는
+      스캐폴드이며, CLAUDE.md가 이를 명시합니다. 스키마의 실제 단일 진실원은 <span class="mono">data/schemas.py</span>(Pydantic)와
+      <span class="mono">api/services/objects_catalog.py</span>(탐색기 메타)입니다. YAML 온톨로지 파일을 기대하고 열면 빈 디렉토리를 만나게 됩니다.
+    </p>
+  </div>
+
+  <h3>2.2 데이터 코호트: real / synthetic / external 출처 태깅</h3>
+  <p>
+    이 프로젝트의 두드러진 설계는 데이터 출처를 스키마 레벨에서 강제한다는 점입니다.
+    모든 노드의 base 클래스가 <span class="mono">source</span> 필드를 필수로 요구하고,
+    <span class="mono">extra="forbid"</span>로 미정의 속성(예: 정치 성향 추론 필드)의 저장 자체를 차단합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">data/schemas.py - 모든 Neptune 노드의 base 클래스</div>
+    <pre><code>class GraphNode(BaseModel):
+    <span class="cm"># `source` 필드 필수 - DataSourceBadge UI 노출에 사용</span>
+    <span class="cm"># `extra="forbid"` - 정치 성향 추론 필드 등 미정의 속성 차단</span>
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    source: Source    <span class="cm"># "real" | "synthetic" | "external"</span></code></pre>
+  </div>
+
+  <p>
+    세 코호트는 어댑터 디렉토리로도 분리되어 있습니다. <span class="mono">data/real/</span>은 국회 OpenAPI 어댑터
+    (bill, member, vote, committee, session, party, agency)로 22대 의원 286명(<span class="mono">members_22.json</span>)을 포함한
+    실 데이터를 가져오고, <span class="mono">data/synthetic/</span>은 독자, 광고, 기사, 토픽을 합성 생성하며,
+    <span class="mono">data/external/</span>은 네이버 뉴스와 여론조사 ETL을 담당합니다.
+    페르소나와 시나리오 조합에 따라 어느 코호트를 조회할지는 <span class="mono">api/services/cohort.py</span>가 단일 지점에서 결정하고,
+    Cypher WHERE 절(<span class="mono">n.source IN [...]</span>)로 변환합니다.
+    프론트엔드에서는 <span class="mono">web/components/DataSourceBadge.tsx</span>가 모든 화면에 출처 배지를 그려,
+    시연 중 어떤 결과가 실 데이터이고 어떤 결과가 합성인지 즉시 구분됩니다.
+  </p>
+
+  <h3>2.3 아키텍처</h3>
+  <p>
+    인프라는 AWS CDK v2의 6개 스택(<span class="mono">infra-cdk/bin/assembly.ts</span> 기준 network, data, ai, compute, edge,
+    observability)으로 배포됩니다. FastAPI 백엔드(21개 라우터)와 Next.js 14 프론트엔드가 ECS Fargate ARM64에서 돌고,
+    CloudFront와 Lambda@Edge JWT가 앞단을 막습니다. 그래프는 Neptune openCypher, 검색은 OpenSearch Serverless의
+    Nori BM25 + Cohere KNN 하이브리드(RRF 융합 후 rerank-v3), LLM 계층은 Bedrock Sonnet 4.6과 AgentCore
+    Memory / Code Interpreter입니다. B2B 페르소나는 별도로 API Gateway Usage Plan + API Key 경로를 탑니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  U["브라우저 (6 페르소나)"] --> CF["CloudFront + Lambda@Edge JWT"]
+  CF --> ALB["ALB"]
+  CF --> GW["API Gateway (B2B API Key)"]
+  ALB --> WEB["Next.js 14 (Fargate ARM64)"]
+  ALB --> API["FastAPI 21 라우터 (Fargate ARM64)"]
+  GW --> API
+  API --> NEP[("Neptune openCypher")]
+  API --> OS[("OpenSearch Serverless BM25+KNN")]
+  API --> BR["Bedrock Sonnet 4.6 + Guardrails"]
+  API --> AC["AgentCore Memory / Code Interpreter"]
+  API --> ADL["Ad Matcher Lambda"]
+    </div>
+    <figcaption>
+      그림 1. 요청 경로와 AI 계층. 인증이 API 계층이 아니라 edge(Lambda@Edge JWT, API Gateway API Key)에서 강제된다는 점이
+      운영 관점의 핵심입니다.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>딥다이브 1: 3단계 진화 비교 (Chatbot vs Agent vs Agentic AI)</h2>
+  <p>
+    시나리오 B는 이 데모의 첫 번째 메인 메시지입니다. 같은 질문을 세 가지 모드로 동시에 실행해
+    한 화면에서 나란히 비교합니다. 모드 분기는 <span class="mono">api/services/three_stage.py</span>가 담당하고,
+    세 번째 모드의 다중 에이전트 파이프라인은 <span class="mono">api/services/multi_agent.py:run_agentic_pipeline</span>이 실행합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 3단계 진화 비교 (api/services/three_stage.py, multi_agent.py 기준)</caption>
+      <thead>
+        <tr><th scope="col">단계</th><th scope="col">방식</th><th scope="col">실행 흐름</th><th scope="col">한계 시연 포인트</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Stage 1 Chatbot</th>
+          <td>RAG</td>
+          <td>OpenSearch top-K 검색 결과를 컨텍스트로 Bedrock 1회 호출</td>
+          <td>검색된 문서 밖의 질문에 답하지 못함</td>
+        </tr>
+        <tr>
+          <th scope="row">Stage 2 Agent</th>
+          <td>Tool Use</td>
+          <td><span class="mono">search_bills, get_proposers, cosponsor_network, analyze_votes</span> 등 사전 정의 도구를 질문 의도에 따라 순차 호출</td>
+          <td>도구 목록 안에서만 행동, 계획 수립 없음</td>
+        </tr>
+        <tr>
+          <th scope="row">Stage 3 Agentic AI</th>
+          <td>다중 에이전트</td>
+          <td>Planner(과제 분해) &rarr; Graph(Cypher 변환과 Neptune 조회) &rarr; Analyst(해석과 가설) &rarr; Editor(기사 초안과 후속 취재 포인트)</td>
+          <td>에이전트 간 재질의를 포함한 자율 협업</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    4개 에이전트의 역할 프롬프트는 <span class="mono">multi_agent.py:AGENT_PROMPTS</span>에 상수로 정의되어 있으며,
+    Analyst는 필요 시 "Graph 에이전트에 재질의 필요"라는 형식으로 그래프 단계에 되물을 수 있습니다.
+    모든 LLM 호출은 <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span> 단일 진입점을 거치고,
+    AWS 자격증명이 없으면 <strong>결정적 demo mock</strong>으로 폴백합니다. 이 폴백 덕분에 오프라인에서도 데모와 테스트가 재현됩니다.
+    스트리밍은 SSE로 통일되어 있고 이벤트 어휘(<span class="mono">phase|delta|log|result|error|done</span>)는
+    <span class="mono">api/routers/chat.py</span> docstring이 단일 진실원입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - Stage 2의 Tool Use는 아직 시뮬레이션입니다</span>
+    <p>
+      <span class="mono">three_stage.py:stage2_agent</span>의 docstring은 "실 Bedrock Converse tool use API 통합은 Phase 2"라고
+      명시합니다. 현재 코드는 질문 의도를 규칙 기반으로 판별해 도구를 순차 호출하는 흐름을 재현하는 것이며,
+      LLM이 도구 선택을 스스로 하는 실 Converse 통합은 계획 단계입니다. 이 코드를 참조 구현으로 가져갈 때 혼동하기 쉬운 지점입니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>딥다이브 2: AI 거버넌스, 광고 매칭 3-way와 중립성 가드레일</h2>
+
+  <h3>4.1 광고 매칭 매트릭스 (시나리오 L)</h3>
+  <p>
+    두 번째 메인 메시지는 광고 매칭 거버넌스입니다. <span class="mono">api/services/ad_matcher.py</span>는 같은 기사와
+    같은 후보 광고 풀에 대해 세 가지 매칭 모드를 실행하고(<span class="mono">compare_modes()</span>), 결정 차이를 비교해 보여줍니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 광고 매칭 3-way 비교 (api/services/ad_matcher.py 기준)</caption>
+      <thead>
+        <tr><th scope="col">모드</th><th scope="col">판단 근거</th><th scope="col">민감 콘텐츠 처리</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">keyword</th>
+          <td>토픽-카테고리 단순 매핑, 점수 0.3~0.5 수준</td>
+          <td>감지 불가, 정치인 비위 기사에도 광고 매칭</td>
+        </tr>
+        <tr>
+          <th scope="row">embedding</th>
+          <td>임베딩 코사인 유사도(실 환경 Cohere embed-v4, mock은 결정적 해시 벡터) + <span class="mono">avoid_topics</span> 감점</td>
+          <td>의미 유사성은 잡지만 윤리, 평판 판단 불가</td>
+        </tr>
+        <tr>
+          <th scope="row">agent</th>
+          <td>민감 패턴 감지 + <span class="mono">avoid_topics</span> 엄격 적용 + 카테고리 점수</td>
+          <td>민감 콘텐츠 감지 시 <span class="mono">chosen_ad_id=None</span>으로 광고 노출 자체를 생략</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    agent 모드가 광고를 생략할 때 그 근거 문장(reasoning trace)은 <span class="mono">AdMatchDecision</span> 노드에 저장되어
+    운영 콘솔에서 추적됩니다. 즉 "왜 이 지면에 광고가 안 나갔는가"가 그래프에 기록으로 남습니다.
+    매칭 실행은 API 응답과 분리된 별도 Ad Matcher Lambda로 동작하며, 모드는 <span class="mono">AD_MATCH_MODE</span> 환경 변수와
+    UI 토글로 전환합니다. 데모 샘플 기사는 Agent가 거절해야 하는 3종(scandal, tragedy, minor_victim)과 안전 매칭 3종으로 총 6개가 준비되어 있습니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - 민감 패턴은 README 서술(3종)보다 코드가 1종 많습니다</span>
+    <p>
+      README와 CLAUDE.md는 자동 광고 생략 대상을 비극, 정치인 비위, 미성년 피해자 3종으로 서술하지만,
+      코드의 <span class="mono">SENSITIVE_PATTERNS</span>에는 <span class="mono">controversy</span>(폭로, 의혹, 논란)를 포함해
+      4종의 정규식 패턴이 정의되어 있습니다. 이 문서는 코드 기준으로 4종으로 봅니다.
+    </p>
+  </div>
+
+  <h3>4.2 정치 중립성 가드레일 6개 레이어 (ADR-0004)</h3>
+  <p>
+    정치 데이터를 다루는 만큼 중립성은 데모 가능성의 전제 조건으로 취급됩니다.
+    ADR-0004(docs/decisions/0004)는 다층 방어 6개 레이어를 정의합니다.
+  </p>
+  <ol class="plain">
+    <li>Layer 1 - Bedrock Guardrails 리소스. 정당명 + 비방 조합, 정치인 모욕을 차단하고 시나리오 B, C, I, K의 입력과 출력 양방향에 적용됩니다.</li>
+    <li>Layer 2 - 모든 LLM 호출에 자동 첨부되는 중립성 system prompt suffix(<span class="mono">NEUTRALITY_GUARD_SUFFIX</span>).</li>
+    <li>Layer 3 - 응답마다 자동 계산되는 <span class="mono">political_balance_score</span>. 한쪽 정당만 부각되면 UI가 경고하고, 평균 0.8 미만이면 CloudWatch 알람이 울립니다.</li>
+    <li>Layer 4 - 클래스 레벨 필드 금지. <span class="mono">Reader.political_leaning</span> 같은 정치 성향 추론 필드는 생성과 저장이 금지되며, <span class="mono">extra="forbid"</span>가 이를 스키마에서 강제합니다.</li>
+    <li>Layer 5 - 라이브 시연은 사전 검증된 질문 풀(<span class="mono">scripts/eval_wow_queries.py</span>)만 사용합니다.</li>
+    <li>Layer 6 - 위 4.1의 광고 매칭 거버넌스입니다.</li>
+  </ol>
+  <p class="lead-def">
+    <b>원칙:</b> 거버넌스를 프롬프트 지시에만 맡기지 않고, 스키마(<span class="mono">extra="forbid"</span>), 메트릭(balance score),
+    인프라(Guardrails, 알람)의 세 층에 나눠 강제하는 것이 이 설계의 요지입니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>23개 시나리오 개관</h2>
+  <p>
+    시나리오 목록의 단일 진실원은 <span class="mono">web/components/Sidebar.tsx:SCENARIOS</span> 배열이며 정확히 23개(A-W)가
+    등록되어 있습니다. 설계 스펙은 base 14개(A-N)였고, O-S는 사용자 요청 확장, T-W는 실 그래프 엣지 위의 고급 인사이트로
+    구현 과정에서 늘었습니다. 23개를 개별 서술하는 대신 구현 패턴으로 묶으면 아래 8가지로 압축됩니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. 23개 시나리오의 구현 패턴 (CLAUDE.md 시나리오 표, api/routers/ 기준)</caption>
+      <thead>
+        <tr><th scope="col">패턴</th><th scope="col">시나리오</th><th scope="col">백엔드</th><th scope="col">대표 기술</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">하이브리드 검색, 그래프 탐색</th>
+          <td>A, O</td>
+          <td><span class="mono">search.py, relations.py</span></td>
+          <td>BM25(Nori) + Cohere KNN + RRF + rerank-v3, 두 인물 간 그래프 경로</td>
+        </tr>
+        <tr>
+          <th scope="row">3단계 대화 비교</th>
+          <td>B</td>
+          <td><span class="mono">chat.py</span></td>
+          <td>three_stage + multi_agent, SSE 스트리밍, AgentCore Memory</td>
+        </tr>
+        <tr>
+          <th scope="row">LLM 인사이트, 차트, 타임라인</th>
+          <td>C, G, K, M, N</td>
+          <td><span class="mono">insights.py</span> 외 시나리오별 라우터</td>
+          <td>Sonnet 4.6 스트리밍 요약, Code Interpreter 한글 차트, 표결 이상치 탐지</td>
+        </tr>
+        <tr>
+          <th scope="row">페르소나 매칭, 룩어라이크</th>
+          <td>D, F</td>
+          <td><span class="mono">persona_match.py, lookalike.py</span></td>
+          <td>6 페르소나 KPI 가중치, 클러스터 매칭 + cross-party 신호</td>
+        </tr>
+        <tr>
+          <th scope="row">통계, 지도, 외부 신호</th>
+          <td>E, H, J</td>
+          <td><span class="mono">cluster.py, district_map.py, external_signal.py</span></td>
+          <td>KMeans + 정치 중립 LLM 라벨, 17개 시도 choropleth, 뉴스/SNS/여론조사 융합</td>
+        </tr>
+        <tr>
+          <th scope="row">중립성 가드레일 가시화</th>
+          <td>I</td>
+          <td><span class="mono">neutrality.py</span></td>
+          <td>Bedrock Guardrails + <span class="mono">political_balance_score</span> 노출</td>
+        </tr>
+        <tr>
+          <th scope="row">광고 매칭 거버넌스</th>
+          <td>L</td>
+          <td><span class="mono">ad_match.py</span> + Ad Matcher Lambda</td>
+          <td>keyword / embedding / agent 3-way, Agent 광고 생략 trace</td>
+        </tr>
+        <tr>
+          <th scope="row">범용 LLM narrative, 실 엣지 인사이트</th>
+          <td>P, Q, R, S / T, U, V, W</td>
+          <td><span class="mono">members.py + insight_generic.py / insights_advanced.py</span></td>
+          <td>전용 라우터 없이 <span class="mono">POST /api/insight</span> 재사용 / 약 74,000개 real 엣지 openCypher (정당 응집도, 영향력 랭킹, 표결 cluster, swing voter)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    23개 시나리오가 21개 라우터와 1:1이 아니라는 점도 코드 이해에 중요합니다. P, Q, R, S 4개는 전용 라우터 없이
+    의원 디렉토리 데이터와 범용 <span class="mono">insight_generic.py</span>로 백킹됩니다. 시나리오 페이지 외에
+    31클래스 Object Explorer, 온톨로지 관계 그래프(mindmap), 의원 디렉토리(286명, 9개 지표), 운영 콘솔(5 패널),
+    코드 지식 그래프(codegraph) 페이지가 함께 배포됩니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>실제 운영 흐름</h2>
+  <p>
+    배포는 <span class="mono">ap-northeast-2</span> 리전에서 <span class="mono">npx cdk deploy --all</span>로 6개 스택을 올리는
+    것으로 시작합니다. VPC는 새로 만들지 않고 자매 프로젝트들과 공유하는 VPC를 import하며(ADR-0006), Neptune은 private
+    subnet에 있어 직접 접근이 불가능합니다. 그래서 데이터 적재는 API 컨테이너 이미지를 재사용하는 one-shot ECS 태스크로 실행합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">데이터 적재 - one-shot ECS 태스크 (CLAUDE.md Key Commands)</div>
+    <pre><code>aws ecs run-task --cluster assembly-dev-cluster --task-definition assembly-dev-api \
+  --overrides '{"containerOverrides":[{"name":"api","command":
+    ["python","-m","data.load","--source","all","--to","s3",
+     "--bucket","assembly-dev-synthetic-data","--neptune","--opensearch"]}]}'</code></pre>
+  </div>
+
+  <p>
+    품질 게이트는 두 겹입니다. CI는 push/PR마다 4개 job(<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>)을
+    돌리고, 배포된 CloudFront를 대상으로 <span class="mono">make wow-eval</span>이 <strong>84개 케이스</strong>(핵심 14개 시나리오
+    A-N &times; 6 페르소나)를 평가합니다. README 배지 기준 현재 상태는 84/84 통과, 평균 balance score 0.98이며,
+    통과율이 85% 미만이거나 중립성 메트릭이 임계값에 미달하면 스크립트가 실패 코드로 종료됩니다.
+    운영 콘솔(<span class="mono">/ops</span>)은 ingest, guardrail, memory, eval, trace 5개 패널로 같은 메트릭을 시연 중에 보여줍니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - wow-eval의 범위는 23개 시나리오 전체가 아닙니다</span>
+    <p>
+      84개 평가 케이스는 base 14개 시나리오(A-N)에 대한 것이며, 확장 시나리오 O-W 9개는 이 자동 평가의 대상이 아닙니다.
+      README도 이를 명시합니다. "wow-eval 100%"를 23개 시나리오 전체의 검증으로 읽으면 과대 해석입니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>한계와 결론</h2>
+
+  <h3>7.1 한계</h3>
+  <ul class="plain">
+    <li>PoC 데모입니다. 인증은 edge 계층(Lambda@Edge, API Gateway)에만 있고 API 계층은 upstream을 신뢰하며, <span class="mono">DEMO_PUBLIC_MODE</span> 같은 데모 전용 우회가 존재합니다.</li>
+    <li>독자, 광고, 기사 데이터는 전부 합성입니다. 광고 매칭 거버넌스의 사업적 유효성은 실 인벤토리 없이 검증되지 않았습니다.</li>
+    <li>Bedrock 미연결 시 결정적 mock으로 폴백하고 Stage 2 Tool Use도 시뮬레이션이므로, 화면에 보이는 모든 것이 실 LLM 호출은 아닙니다. 실 데이터 경로(T-W의 Neptune openCypher)와 mock 경로가 혼재합니다.</li>
+    <li>문서와 코드의 정합은 계속 따라잡는 중입니다. CHANGELOG에 시나리오 수(14 &rarr; 23), 클래스 수(25+ &rarr; 31), 라우터 수(17 &rarr; 21) 정정 기록이 남아 있으며, 이 문서의 수치는 모두 코드 기준입니다.</li>
+    <li>중립성 가드레일은 한국어 정규식과 사전 검증 질문 풀에 크게 의존합니다. 자유 입력이 늘어나는 production 시나리오에서는 별도 검증이 필요합니다.</li>
+  </ul>
+
+  <h3>7.2 결론</h3>
+  <p>
+    ontology-for-assembly의 가치는 개별 시나리오의 화려함이 아니라 반복 가능한 골격에 있습니다.
+    실 공공 데이터와 합성 데이터를 스키마 레벨 출처 태깅으로 섞고, 같은 질문에 대한 세 가지 AI 패러다임의 차이를
+    비교 가능하게 만들고, 민감 도메인의 거버넌스를 프롬프트가 아닌 스키마와 메트릭과 인프라에 나눠 강제하는 구조는
+    국회 데이터가 아닌 다른 도메인에도 그대로 이식됩니다. 실제로 이 저장소 자체가 화학 도메인 PoC(ontology-for-gcc)의
+    골격을 차용해 도메인만 교체한 결과물이라는 점이 그 이식성의 증거입니다.
+  </p>
+  <p class="lead-def">
+    <b>권고:</b> 이 저장소를 참조할 때는 시나리오 코드가 아니라 세 개의 단일 진실원, 즉 <span class="mono">data/schemas.py</span>(스키마),
+    <span class="mono">PERSONA_REGISTRY</span>(페르소나), <span class="mono">Sidebar.tsx:SCENARIOS</span>(시나리오 목록)부터 읽기를 권합니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ontology-for-assembly">ontology-for-assembly GitHub 저장소</a>
+      - whchoi98 (2026-08-09 로컬 체크아웃 기준. README, CLAUDE.md, CHANGELOG, docs/decisions ADR 0001-0010, api/, web/, data/, infra-cdk/)
+      <span class="url">https://github.com/whchoi98/ontology-for-assembly</span>
+    </li>
+    <li>
+      <a href="https://open.assembly.go.kr">국회 열린데이터광장</a>
+      - 대한민국 국회 (실 데이터 코호트의 원천 OpenAPI)
+      <span class="url">https://open.assembly.go.kr</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html">Amazon Neptune - openCypher를 사용한 그래프 접근</a>
+      <span class="url">https://docs.aws.amazon.com/neptune/latest/userguide/access-graph-opencypher.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html">Amazon Bedrock AgentCore Developer Guide</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/what-is-bedrock-agentcore.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html">Amazon Bedrock Guardrails</a>
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html">Amazon OpenSearch Serverless</a>
+      <span class="url">https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless.html</span>
+    </li>
+  </ul>
+
+  <h3>관련 저장소</h3>
+  <ul>
+    <li>
+      <a href="https://github.com/whchoi98/ontology-for-gcc">ontology-for-gcc</a>
+      - 차용 베이스 (plan1-foundation 브랜치, 디렉토리 / 6-stack CDK / 하니스 골격의 원본)
+      <span class="url">https://github.com/whchoi98/ontology-for-gcc</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-09.
+    본 문서는 ontology-for-assembly GitHub 저장소의 코드와 문서(README, CLAUDE.md, CHANGELOG, docs/, data/schemas.py 등)를
+    기반으로 작성한 기술 분석 자료입니다.
+    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 저장소와 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btn = document.querySelector(".theme-toggle");
+  if (!btn) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btn.setAttribute("aria-pressed", String(dark));
+    btn.setAttribute("aria-label", dark ? "라이트 모드로 전환" : "다크 모드로 전환");
+  }
+  sync();
+
+  btn.addEventListener("click", function () {
+    var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(KEY, next); } catch (e) {}
+    sync();
+    document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>

@@ -3,7 +3,7 @@ title: About
 layout: about
 permalink: /about/
 hero_name: 최우형 · whchoi98
-hero_role: AWS Solutions Architect - 클라우드 인프라와 GenAI 워크로드를 설계하고 검증합니다.
+hero_role: AWS Principal Solutions Architect - 클라우드 인프라와 GenAI 워크로드를 설계하고 검증합니다.
 email: whchoi98@gmail.com
 ---
 
@@ -37,12 +37,12 @@ email: whchoi98@gmail.com
   <div class="history">
     <div class="history-row">
       <span class="history-period">현재</span>
-      <span class="history-desc">AWS Solutions Architect - 클라우드 아키텍처 설계, GenAI 워크샵</span>
+      <span class="history-desc">AWS Principal Solutions Architect - 클라우드 아키텍처 설계, GenAI 워크샵</span>
     </div>
     <div class="history-row">
       <span class="history-period">이전</span>
       <span class="history-desc">네트워크 / 인프라 엔지니어 - 데이터센터와 엔터프라이즈 네트워크 운영</span>
     </div>
   </div>
-  <p class="history-note" style="font-size:13px;color:var(--t-text3);margin-top:8px">이력과 소개는 초안입니다 - 원하는 내용으로 알려주시면 바로 업데이트합니다.</p>
+  <p class="history-note" style="font-size:13px;color:var(--t-text3);margin-top:8px">상세 이력은 <a href="https://www.linkedin.com/in/woohyungchoi/" target="_blank" rel="noopener">LinkedIn</a>에서 확인하세요.</p>
 </div>
