@@ -583,10 +583,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>L40S(g6e.2xlarge)에서 S1 채팅 최대 <strong>536 tok/s</strong>, 동일 워크로드를 g7e(RTX PRO 6000 Blackwell)로 옮기면 1,871 tok/s로 전 시나리오 3.49배에서 4.83배 높다.</li>
-    <li>g7e의 우위는 FP4 텐서코어 네이티브 커널과 96GB GDDR7에서 나온다. KV 캐시가 125,023 tokens까지 확보되어 L40S가 포화하던 고동시성 구간의 preemption이 사라진다.</li>
-    <li>PoC 판정 기준인 처리량/GPU 1.5배를 3배에서 5배까지 상회하며, Spot 가격($1.50/hr)을 반영한 비용 효율은 6배에서 9배다. 다만 당근 현행 GPU당 처리량 수치가 아직 입력되지 않아 배율 확정은 그 값 확보 후로 남는다.</li>
-    <li>스타트업은 runai_streamer S3 직결과 compile 캐시 영속화로 콜드 537초에서 웜 155초로 줄었고, 한국어 지연은 공식 MTP assistant(수용률 56%)로 2.6배 단축된다. 권장 프로덕션 구성은 6절에 정리한다.</li>
+    <li>L40S(g6e.2xlarge)에서 S1 채팅 최대 <strong>536 tok/s</strong>, 동일 워크로드를 g7e(RTX PRO 6000 Blackwell)로 옮기면 1,871 tok/s로 전 시나리오 3.49배에서 4.83배 높습니다.</li>
+    <li>g7e의 우위는 FP4 텐서코어 네이티브 커널과 96GB GDDR7에서 나옵니다. KV 캐시가 125,023 tokens까지 확보되어 L40S가 포화하던 고동시성 구간의 preemption이 사라집니다.</li>
+    <li>PoC 판정 기준인 처리량/GPU 1.5배를 3배에서 5배까지 상회하며, Spot 가격($1.50/hr)을 반영한 비용 효율은 6배에서 9배입니다. 다만 당근 현행 GPU당 처리량 수치가 아직 입력되지 않아 배율 확정은 그 값 확보 후로 남습니다.</li>
+    <li>스타트업은 runai_streamer S3 직결과 compile 캐시 영속화로 콜드 537초에서 웜 155초로 줄었고, 가중치 로드는 12xlarge NVMe와 g7e에서 19~18초까지 내려갑니다. 한국어 지연은 공식 MTP assistant(수용률 56%)로 2.6배 단축됩니다. 권장 프로덕션 구성은 6절에 정리합니다.</li>
   </ul>
 </section>
 
@@ -612,15 +612,15 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>배경과 판정 기준</h2>
   <p>
-    이 PoC의 질문은 하나다. Gemma-4-31B를 vLLM으로 서빙할 때 <strong>GPU당 처리량이 현행 대비 1.5배 이상</strong>이면 동일 트래픽을 더 적은 레플리카로 감당할 수 있고, 그러면 서빙 레플리카를 12개에서 8개로 줄이는 근거가 된다. 판정 대상은 채팅, 요약, 분류, 장문 RAG 네 가지 실사용형 워크로드다.
+    이 PoC의 질문은 하나입니다. Gemma-4-31B를 vLLM으로 서빙할 때 <strong>GPU당 처리량이 현행 대비 1.5배 이상</strong>이면 동일 트래픽을 더 적은 레플리카로 감당할 수 있고, 그러면 서빙 레플리카를 12개에서 8개로 줄이는 근거가 됩니다. 판정 대상은 채팅, 요약, 분류, 장문 RAG 네 가지 실사용형 워크로드입니다.
   </p>
   <p>
-    측정은 두 단계로 진행했다. 먼저 확보가 쉬운 L40S(g6e) 위에서 기준선을 잡고 서빙 파이프라인의 병목(스타트업, 양자화 포맷, 한국어 지연)을 정리한 뒤, FP4 텐서코어를 네이티브로 갖춘 g7e(RTX PRO 6000 Blackwell)를 Spot으로 확보해 본판정을 냈다. 처리량 지표는 output tok/s와 req/s, 지연 지표는 TTFT(첫 토큰까지)와 ITL(토큰 사이 간격)을 본다.
+    측정은 두 단계로 진행했습니다. 먼저 확보가 쉬운 L40S(g6e) 위에서 기준선을 잡고 서빙 파이프라인의 병목(스타트업, 양자화 포맷, 한국어 지연)을 정리한 뒤, FP4 텐서코어를 네이티브로 갖춘 g7e(RTX PRO 6000 Blackwell)를 Spot으로 확보해 본판정을 냈습니다. 처리량 지표는 output tok/s와 req/s, 지연 지표는 TTFT(첫 토큰까지)와 ITL(토큰 사이 간격)을 봅니다.
   </p>
 
   <div class="callout note">
     <span class="callout-title">참고 - 판정 기준의 미완 항목</span>
-    <p>판정식의 분모인 당근 현행 GPU당 처리량 수치는 아직 입력되지 않았다. 따라서 이 문서의 배율은 L40S 기준선 대비 g7e의 상대 배율이며, 현행 대비 최종 배율은 그 값이 확보되면 확정된다.</p>
+    <p>판정식의 분모인 당근 현행 GPU당 처리량 수치는 아직 입력되지 않았습니다. 따라서 이 문서의 배율은 L40S 기준선 대비 g7e의 상대 배율이며, 현행 대비 최종 배율은 그 값이 확보되면 확정됩니다.</p>
   </div>
 </section>
 
@@ -628,7 +628,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s2">
   <h2><span class="no">02</span>실험 환경과 방법</h2>
   <p>
-    서울 리전 EKS 클러스터(GPU01)의 <span class="mono">serving</span> 네임스페이스에 vLLM v0.26.0을 배포하고, 모델 가중치는 S3 버킷에서 <span class="mono">runai_streamer</span>로 직접 적재했다. 세 가지 인스턴스 세대를 용도에 맞게 나눠 썼다.
+    서울 리전 EKS 클러스터(GPU01)의 <span class="mono">serving</span> 네임스페이스에 vLLM v0.26.0을 배포하고, 모델 가중치는 S3 버킷에서 <span class="mono">runai_streamer</span>로 직접 적재했습니다. 세 가지 인스턴스 세대를 용도에 맞게 나눠 썼습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -647,7 +647,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <h3>2.1 워크로드 정의</h3>
   <p>
-    네 시나리오는 입력 길이와 출력 길이로 실사용 패턴을 모사한다. 각 시나리오를 동시성 1, 2, 4, 8, 16, 32, 64로 스윕해 시나리오당 7조합, 전체 28조합을 <span class="mono">vllm bench serve</span>로 측정했다.
+    네 시나리오는 입력 길이와 출력 길이로 실사용 패턴을 모사합니다. 각 시나리오를 동시성 1, 2, 4, 8, 16, 32, 64로 스윕해 시나리오당 7조합, 전체 28조합을 <span class="mono">vllm bench serve</span>로 측정했습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -667,7 +667,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <div class="callout note">
     <span class="callout-title">참고 - 양자화 포맷별 커널 경로</span>
-    <p>같은 NVFP4 가중치라도 GPU 세대에 따라 실행 커널이 다르다. L40S(SM89)는 FP4 텐서코어가 없어 NVFP4가 <span class="mono">Marlin</span> W4A16으로 자동 폴백되고, g7e(Blackwell)는 <span class="mono">FlashInferCutlassNvFp4</span> 네이티브로 돈다. FP8 W8A8은 L40S에서도 Ada FP8 텐서코어로 네이티브 실행이며 폴백이 아니다.</p>
+    <p>같은 NVFP4 가중치라도 GPU 세대에 따라 실행 커널이 다릅니다. L40S(SM89)는 FP4 텐서코어가 없어 NVFP4가 <span class="mono">Marlin</span> W4A16으로 자동 폴백되고, g7e(Blackwell)는 <span class="mono">FlashInferCutlassNvFp4</span> 네이티브로 돕니다. FP8 W8A8은 L40S에서도 Ada FP8 텐서코어로 네이티브 실행이며 폴백이 아닙니다.</p>
   </div>
 </section>
 
@@ -675,7 +675,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s3">
   <h2><span class="no">03</span>L40S 기준선 28조합</h2>
   <p>
-    nvidia/Gemma-4-31B-IT-NVFP4를 8K 컨텍스트, KV 캐시 31,344 tokens, speculative decoding 끔 조건으로 측정했다. 시나리오별 최대 처리량과 그 지점의 동시성은 아래와 같다.
+    nvidia/Gemma-4-31B-IT-NVFP4를 8K 컨텍스트, KV 캐시 31,344 tokens, speculative decoding 끔 조건으로 측정했습니다. 시나리오별 최대 처리량과 그 지점의 동시성은 아래와 같습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -694,7 +694,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    S1 채팅의 동시성 곡선을 펼치면 포화 구조가 드러난다. 처리량은 동시성 64까지 계속 오르지만 TTFT는 동시성 32를 넘어서며 <strong>급격히 나빠진다</strong>. 짧은 입력/출력이라 KV 압박이 가장 덜한 시나리오인데도 그렇다.
+    S1 채팅의 동시성 곡선을 펼치면 포화 구조가 드러납니다. 처리량은 동시성 64까지 계속 오르지만 TTFT는 동시성 32를 넘어서며 <strong>급격히 나빠집니다</strong>. 짧은 입력/출력이라 KV 압박이 가장 덜한 시나리오인데도 그렇습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -716,8 +716,8 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <div class="callout warn">
-    <span class="callout-title">주의 - 기준선은 g7e 판정치가 아니다</span>
-    <p>이 표의 값은 L40S에서 NVFP4가 Marlin W4A16으로 폴백 실행된 결과다. FP4 네이티브인 g7e 판정과 직접 비교하면 안 되고, 6절의 배율 계산에서만 분모로 쓴다. 또한 이 라운드는 수집 스크립트 버그로 GPU 사용률 컬럼이 기록되지 않았다.</p>
+    <span class="callout-title">주의 - 기준선은 g7e 판정치가 아닙니다</span>
+    <p>이 표의 값은 L40S에서 NVFP4가 Marlin W4A16으로 폴백 실행된 결과입니다. FP4 네이티브인 g7e 판정과 직접 비교하면 안 되고, 6절의 배율 계산에서만 분모로 씁니다. 또한 이 라운드는 수집 스크립트 버그로 GPU 사용률 컬럼이 기록되지 않았습니다.</p>
   </div>
 </section>
 
@@ -725,8 +725,16 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s4">
   <h2><span class="no">04</span>스타트업 단축 A/B</h2>
   <p>
-    콜드 스타트 537초(8분 57초)를 분해하면 가중치 로드 149초, torch.compile 73초, 신규 노드 확보 48초, 이미지 pull 82초다. 구성을 바꿔가며 이 병목을 어디까지 줄일 수 있는지 측정했다.
+    콜드 스타트 537초(8분 57초)를 분해하면 가중치 로드 149초, torch.compile 73초, 신규 노드 확보 48초, 이미지 pull 82초입니다. 구성을 바꿔가며 이 병목을 어디까지 줄일 수 있는지 측정했습니다. 측정 구간은 pod 생성부터 <span class="mono">/health</span> 200 도달까지이고, 구간 분해는 vLLM 기동 로그 기준입니다(vLLM v0.26.0, 2026-08-05~06 수동 계측).
   </p>
+  <p>
+    비교 기준선은 당근 현행 경로입니다. HuggingFace &rarr; S3 sync &rarr; S3 Mountpoint 위에서
+    <span class="mono">runai_streamer</span>(concurrency 32, memory_limit 8GiB)로 로드하는 구성으로,
+    기동 시간은 16분에서 5분까지 개선된 상태였습니다. 이번 실측은 같은 경로의 병목을 구간별로 확인하고
+    구성만 바꿔 재측정한 것입니다.
+  </p>
+
+  <h3>4.1 구성별 A/B - g6e.2xlarge</h3>
 
   <div class="tbl-wrap">
     <table>
@@ -736,6 +744,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       </thead>
       <tbody>
         <tr><th scope="row">콜드 기준 (Mountpoint, 캐시 없음)</th><td><span class="num">537초</span></td><td><span class="num">149초</span></td><td><span class="num">73초</span></td></tr>
+        <tr><th scope="row">콜드 + hostPath 캐시 볼륨 (적재 회차)</th><td><span class="num">475초</span></td><td><span class="num">148초</span></td><td><span class="num">63초</span></td></tr>
         <tr><th scope="row">웜 + compile 캐시 히트</th><td><span class="num">285초</span></td><td><span class="num">149초</span></td><td><span class="num">8.4초</span></td></tr>
         <tr><th scope="row">웜 + runai_streamer S3 직결</th><td><span class="num">238초</span></td><td><span class="num">32초</span></td><td><span class="num">64초</span></td></tr>
         <tr><th scope="row">웜 + runai + 캐시 히트 (최적)</th><td><span class="num">155초</span></td><td><span class="num">29초</span></td><td><span class="num">8.5초</span></td></tr>
@@ -761,12 +770,12 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
       </div>
     </div>
     <figcaption>
-      그림 1. 스타트업 단축 단계. 최적 구성은 당근 현행 기동 5분(300초) 대비 48% 짧다.
+      그림 1. 스타트업 단축 단계. 최적 구성은 당근 현행 기동 5분(300초) 대비 48% 짧습니다.
     </figcaption>
   </figure>
 
   <p>
-    가장 큰 효과는 가중치 로드 경로 교체에서 나왔다. Mountpoint FUSE는 149초(실효 1.75Gbps)가 걸린 반면 <span class="mono">runai_streamer</span> S3 직결은 29초에서 32초(실효 8.2Gbps, concurrency 64, memory_limit 24GiB)로 <strong>약 5배 빠르다</strong>. compile 캐시를 노드에 영속화하면 재기동 시 컴파일 73초가 8.5초로 줄어 공짜로 55초를 회수한다.
+    가장 큰 효과는 가중치 로드 경로 교체에서 나왔습니다. Mountpoint FUSE는 149초(실효 1.75Gbps)가 걸린 반면 <span class="mono">runai_streamer</span> S3 직결은 29초에서 32초(실효 8.2Gbps, concurrency 64, memory_limit 24GiB)로 <strong>약 5배 빠릅니다</strong>. compile 캐시를 노드에 영속화하면 재기동 시 컴파일 73초가 8.5초로 줄어 공짜로 55초를 회수하고, 엔진 초기화도 93초에서 25초로 줄어듭니다.
   </p>
 
   <figure class="diagram">
@@ -778,14 +787,31 @@ flowchart LR
   API --> B["vllm bench serve"]
     </div>
     <figcaption>
-      그림 2. 가중치 적재 경로 비교. 병목은 대역폭이 아니라 FUSE 경로였고, S3 직결로 우회하면 노드 NIC이 새 한계가 된다.
+      그림 2. 가중치 적재 경로 비교. 병목은 대역폭이 아니라 FUSE 경로였고, S3 직결로 우회하면 노드 NIC이 새 한계가 됩니다.
     </figcaption>
   </figure>
 
   <div class="callout note">
     <span class="callout-title">참고 - sleep 모드로 유휴 GPU 반납</span>
-    <p>유휴 시 <span class="mono">/sleep</span>으로 26.8초 만에 GPU 메모리 45.4GB에서 14.7GB로 30GB를 반납하고, 수요가 오면 <span class="mono">/wake_up</span>으로 3.6초에 복귀했다. 155초 풀 재기동 대비 약 40배 빠른 복귀라, 자동 GPU 할당의 구조적 대안이 된다.</p>
+    <p>유휴 시 <span class="mono">/sleep</span>으로 26.8초 만에 GPU 메모리 45.4GB에서 14.7GB로 30GB를 반납하고, 수요가 오면 <span class="mono">/wake_up</span>으로 3.6초에 복귀했습니다. 155초 풀 재기동 대비 약 40배 빠른 복귀라, 자동 GPU 할당의 구조적 대안이 됩니다.</p>
   </div>
+
+  <h3>4.2 인스턴스 / 스토리지 축 - 12xlarge NVMe와 g7e</h3>
+  <p>
+    같은 <span class="mono">runai_streamer</span> 직결이라도 인스턴스와 스토리지에 따라 로드 시간이 더 내려갑니다.
+    가중치 로드만 보면 Mountpoint 149초 &rarr; 2xlarge 직결 29~32초 &rarr; 12xlarge 19초 &rarr; g7e 18초의 계열입니다.
+  </p>
+  <ul class="plain">
+    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - 가중치 로드 <strong>19초</strong>. FP8과 NVFP4 두 모델(합계 66GB)을 같은 노드에서 동시에 로드하는 중에도 이 값이었고, Mountpoint 대비 7.8배입니다. 콜드 스타트(신규 노드 확보 + 이미지 pull + 로딩)는 2모델 동시 기준 380초였습니다. Karpenter NodePool에 <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 인스턴스 스토어 3.8TB가 자동 구성되고, runai는 concurrency 128 / memory_limit 64GiB를 사용했습니다.</li>
+    <li><b>g7e.2xlarge (Spot)</b> - 6절 본판정 환경에서 가중치 로드 <strong>18초</strong>였습니다. 로딩 구간 분해는 g6e 계열에서만 수행했으므로 g7e는 가중치 로드 단일 값입니다.</li>
+  </ul>
+
+  <h3>4.3 한계</h3>
+  <ul class="plain">
+    <li>콜드 스타트는 재현 비용이 커서 반복 측정하지 못했습니다. 신규 노드에는 compile 캐시가 없으므로 최적 구성의 콜드 기동은 약 4.5분으로 추정치입니다.</li>
+    <li>concurrency는 인스턴스와 함께 바뀌어(32 &rarr; 64 &rarr; 128) 단독 효과를 분리하지 못했습니다.</li>
+    <li>NVMe 프리스테이징 후 로컬 로드, fastsafetensors + GDS, FSx for Lustre, EBS 스냅샷 FSR, S3 Express One Zone은 미측정 대안으로 남아 있습니다.</li>
+  </ul>
 </section>
 
 <!-- ===================== 05 ===================== -->
@@ -794,7 +820,7 @@ flowchart LR
 
   <h3>5.1 FP8-dynamic 대 NVFP4</h3>
   <p>
-    g6e.12xlarge 한 노드에 FP8 pod와 NVFP4 pod를 GPU 격리로 동시에 올려 같은 조건에서 비교했다. 결론은 워크로드에 따라 갈린다. 초저지연 채팅은 NVFP4가, 요약과 RAG 같은 고동시성 종합 워크로드는 <strong>FP8에 fp8 KV를 켠 구성</strong>이 앞선다.
+    g6e.12xlarge 한 노드에 FP8 pod와 NVFP4 pod를 GPU 격리로 동시에 올려 같은 조건에서 비교했습니다. 결론은 워크로드에 따라 갈립니다. 초저지연 채팅은 NVFP4가, 요약과 RAG 같은 고동시성 종합 워크로드는 <strong>FP8에 fp8 KV를 켠 구성</strong>이 앞섭니다.
   </p>
 
   <div class="tbl-wrap">
@@ -814,18 +840,18 @@ flowchart LR
   </div>
 
   <div class="callout warn">
-    <span class="callout-title">주의 - FP8 체크포인트는 fp8 KV를 명시해야 한다</span>
-    <p>FP8-dynamic 체크포인트는 <span class="mono">kv_cache_scheme</span>이 <span class="mono">None</span>이라 기본 KV가 BF16으로 잡히고, 고동시성에서 KV 부족으로 실력을 못 낸다. <span class="mono">--kv-cache-dtype fp8</span>을 붙이면 KV 용량이 12,150에서 23,320 tokens로 늘어 S2와 S4에서 NVFP4를 역전한다. 이 플래그를 빠뜨린 채 FP8이 느리다고 판단하는 것이 가장 흔한 실수다.</p>
+    <span class="callout-title">주의 - FP8 체크포인트는 fp8 KV를 명시해야 합니다</span>
+    <p>FP8-dynamic 체크포인트는 <span class="mono">kv_cache_scheme</span>이 <span class="mono">None</span>이라 기본 KV가 BF16으로 잡히고, 고동시성에서 KV 부족으로 실력을 못 냅니다. <span class="mono">--kv-cache-dtype fp8</span>을 붙이면 KV 용량이 12,150에서 23,320 tokens로 늘어 S2와 S4에서 NVFP4를 역전합니다. 이 플래그를 빠뜨린 채 FP8이 느리다고 판단하는 것이 가장 흔한 실수입니다.</p>
   </div>
 
   <h3>5.2 g6e.12xlarge 스케일업</h3>
   <p>
-    100Gbps NIC과 NVMe RAID0를 갖춘 12xlarge에서는 <span class="mono">runai_streamer</span> 가중치 로드가 두 모델(66GB)을 동시에 올리는 중에도 19초로 끝났다. Mountpoint 149초 대비 <strong>7.8배</strong>다. <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 NVMe 3.8TB가 kubelet ephemeral-storage로 자동 구성된다.
+    100Gbps NIC과 NVMe RAID0를 갖춘 12xlarge에서는 <span class="mono">runai_streamer</span> 가중치 로드가 두 모델(66GB)을 동시에 올리는 중에도 19초로 끝났습니다. Mountpoint 149초 대비 <strong>7.8배</strong>입니다. <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 NVMe 3.8TB가 kubelet ephemeral-storage로 자동 구성됩니다.
   </p>
 
   <h3>5.3 한국어 speculative decoding</h3>
   <p>
-    당근형 한국어 프롬프트 200개로 draft 모델의 수용률을 측정했다. 공식 MTP speculator인 <span class="mono">google/gemma-4-31B-it-assistant</span>가 <strong>수용률 56%</strong>로, 축소 어휘(32K vocab) EAGLE3의 5.6% 대비 10배 높았다. 전체 262K vocab을 그대로 쓰기 때문에 한국어를 커버한다.
+    당근형 한국어 프롬프트 200개로 draft 모델의 수용률을 측정했습니다. 공식 MTP speculator인 <span class="mono">google/gemma-4-31B-it-assistant</span>가 <strong>수용률 56%</strong>로, 축소 어휘(32K vocab) EAGLE3의 5.6% 대비 10배 높았습니다. 전체 262K vocab을 그대로 쓰기 때문에 한국어를 커버합니다.
   </p>
 
   <div class="tbl-wrap">
@@ -842,7 +868,7 @@ flowchart LR
     </table>
   </div>
   <p>
-    MTP assistant는 c1 종단 지연을 6.85초에서 2.69초로 2.6배, c8 처리량을 122.9에서 281.5 tok/s로 2.3배 끌어올린다. 모델 크기도 0.94GB로 EAGLE3(4.5GB)의 5분의 1이다. 한국어 draft는 별도 학습 없이 공식 MTP assistant 채택이 정답이라는 결론이다.
+    MTP assistant는 c1 종단 지연을 6.85초에서 2.69초로 2.6배, c8 처리량을 122.9에서 281.5 tok/s로 2.3배 끌어올립니다. 모델 크기도 0.94GB로 EAGLE3(4.5GB)의 5분의 1입니다. 한국어 draft는 별도 학습 없이 공식 MTP assistant 채택이 정답이라는 결론입니다.
   </p>
 </section>
 
@@ -850,7 +876,7 @@ flowchart LR
 <section class="sec" id="s6">
   <h2><span class="no">06</span>g7e 본판정</h2>
   <p>
-    Spot으로 확보한 g7e.2xlarge에서 NVFP4를 네이티브 커널로 돌렸다. KV 캐시가 125,023 tokens까지 잡히고 가중치 로드는 18초다. 동일 워크로드, 동일 8K 컨텍스트로 L40S 기준선과 비교한 결과 전 시나리오에서 <strong>3.49배에서 4.83배</strong> 높았다.
+    Spot으로 확보한 g7e.2xlarge에서 NVFP4를 네이티브 커널로 돌렸습니다. KV 캐시가 125,023 tokens까지 잡히고 가중치 로드는 18초입니다. 동일 워크로드, 동일 8K 컨텍스트로 L40S 기준선과 비교한 결과 전 시나리오에서 <strong>3.49배에서 4.83배</strong> 높았습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -869,18 +895,18 @@ flowchart LR
   </div>
 
   <p class="lead-def">
-    <b>핵심:</b> g7e의 우위는 고동시성에서 커진다. 96GB GDDR7이 KV를 125,023 tokens까지 확보해 L40S가 포화하던 구간의 preemption을 없애기 때문이다.
+    <b>핵심:</b> g7e의 우위는 고동시성에서 커집니다. 96GB GDDR7이 KV를 125,023 tokens까지 확보해 L40S가 포화하던 구간의 preemption을 없애기 때문입니다.
   </p>
 
   <ul class="plain">
-    <li>디코드 지연 ITL p50이 전 시나리오 동시성 1 기준 45ms에서 25ms로 반토막이다. GDDR7 1.6TB/s 대역폭과 FP4 네이티브 커널의 효과다.</li>
-    <li>분류(S3)는 4.83배로 격차가 가장 크다. L40S에서 KV 부족으로 요동치던 동시성 16에서 32 구간이 g7e에서 24.7 req/s로 완전히 해소됐다.</li>
-    <li>낮은 동시성의 레이턴시 구간에서도 전 조합 최소 1.8배로 일관된 우위를 보인다.</li>
+    <li>디코드 지연 ITL p50이 전 시나리오 동시성 1 기준 45ms에서 25ms로 반토막입니다. GDDR7 1.6TB/s 대역폭과 FP4 네이티브 커널의 효과입니다.</li>
+    <li>분류(S3)는 4.83배로 격차가 가장 큽니다. L40S에서 KV 부족으로 요동치던 동시성 16에서 32 구간이 g7e에서 24.7 req/s로 완전히 해소됐습니다.</li>
+    <li>낮은 동시성의 레이턴시 구간에서도 전 조합 최소 1.8배로 일관된 우위를 보입니다.</li>
   </ul>
 
   <div class="callout note">
     <span class="callout-title">참고 - 비용 효율 계산의 전제</span>
-    <p>비용효율 배율은 최대 tok/s를 시간당 단가로 나눈 값의 비율이다. g7e는 Spot $1.50/hr, L40S는 온디맨드 $2.76/hr을 적용했다. g7e 온디맨드는 $4.13/hr이므로 Spot 확보 여부가 비용 효율의 큰 변수다.</p>
+    <p>비용효율 배율은 최대 tok/s를 시간당 단가로 나눈 값의 비율입니다. g7e는 Spot $1.50/hr, L40S는 온디맨드 $2.76/hr을 적용했습니다. g7e 온디맨드는 $4.13/hr이므로 Spot 확보 여부가 비용 효율의 큰 변수입니다.</p>
   </div>
 </section>
 
@@ -888,7 +914,7 @@ flowchart LR
 <section class="sec" id="s7">
   <h2><span class="no">07</span>권장 프로덕션 구성</h2>
   <p>
-    L40S 환경 기준으로 후속 실험 결과를 합치면 다음 구성이 종합 성능과 한국어 지연을 동시에 잡는다. FP8-dynamic 체크포인트에 fp8 KV와 MTP assistant를 얹고, 기동은 <span class="mono">runai_streamer</span>와 compile 캐시로 단축한다.
+    L40S 환경 기준으로 후속 실험 결과를 합치면 다음 구성이 종합 성능과 한국어 지연을 동시에 잡습니다. FP8-dynamic 체크포인트에 fp8 KV와 MTP assistant를 얹고, 기동은 <span class="mono">runai_streamer</span>와 compile 캐시로 단축합니다.
   </p>
 
   <div class="codeblock">
@@ -903,7 +929,7 @@ flowchart LR
   </div>
 
   <p>
-    이 조합의 예상 효과는 웜 기동 2분에서 3분, 한국어 응답 지연 2.5배 단축, 프리필 처리량 약 1.25배다. g7e를 확보하면 같은 구성을 NVFP4 네이티브로 재판정해 6절의 배율을 다시 검증한다.
+    이 조합의 예상 효과는 웜 기동 2분에서 3분, 한국어 응답 지연 2.5배 단축, 프리필 처리량 약 1.25배입니다. g7e를 확보하면 같은 구성을 NVFP4 네이티브로 재판정해 6절의 배율을 다시 검증합니다.
   </p>
 </section>
 
@@ -911,7 +937,7 @@ flowchart LR
 <section class="sec" id="s8">
   <h2><span class="no">08</span>결론과 남은 과제</h2>
   <p>
-    처리량 관점에서 g7e는 L40S 대비 3.5배에서 4.8배, 비용 효율은 6배에서 9배다. PoC 판정 기준인 1.5배를 크게 상회하므로, 당근 현행 GPU가 L40S급 이하라면 <strong>레플리카 12개에서 8개를 넘어 4개 수준까지</strong> 검토할 여지가 있다. 스타트업과 한국어 지연도 각각 실용 범위로 들어왔다.
+    처리량 관점에서 g7e는 L40S 대비 3.5배에서 4.8배, 비용 효율은 6배에서 9배입니다. PoC 판정 기준인 1.5배를 크게 상회하므로, 당근 현행 GPU가 L40S급 이하라면 <strong>레플리카 12개에서 8개를 넘어 4개 수준까지</strong> 검토할 여지가 있습니다. 스타트업과 한국어 지연도 각각 실용 범위로 들어왔습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -931,7 +957,7 @@ flowchart LR
   </div>
 
   <p>
-    남은 과제는 세 가지다. 첫째, 판정식을 닫으려면 당근 현행 GPU당 처리량 수치가 필요하다. 둘째, MTP와 fp8 KV, 고동시성의 상호작용 스윕(num_speculative_tokens 4 대 8)이 미완이다. 셋째, 70B급을 대비한 TP=2/4(PCIe) 실측이 남아 있다.
+    남은 과제는 세 가지입니다. 첫째, 판정식을 닫으려면 당근 현행 GPU당 처리량 수치가 필요합니다. 둘째, MTP와 fp8 KV, 고동시성의 상호작용 스윕(num_speculative_tokens 4 대 8)이 미완입니다. 셋째, 70B급을 대비한 TP=2/4(PCIe) 실측이 남아 있습니다.
   </p>
 </section>
 
