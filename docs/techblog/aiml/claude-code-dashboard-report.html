@@ -587,10 +587,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>claude-code-dashboard는 Anthropic Analytics / Admin / Compliance API와 Spend Report CSV, S3 아카이브를 하나로 묶어 <strong>19개 페이지</strong>로 조직의 Claude Code 사용을 보여주는 CloudFront 기반 대시보드입니다.</li>
-    <li>Analytics API는 조회 가능 기간 90일, engagement 3일 버퍼, cost 계열 요청당 31일 상한, 조직 단위 60 rpm 제한이 있어 그대로는 운영 리포팅이 어렵습니다. 이 프로젝트는 Lambda collector가 매일 S3에 NDJSON으로 적재하고 서버가 S3 우선으로 응답해 이 제약을 우회합니다.</li>
-    <li>생산성은 도구 수락률, 활동 점수, 경제 생산성 점수(v3, 코드 기준 가중치 0.55 / 0.25 / 0.12 / 0.08)로 계량화하고, Bedrock의 Claude Sonnet 4.6이 SELECT 전용 sanitizer를 거친 Athena SQL로 자연어 질의에 답합니다.</li>
-    <li>도입을 검토한다면 Analytics API 키 하나로 시작할 수 있습니다. Admin / Compliance 키와 CSV는 선택 사항이며 없으면 해당 페이지만 비활성화됩니다. 고정 인프라 비용은 README 추정 기준 월 약 $66에서 $70입니다.</li>
+    <li>claude-code-dashboard는 조직의 Claude Code 사용 현황을 <strong>19개 페이지</strong>로 보여주는 오픈소스 대시보드입니다. Anthropic이 제공하는 Analytics / Admin / Compliance API와 Spend Report CSV, S3 아카이브를 하나로 묶어 CloudFront 뒤에서 서비스합니다.</li>
+    <li>Anthropic의 사용 통계 API는 그대로 쓰기에 제약이 많습니다. 조회 가능 기간 90일, 참여 데이터 3일 지연, 비용 조회 요청당 31일 상한, 조직 전체 분당 60회 호출 제한이 있어서, 이 프로젝트는 매일 데이터를 S3에 복사해 두고 S3부터 읽는 방식으로 제약을 우회합니다.</li>
+    <li>생산성은 세 가지 점수로 계량화합니다. 도구 수락률, 활동 점수, 경제 생산성 점수(v3, 코드 기준 가중치 0.55 / 0.25 / 0.12 / 0.08)이며, 자연어 질문에는 Bedrock의 Claude Sonnet 4.6이 SELECT만 허용하는 검증기를 거친 SQL로 답합니다.</li>
+    <li>도입은 Analytics API 키 하나로 시작할 수 있습니다. Admin / Compliance 키와 CSV는 선택 사항이라 없으면 해당 페이지만 꺼지고, 고정 인프라 비용은 README 추정 기준 월 약 $66에서 $70입니다.</li>
   </ul>
 </section>
 
@@ -616,11 +616,19 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>문제 정의 - 조직 도입에서 무엇을 측정하는가</h2>
   <p>
-    Claude Code를 팀 단위로 도입하면 "잘 쓰이고 있는가"라는 질문이 곧바로 네 개의 서로 다른 질문으로 갈라집니다. 누가 얼마나 자주 쓰는가(참여도), 무엇을 만들어냈는가(생산성), 얼마를 쓰고 있는가(비용), 그리고 무엇을 했는가(감사)입니다. claude-code-dashboard는 이 네 축에 다섯 번째 축인 "이 데이터가 무엇을 의미하는가"(AI 분석)를 더해 하나의 대시보드로 통합합니다.
+    이 절은 이 대시보드가 어떤 질문에 답하려고 만들어졌는지, 그리고 왜 데이터를 모으는 일 자체가 어려운지를 설명합니다. 이후 절의 설계 결정은 모두 여기서 출발합니다.
   </p>
   <p>
-    Anthropic은 이 질문들에 답할 원천 데이터를 API로 제공하지만, 축마다 소스가 다릅니다. 참여도와 Claude Code 생산성은 Analytics API의 engagement 계열이, 비용은 같은 키의 cost 계열 4개 엔드포인트가, 감사 이벤트는 Compliance API가 담당합니다. 어느 소스에도 다른 축의 데이터가 없어서, 예를 들어 "사용자별 지출 대비 산출"을 보려면 <strong>두 소스를 이메일로 조인</strong>해야 합니다.
+    Claude Code를 팀 단위로 도입하면 "잘 쓰이고 있는가"라는 질문이 곧바로 네 개로 갈라집니다. 누가 얼마나 자주 쓰는가(참여도), 무엇을 만들어냈는가(생산성), 얼마를 쓰는가(비용), 무엇을 했는가(감사)입니다. claude-code-dashboard는 여기에 다섯 번째 축인 "이 데이터가 무엇을 의미하는가"(AI 분석)를 더해 하나의 대시보드로 통합합니다.
   </p>
+  <p>
+    Anthropic은 이 질문들에 답할 원천 데이터를 API로 제공합니다. 다만 축마다 소스가 다릅니다. 참여도와 Claude Code 생산성은 Analytics API(조직의 사용 통계를 내려주는 조회 API)의 engagement 계열(사용자 활동 데이터 묶음)에서 나옵니다.
+  </p>
+  <p>
+    비용은 같은 키로 부르는 cost 계열 엔드포인트 4개가 담당합니다. 감사 이벤트는 Compliance API(로그인, 권한 변경 같은 보안 이벤트를 내려주는 API)가 담당합니다. 어느 소스에도 다른 축의 데이터가 없어서, 예를 들어 "사용자별 지출 대비 산출"을 보려면 <strong>두 소스를 이메일로 조인</strong>해야 합니다.
+  </p>
+
+  <p>이 표에서는 다섯 개 측정 축이 각각 어떤 소스에서 오는지를 봅니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -639,11 +647,17 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    두 번째 문제는 조회창 제한입니다. Analytics API는 조회 가능 기간이 90일이고, engagement 계열은 오늘부터 3일 이내 날짜를 조회할 수 없으며(3일 버퍼), cost 계열은 요청당 최대 31일 범위만 허용합니다. rate limit은 키가 아니라 조직 단위로 60 rpm이라 뷰어 여러 명이 동시에 접속하면 예산을 나눠 씁니다. 분기 단위 리포팅이나 연간 추세 분석은 API를 직접 호출하는 방식으로는 불가능하고, 이것이 이 프로젝트가 S3 아카이브 계층을 두는 이유입니다.
+    그렇다면 API를 직접 호출해서 화면을 그리면 되지 않을까요? 두 번째 문제인 조회창 제한 때문에 어렵습니다. Analytics API는 조회 가능 기간이 90일입니다.
+  </p>
+  <p>
+    engagement 계열은 오늘부터 3일 이내 날짜를 조회할 수 없습니다(3일 버퍼). cost 계열은 요청당 최대 31일 범위만 허용합니다. 호출 횟수 제한(rate limit)도 키가 아니라 조직 단위로 60 rpm(분당 60회)이라, 뷰어 여러 명이 동시에 접속하면 이 예산을 나눠 씁니다.
+  </p>
+  <p>
+    결국 분기 단위 리포팅이나 연간 추세 분석은 API 직접 호출로는 불가능합니다. 이것이 이 프로젝트가 S3 아카이브 계층을 두는 이유입니다.
   </p>
 
   <p class="lead-def">
-    <b>원칙:</b> 이 대시보드의 설계 문제는 "차트를 그리는 것"이 아니라, 소스가 갈라져 있고 조회창이 제한된 API들을 조인 가능하고 보존 가능한 형태로 재구성하는 것입니다.
+    <b>원칙:</b> 이 대시보드의 설계 문제는 "차트를 그리는 것"이 아닙니다. 소스가 갈라져 있고 조회창이 제한된 API들을, 조인 가능하고 보존 가능한 형태로 재구성하는 것입니다.
   </p>
 </section>
 
@@ -651,7 +665,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s2">
   <h2><span class="no">02</span>동작 원리 - 데이터 파이프라인</h2>
   <p>
-    전체 구조는 3계층입니다. 브라우저의 React SPA(React 18 + Vite 5 + TypeScript 5, Recharts 2), ECS Fargate에서 도는 Express 4 프록시, 그리고 90일 API 조회창 너머의 보존을 담당하는 S3 + Glue + Athena 아카이브입니다. CloudFront와 WAF가 ALB 앞을 막고, ALB 보안 그룹은 CloudFront 관리형 prefix list로 잠겨 있어 직접 접근이 차단됩니다.
+    이 절은 데이터가 Anthropic API에서 출발해 어떤 경로로 화면까지 도달하는지를 따라갑니다. 수집, 서빙, 표시의 세 단계로 나누어 봅니다.
+  </p>
+  <p>
+    전체 구조는 3계층입니다. 브라우저에서 도는 React SPA(한 번 로드된 뒤 화면 전환 없이 동작하는 단일 페이지 앱, React 18 + Vite 5 + TypeScript 5, Recharts 2), ECS Fargate에서 도는 Express 4 프록시, 그리고 90일 API 조회창 너머의 보존을 담당하는 S3 + Glue + Athena 아카이브입니다. CloudFront와 WAF가 ALB 앞을 막고, ALB 보안 그룹은 CloudFront 관리형 prefix list로 잠겨 있어 직접 접근이 차단됩니다.
   </p>
 
   <figure class="diagram">
@@ -673,25 +690,37 @@ flowchart LR
 
   <h3>2.1 수집 - collector Lambda</h3>
   <p>
-    Node 20 Lambda(<span class="mono">collector/handler.js</span>)가 EventBridge 스케줄로 매일 실행되어 Analytics API의 5개 engagement 엔드포인트(users, summaries, skills, connectors, projects)와 Compliance 감사 피드를 스냅샷합니다. 결과는 <span class="mono">s3://&lt;bucket&gt;/&lt;table&gt;/date=YYYY-MM-DD/</span> 형태의 NDJSON 파티션으로 쓰이고, Glue Data Catalog의 테이블 6종(<span class="mono">claude_code_analytics</span>, <span class="mono">summaries_daily</span>, <span class="mono">skills_daily</span>, <span class="mono">connectors_daily</span>, <span class="mono">projects_daily</span>, <span class="mono">compliance_daily</span>)이 파티션 프로젝션으로 이를 읽습니다. 평탄화 매핑이 아직 다루지 않는 API 필드를 나중에 복구할 수 있도록 <strong>원본 레코드 사이드카</strong>를 <span class="mono">raw/&lt;table&gt;/</span> 아래에 함께 남기는 점이 특징입니다.
+    Node 20 Lambda(<span class="mono">collector/handler.js</span>)가 EventBridge 스케줄로 매일 실행됩니다. Analytics API의 5개 engagement 엔드포인트(users, summaries, skills, connectors, projects)와 Compliance 감사 피드를 그날 상태 그대로 스냅샷합니다.
+  </p>
+  <p>
+    결과는 NDJSON(한 줄에 JSON 레코드 하나를 담는 텍스트 형식)으로 <span class="mono">s3://&lt;bucket&gt;/&lt;table&gt;/date=YYYY-MM-DD/</span> 경로에 날짜별로 쌓입니다. Glue Data Catalog의 테이블 6종(<span class="mono">claude_code_analytics</span>, <span class="mono">summaries_daily</span>, <span class="mono">skills_daily</span>, <span class="mono">connectors_daily</span>, <span class="mono">projects_daily</span>, <span class="mono">compliance_daily</span>)이 파티션 프로젝션(날짜별 폴더를 별도 등록 없이 테이블 파티션으로 읽는 Glue 기능)으로 이를 읽습니다.
+  </p>
+  <p>
+    특징은 <strong>원본 레코드 사이드카</strong>입니다. 평탄화 매핑이 아직 다루지 않는 API 필드를 나중에 복구할 수 있도록, 원본 응답을 <span class="mono">raw/&lt;table&gt;/</span> 아래에 함께 남깁니다.
   </p>
 
   <h3>2.2 서빙 - Express 프록시의 S3 우선 전략</h3>
   <p>
-    기간 조회(<span class="mono">/api/analytics/users/range</span> 등)는 S3 아카이브를 먼저 읽고, 캐시 미스가 난 날짜만 실 API로 나갑니다. README는 S3 히트 시 응답을 약 150 ms로 서술합니다. 응답에는 <span class="mono">{"s3_hits": 14, "live_calls": 0}</span> 형태의 캐시 힌트가 실려서 아카이브 최신성을 바로 진단할 수 있습니다. 서버에는 10분 in-memory 캐시와 stale-while-revalidate 방식의 비용 캐시, 그리고 UI 프리셋 창을 미리 데우는 keep-warm 스케줄러가 있어 조직 단위 60 rpm 예산 안에서 다중 뷰어를 감당합니다.
+    기간 조회(<span class="mono">/api/analytics/users/range</span> 등)는 S3 아카이브를 먼저 읽습니다. 캐시 미스가 난 날짜만 실 API로 나갑니다. S3에서 읽으면 얼마나 빠를까요? README는 S3 히트 시 응답을 약 150 ms로 서술합니다.
   </p>
   <p>
-    cost 계열의 요청당 31일 상한은 서버가 흡수합니다. <span class="mono">splitCostWindow()</span>(server/aws.js)가 긴 창을 31일 이하 청크 최대 6개로 쪼개 병합하므로, 대시보드는 한 번의 질의로 최대 186일 창까지 정확한 합산을 보여줍니다. 그 이상은 최근 구간으로 클램프하고 배너로 알립니다.
+    응답에는 <span class="mono">{"s3_hits": 14, "live_calls": 0}</span> 형태의 캐시 힌트가 실립니다. 아카이브가 얼마나 최신인지 바로 진단할 수 있습니다. 서버에는 10분 in-memory 캐시, stale-while-revalidate(오래된 캐시를 일단 응답하고 뒤에서 갱신하는 방식)의 비용 캐시, UI 프리셋 창을 미리 데우는 keep-warm 스케줄러가 있어 조직 단위 60 rpm 예산 안에서 다중 뷰어를 감당합니다.
+  </p>
+  <p>
+    그러면 31일이 넘는 긴 기간 조회는 어떻게 처리할까요? cost 계열의 요청당 31일 상한은 서버가 흡수합니다. <span class="mono">splitCostWindow()</span>(server/aws.js)가 긴 창을 31일 이하 청크 최대 6개로 쪼개 병합하므로, 대시보드는 한 번의 질의로 최대 186일 창까지 정확한 합산을 보여줍니다.
+  </p>
+  <p>
+    그 이상의 기간은 최근 구간으로 잘라서 보여줍니다. 잘렸다는 사실은 배너로 알립니다.
   </p>
 
   <h3>2.3 표시 - React SPA</h3>
   <p>
-    프론트는 19개 라우트, 영어/한국어 런타임 토글, 7일 기본 날짜 범위 컨트롤, 사용자 행 클릭 시 열리는 드릴다운 패널로 구성됩니다. Analyze, Cost, Executive 페이지는 print CSS 기반의 PDF 내보내기를 지원합니다.
+    프론트는 19개 라우트로 구성됩니다. 영어/한국어 런타임 토글, 7일 기본의 날짜 범위 컨트롤, 사용자 행을 클릭하면 열리는 드릴다운 패널이 있습니다. Analyze, Cost, Executive 페이지는 print CSS 기반의 PDF 내보내기를 지원합니다.
   </p>
 
   <div class="callout note">
     <span class="callout-title">참고 - 세 API 키는 모두 선택적 결합입니다</span>
-    <p>Analytics, Admin, Compliance 키는 각각 별도의 Secrets Manager 시크릿(ccd/analytics-key 등)으로 주입되고, 없는 키에 해당하는 페이지만 조용히 비활성화됩니다. Analytics 키 하나만으로 참여도와 생산성 페이지가 동작하고, CLAUDE.md에 따르면 현재는 Analytics 키의 scope가 compliance 읽기까지 커버해 전용 Compliance 키 없이도 서버가 자동 폴백합니다.</p>
+    <p>Analytics, Admin, Compliance 키는 각각 별도의 Secrets Manager 시크릿(ccd/analytics-key 등)으로 주입됩니다. 없는 키에 해당하는 페이지만 조용히 비활성화됩니다. Analytics 키 하나만으로 참여도와 생산성 페이지가 동작하고, CLAUDE.md에 따르면 현재는 Analytics 키의 scope가 compliance 읽기까지 커버해 전용 Compliance 키 없이도 서버가 자동 폴백합니다.</p>
   </div>
 </section>
 
@@ -699,17 +728,23 @@ flowchart LR
 <section class="sec" id="s3">
   <h2><span class="no">03</span>핵심 지표와 산식</h2>
   <p>
-    이 대시보드가 계산하는 파생 지표는 docs/metrics-catalog.md에 공식과 함께 문서화되어 있습니다. 여기서는 의사결정에 직접 쓰이는 대표 지표 네 가지를 코드 기준으로 살펴봅니다.
+    이 절은 대시보드가 화면에 보여주는 숫자들이 실제로 어떻게 계산되는지를 다룹니다. 산식을 알아야 숫자를 잘못 읽는 일을 피할 수 있기 때문입니다.
+  </p>
+  <p>
+    파생 지표 전체는 docs/metrics-catalog.md에 공식과 함께 문서화되어 있습니다. 여기서는 의사결정에 직접 쓰이는 대표 지표 네 가지를 코드 기준으로 살펴봅니다.
   </p>
 
   <h3>3.1 도구 수락률 (Tool Acceptance Rate)</h3>
   <p>
-    가장 기본이 되는 품질 지표입니다. Claude Code의 편집 도구 4종(<span class="mono">edit</span>, <span class="mono">multi_edit</span>, <span class="mono">write</span>, <span class="mono">notebook_edit</span>)이 낸 제안 중 사용자가 수락한 비율로, <span class="mono">accepted / (accepted + rejected)</span>로 계산합니다. AI 제안 품질과 사용자 신뢰도가 결합된 지표이며, 분모가 0이면 null로 두어 "데이터 없음"과 "0%"를 구분합니다.
+    가장 기본이 되는 품질 지표입니다. Claude Code의 편집 도구 4종(<span class="mono">edit</span>, <span class="mono">multi_edit</span>, <span class="mono">write</span>, <span class="mono">notebook_edit</span>)이 낸 제안 중 사용자가 수락한 비율입니다. <span class="mono">accepted / (accepted + rejected)</span>로 계산합니다.
+  </p>
+  <p>
+    AI 제안 품질과 사용자 신뢰도가 결합된 지표입니다. 분모가 0이면 null로 두어 "데이터 없음"과 "0%"를 구분합니다.
   </p>
 
   <h3>3.2 활동 점수 (User Activity Score)</h3>
   <p>
-    비용 데이터 없이 Analytics만으로 사용자별 랭킹을 만드는 점수입니다. 다섯 항목의 가중합으로, 각 항목은 목표치 대비 정규화 후 0에서 1로 클램프됩니다.
+    비용 데이터 없이 Analytics만으로 사용자별 랭킹을 만드는 점수입니다. 다섯 항목의 가중합이며, 각 항목은 목표치 대비 정규화한 뒤 0에서 1 사이로 자릅니다(클램프).
   </p>
 
   <div class="codeblock">
@@ -723,7 +758,10 @@ flowchart LR
 
   <h3>3.3 경제 생산성 점수 (Cost-Efficiency Score v3)</h3>
   <p>
-    사용자별 지출(cost 계열)과 산출(Analytics)을 이메일로 조인해 "달러당 산출"을 순위화하는 점수입니다. 코드(server/aws.js의 <span class="mono">scoreEconomicProductivity()</span>)는 표면별 산출(code, cowork, office, design)을 각 표면의 활성 사용자 집단 안에서 winsorize 후 중앙값 앵커로 정규화하고, 활성 표면 평균을 지출로 나눈 값을 다시 집단 내 정규화해 value 항을 만듭니다.
+    사용자별 지출(cost 계열)과 산출(Analytics)을 이메일로 조인해 "달러당 산출"을 순위화하는 점수입니다. 코드는 server/aws.js의 <span class="mono">scoreEconomicProductivity()</span>입니다.
+  </p>
+  <p>
+    계산은 세 단계입니다. 표면별 산출(code, cowork, office, design)을 각 표면의 활성 사용자 집단 안에서 winsorize(극단값을 일정 범위 안으로 눌러 담는 통계 처리)한 뒤 중앙값을 기준으로 정규화합니다. 그다음 활성 표면 평균을 지출로 나누고, 그 값을 다시 집단 안에서 정규화해 value 항을 만듭니다.
   </p>
 
   <div class="codeblock">
@@ -740,12 +778,15 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 
   <h3>3.4 프롬프트당 작업 수 (Actions per Prompt)</h3>
   <p>
-    Agentic 페이지의 위임도 지표입니다. Cowork가 <span class="mono">action_count</span>와 <span class="mono">message_count</span>를 모두 제공하는 유일한 표면이라 Cowork 기준으로 <span class="mono">sum(action_count) / sum(message_count)</span>를 계산하고, Claude Code는 프롬프트 수 필드가 없어 세션당 수락된 작업 수를 프록시로 씁니다. 값이 높을수록 팀이 한 번의 지시로 더 많은 작업을 위임한다는 뜻입니다.
+    Agentic 페이지의 위임도 지표입니다. 한 번의 지시로 AI가 얼마나 많은 작업을 처리하는지를 봅니다. 값이 높을수록 팀이 한 번의 지시로 더 많은 작업을 위임한다는 뜻입니다.
+  </p>
+  <p>
+    Cowork가 <span class="mono">action_count</span>와 <span class="mono">message_count</span>를 모두 제공하는 유일한 표면입니다. 그래서 Cowork 기준으로 <span class="mono">sum(action_count) / sum(message_count)</span>를 계산합니다. Claude Code는 프롬프트 수 필드가 없어 세션당 수락된 작업 수를 대리 지표(프록시)로 씁니다.
   </p>
 
   <div class="callout warn">
     <span class="callout-title">주의 - LOC는 순증가가 아닙니다</span>
-    <p>Analytics의 <span class="mono">lines_of_code.added_count</span>는 세션 안에서 같은 코드를 쓰고 지우기를 반복해도 계속 누적됩니다. 코드의 v3 점수가 <span class="mono">added - 0.5 * removed</span>로 churn을 할인하는 이유가 이것이며, LOC 단독 랭킹을 성과 평가에 그대로 쓰면 안 됩니다.</p>
+    <p>LOC(작성된 코드 줄 수)를 셀 때, Analytics의 <span class="mono">lines_of_code.added_count</span>는 세션 안에서 같은 코드를 쓰고 지우기를 반복해도 계속 누적됩니다. 코드의 v3 점수가 <span class="mono">added - 0.5 * removed</span>로 churn(썼다 지운 코드)을 할인하는 이유가 이것입니다. LOC 단독 랭킹을 성과 평가에 그대로 쓰면 안 됩니다.</p>
   </div>
 
 </section>
@@ -754,15 +795,27 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s4">
   <h2><span class="no">04</span>AI 질의 레이어와 프라이버시 처리</h2>
   <p>
-    Analyze 페이지는 Amazon Bedrock의 Claude Sonnet 4.6(교차 리전 inference profile <span class="mono">global.anthropic.claude-sonnet-4-6</span>)에 자연어로 질문을 던지는 화면입니다. 서버가 <span class="mono">ConverseStream</span>으로 모델을 호출하고 SSE로 브라우저에 스트리밍하며, 두 가지 모드가 있습니다. Direct 모드는 현재 라이브 스냅샷(summaries + users + skills + connectors)을 분석하고, Athena SQL 모드는 <strong>모델이 스스로 SQL을 생성해 실행</strong>한 뒤 결과 행으로 리포트를 씁니다.
+    이 절은 "데이터에게 말로 질문하는" 기능이 어떻게 구현되어 있는지, 그리고 그 과정에서 개인 정보를 어떻게 보호하는지를 다룹니다. AI에게 데이터 접근을 열어줄 때 무엇을 조심해야 하는지 보여주는 부분입니다.
   </p>
   <p>
-    모델은 tool-use 챗봇으로 동작하며, 코드(server/chat-tools.js) 기준으로 도구 5종을 자율 호출합니다: <span class="mono">get_analytics_overview</span>, <span class="mono">run_athena_sql</span>, <span class="mono">get_cost_summary</span>, <span class="mono">search_users</span>, 그리고 v2.0.3에서 추가된 <span class="mono">get_user_usage</span>(오늘까지의 사용자별 라이브 사용량)입니다. docs/architecture.md는 아직 4종으로 서술하고 있어 코드가 문서보다 앞서 있습니다.
+    Analyze 페이지는 Amazon Bedrock의 Claude Sonnet 4.6(교차 리전 inference profile <span class="mono">global.anthropic.claude-sonnet-4-6</span>)에 자연어로 질문을 던지는 화면입니다. 서버가 <span class="mono">ConverseStream</span>으로 모델을 호출하고, SSE(서버가 브라우저로 응답을 조각조각 흘려보내는 스트리밍 방식)로 전달합니다.
+  </p>
+  <p>
+    모드는 두 가지입니다. Direct 모드는 현재 라이브 스냅샷(summaries + users + skills + connectors)을 분석합니다. Athena SQL 모드는 <strong>모델이 스스로 SQL을 생성해 실행</strong>한 뒤 결과 행으로 리포트를 씁니다.
+  </p>
+  <p>
+    모델은 tool-use(모델이 정해진 도구를 스스로 골라 호출해 데이터를 가져오는 방식) 챗봇으로 동작합니다. 코드(server/chat-tools.js) 기준으로 도구 5종을 자율 호출합니다: <span class="mono">get_analytics_overview</span>, <span class="mono">run_athena_sql</span>, <span class="mono">get_cost_summary</span>, <span class="mono">search_users</span>, 그리고 v2.0.3에서 추가된 <span class="mono">get_user_usage</span>(오늘까지의 사용자별 라이브 사용량)입니다. docs/architecture.md는 아직 4종으로 서술하고 있어 코드가 문서보다 앞서 있습니다.
   </p>
 
   <h3>4.1 SQL sanitizer - LLM이 생성한 SQL도 예외 없이</h3>
   <p>
-    Athena로 가는 SQL은 사용자가 직접 쓴 것이든 모델이 생성한 것이든 동일한 <span class="mono">sanitizeAthenaQuery()</span>를 통과해야 합니다. 검증 순서가 핵심입니다. 주석을 먼저 제거한 뒤 남은 세미콜론을 거부해 "주석 뒤에 숨긴 두 번째 문장" 공격을 잡고, SELECT/WITH로 시작하는지, 금지 키워드(INSERT, DROP, ALTER, CREATE, GRANT 등 23종 패턴 - metrics-catalog의 19종 목록에 코드가 EXEC, DESCRIBE, SHOW, EXPLAIN을 추가)가 없는지, 모든 FROM/JOIN 대상이 테이블 allowlist에 있는지를 차례로 확인합니다. allowlist는 기본 6개 테이블과 org2 쌍둥이 6개, 총 12개이며 CTE 별칭과 서브쿼리 내부 FROM까지 재귀 검증합니다. IAM은 워크그룹과 데이터베이스 범위를 한 번 더 제한하는 이중 방어선입니다.
+    sanitizer(위험한 SQL을 걸러내는 검증기)는 예외를 두지 않습니다. Athena로 가는 SQL은 사용자가 직접 쓴 것이든 모델이 생성한 것이든 동일한 <span class="mono">sanitizeAthenaQuery()</span>를 통과해야 합니다.
+  </p>
+  <p>
+    검증 순서가 핵심입니다. 주석을 먼저 제거한 뒤 남은 세미콜론을 거부해 "주석 뒤에 숨긴 두 번째 문장" 공격을 잡습니다. 그다음 SELECT/WITH로 시작하는지, 금지 키워드(INSERT, DROP, ALTER, CREATE, GRANT 등 23종 패턴 - metrics-catalog의 19종 목록에 코드가 EXEC, DESCRIBE, SHOW, EXPLAIN을 추가)가 없는지를 확인합니다.
+  </p>
+  <p>
+    마지막으로 모든 FROM/JOIN 대상이 테이블 allowlist(허용 목록)에 있는지 봅니다. allowlist는 기본 6개 테이블과 org2 쌍둥이 6개로 총 12개이고, CTE 별칭과 서브쿼리 내부 FROM까지 재귀 검증합니다. IAM은 워크그룹과 데이터베이스 범위를 한 번 더 제한하는 이중 방어선입니다.
   </p>
 
   <div class="codeblock">
@@ -775,12 +828,15 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 
   <h3>4.2 이메일 마스킹 - 기본값이 비식별</h3>
   <p>
-    UI에 표시되는 모든 이메일은 <span class="mono">maskEmail()</span>(src/lib/format.ts)을 거칩니다. 로컬 파트 앞 2자만 남기고 나머지를 최소 3개의 별표로 바꾸며 도메인은 유지합니다(<span class="mono">alice.kim@acme.com &rarr; al*******@acme.com</span>). 서버의 LLM 시스템 프롬프트도 응답에서 같은 마스킹을 강제합니다. v2.0.3 릴리스 노트에 따르면 새 챗 도구가 초기 구현에서 마스킹된 이메일 옆에 실명을 함께 반환했는데, 배포 전 리뷰에서 재식별 위험으로 판정되어 <strong>실명 필드를 도구 결과에서 제거</strong>했습니다. 마스킹이 UI 장식이 아니라 데이터 계약으로 다뤄진다는 사례입니다.
+    UI에 표시되는 모든 이메일은 <span class="mono">maskEmail()</span>(src/lib/format.ts)을 거칩니다. @ 앞부분(로컬 파트)의 앞 2자만 남기고 나머지를 최소 3개의 별표로 바꾸며, 도메인은 유지합니다(<span class="mono">alice.kim@acme.com &rarr; al*******@acme.com</span>). 서버의 LLM 시스템 프롬프트도 응답에서 같은 마스킹을 강제합니다.
+  </p>
+  <p>
+    이 원칙이 실제로 작동한 사례가 있습니다. v2.0.3 릴리스 노트에 따르면 새 챗 도구가 초기 구현에서 마스킹된 이메일 옆에 실명을 함께 반환했습니다. 배포 전 리뷰에서 재식별 위험으로 판정되어 <strong>실명 필드를 도구 결과에서 제거</strong>했고, 마스킹이 UI 장식이 아니라 데이터 계약으로 다뤄진다는 사례입니다.
   </p>
 
   <div class="callout warn">
     <span class="callout-title">주의 - 감사 피드의 IP와 UA는 PII입니다</span>
-    <p>Compliance API 이벤트에는 행위자 IP 주소와 User-Agent가 포함됩니다. 대시보드는 이를 UI에 표시하되, metrics-catalog는 LLM 프롬프트로 전달할 때 마스킹을 권고합니다. 이 대시보드를 변형해 쓸 때 챗 도구에 감사 데이터를 새로 연결한다면 같은 기준을 적용해야 합니다.</p>
+    <p>Compliance API 이벤트에는 행위자 IP 주소와 User-Agent(접속 브라우저 정보)가 포함되며, 이는 PII(개인 식별 정보)입니다. 대시보드는 이를 UI에 표시하되, metrics-catalog는 LLM 프롬프트로 전달할 때 마스킹을 권고합니다. 이 대시보드를 변형해 챗 도구에 감사 데이터를 새로 연결한다면 같은 기준을 적용해야 합니다.</p>
   </div>
 </section>
 
@@ -788,8 +844,13 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s5">
   <h2><span class="no">05</span>화면 구성 개관</h2>
   <p>
-    페이지는 v2.0.3 기준 19개(<span class="mono">src/pages/</span>의 라우트 수)입니다. 개별 페이지를 나열하는 대신 데이터 소스 기준으로 묶으면 구조가 명확해집니다. 같은 그룹의 페이지는 같은 서버 라우트를 다른 각도로 보여주는 관계입니다.
+    이 절은 대시보드에 어떤 화면이 있고 서로 어떤 관계인지를 한눈에 정리합니다. 페이지 수는 많지만 구조는 단순하다는 것이 요점입니다.
   </p>
+  <p>
+    페이지는 몇 개일까요? v2.0.3 기준 19개(<span class="mono">src/pages/</span>의 라우트 수)입니다. 개별 페이지를 나열하는 대신 데이터 소스 기준으로 묶으면 구조가 명확해지고, 같은 그룹의 페이지는 같은 서버 라우트를 다른 각도로 보여주는 관계입니다.
+  </p>
+
+  <p>이 표에서는 19개 페이지가 여섯 개 영역으로 어떻게 묶이는지, 각 영역이 어떤 소스를 읽는지를 봅니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -809,26 +870,37 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
   </div>
 
   <p>
-    반복되는 UI 패턴도 페이지 수보다 적습니다. KPI 카드 행, Recharts 차트 카드, 정렬 가능한 사용자 테이블, 날짜 범위 컨트롤(7d / 14d / 30d 프리셋 + 커스텀, URL 쿼리로 공유), 그리고 행 클릭 드릴다운 패널이 거의 모든 페이지에서 재사용됩니다. Executive 페이지는 이 구성 요소들을 한 화면으로 압축한 CFO/CTO용 스냅샷으로, 12개의 기간 연동 KPI와 PDF 내보내기를 제공합니다.
+    반복되는 UI 패턴도 페이지 수보다 적습니다. KPI 카드 행, Recharts 차트 카드, 정렬 가능한 사용자 테이블, 날짜 범위 컨트롤(7d / 14d / 30d 프리셋 + 커스텀, URL 쿼리로 공유), 행 클릭 드릴다운 패널이 거의 모든 페이지에서 재사용됩니다.
+  </p>
+  <p>
+    Executive 페이지는 이 구성 요소들을 한 화면으로 압축한 CFO/CTO용 스냅샷입니다. 12개의 기간 연동 KPI와 PDF 내보내기를 제공합니다.
   </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6">
   <h2><span class="no">06</span>실제 운영 흐름 - 배포와 수집 주기</h2>
+  <p>
+    이 절은 이 대시보드를 실제로 띄우고 굴리는 데 무엇이 필요한지를 다룹니다. 배포에 드는 손과 돈, 그리고 데이터가 갱신되는 리듬입니다.
+  </p>
 
   <h3>6.1 배포</h3>
   <p>
-    인프라는 AWS CDK(TypeScript) 4개 스택(network / storage / compute / collector)으로 정의됩니다. 런타임은 ECS Fargate ARM64 태스크 2개(각 0.5 vCPU, 1 GB)이고, 배포는 <span class="mono">npx cdk deploy --all</span> 한 번으로 끝납니다. 배포 후 Secrets Manager에 API 키를 주입하면 대시보드가 라이브 데이터로 전환됩니다. 인증은 Cognito Hosted UI와 <strong>Lambda@Edge 함수 4종</strong>(check-auth, parse-auth, refresh-auth, sign-out)이 담당하며, 미인증 트래픽은 WAF / ALB / ECS에 도달하기 전에 CloudFront 엣지에서 차단됩니다.
+    인프라는 AWS CDK(TypeScript) 4개 스택(network / storage / compute / collector)으로 정의됩니다. 런타임은 ECS Fargate ARM64 태스크 2개(각 0.5 vCPU, 1 GB)이고, 배포는 <span class="mono">npx cdk deploy --all</span> 한 번으로 끝납니다. 배포 후 Secrets Manager에 API 키를 주입하면 대시보드가 라이브 데이터로 전환됩니다.
   </p>
   <p>
-    README의 비용 추정(ap-northeast-2, 기존 VPC 재사용 기준)은 고정 인프라 월 약 $66에서 $70이고, Bedrock 분석 질의량에 따라 경량 사용 월 약 $80, 중간 약 $130, 대량 약 $250입니다. 새 VPC를 만들면 NAT Gateway 비용 약 $43이 추가됩니다.
+    인증은 Cognito Hosted UI와 <strong>Lambda@Edge 함수 4종</strong>(check-auth, parse-auth, refresh-auth, sign-out)이 담당합니다. 미인증 트래픽은 WAF / ALB / ECS에 도달하기 전에 CloudFront 엣지에서 차단됩니다.
+  </p>
+  <p>
+    비용은 얼마나 들까요? README의 추정(ap-northeast-2, 기존 VPC 재사용 기준)은 고정 인프라 월 약 $66에서 $70입니다. Bedrock 분석 질의량에 따라 경량 사용 월 약 $80, 중간 약 $130, 대량 약 $250이고, 새 VPC를 만들면 NAT Gateway 비용 약 $43이 추가됩니다.
   </p>
 
   <h3>6.2 수집 주기</h3>
   <p>
     수집은 하루 두 번, 목적이 다른 스케줄로 나뉩니다. 시각 선택에 이유가 있습니다.
   </p>
+
+  <p>이 표에서는 두 스케줄의 실행 시각과 그 시각을 고른 이유를 봅니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -844,7 +916,10 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
   </div>
 
   <p>
-    라이브 경로에도 주기가 있습니다. 서버는 5분마다 감사 캐시와 engagement 프리셋 창을, 8분마다 비용 캐시를 미리 데워서 첫 접속자가 12초에서 30초까지 걸리는 upstream 그룹 질의를 기다리지 않게 합니다. cost 계열 데이터 자체는 약 4시간 주기의 watermark(<span class="mono">data_refreshed_at</span>)로 갱신되고 사용일로부터 약 30일까지 보정될 수 있어, 당일 수치는 부분 데이터로 표시됩니다.
+    라이브 경로에도 주기가 있습니다. 서버는 5분마다 감사 캐시와 engagement 프리셋 창을, 8분마다 비용 캐시를 미리 데웁니다. 덕분에 첫 접속자가 12초에서 30초까지 걸리는 upstream 그룹 질의를 기다리지 않습니다.
+  </p>
+  <p>
+    cost 계열 데이터 자체는 약 4시간 주기의 watermark(데이터가 어느 시점까지 반영됐는지 나타내는 기준 시각, <span class="mono">data_refreshed_at</span>)로 갱신됩니다. 사용일로부터 약 30일까지 보정될 수 있어, 당일 수치는 부분 데이터로 표시됩니다.
   </p>
 </section>
 
@@ -852,14 +927,14 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s7">
   <h2><span class="no">07</span>한계</h2>
   <p>
-    이 대시보드의 한계는 대부분 원천 API의 한계입니다. 도입 판단 전에 알아야 할 것을 추립니다.
+    이 절은 대시보드 수치를 믿기 전에 알아야 할 함정을 정리합니다. 대부분은 대시보드 자체가 아니라 원천 API의 한계이고, 도입 판단 전에 확인해야 합니다.
   </p>
   <ul class="plain">
     <li><strong>Bedrock / Vertex 경유 사용은 0으로 집계됩니다.</strong> Analytics API와 Spend Report CSV 모두 Anthropic 1st-party 경로만 반영하므로, Bedrock으로 Claude Code를 쓰는 조직은 실제 사용량과 대시보드 수치가 다릅니다.</li>
     <li>engagement 데이터는 3일 버퍼 뒤에 확정됩니다. "오늘"을 조회할 수 있는 것은 cost 계열뿐이고 그것도 약 4시간 watermark의 부분 데이터입니다.</li>
     <li>사용자와 스킬을 잇는 차원이 API에 없습니다. 사용자 상세 패널의 스킬 카드는 조직 전체 기준이며 화면에도 그렇게 명시됩니다.</li>
     <li>Spend Report CSV는 기간 누계만 있고 일자별 breakdown이 없으며, Console이 export API를 제공하지 않아 업로드가 수동입니다.</li>
-    <li>지출과 산출의 조인 키가 이메일이라 대소문자 변이가 있으면 미스매치가 생기고, 조직이 10명 수준이면 이상치 한 명이 점수 분포를 지배하므로 절대값이 아닌 조직 내 상대 순위로 읽어야 합니다.</li>
+    <li>지출과 산출의 조인 키가 이메일이라 대소문자 변이가 있으면 미스매치가 생깁니다. 조직이 10명 수준이면 이상치 한 명이 점수 분포를 지배하므로, 점수는 절대값이 아닌 조직 내 상대 순위로 읽어야 합니다.</li>
   </ul>
 </section>
 
@@ -867,13 +942,19 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s8">
   <h2><span class="no">08</span>결론</h2>
   <p>
+    이 절은 지금까지의 분석을 도입 판단에 쓸 수 있는 권고로 정리합니다.
+  </p>
+  <p>
     claude-code-dashboard는 Anthropic의 흩어진 관측 API들을 하나의 운영 도구로 묶는 프로젝트입니다. 기술적으로 주목할 부분은 화면이 아니라 그 아래의 결정들입니다. 90일 조회창을 S3 아카이브로 넘어서는 S3 우선 전략, 31일 상한을 청크 병합으로 흡수해 최대 186일 창을 정확히 합산하는 서버, LLM이 생성한 SQL에도 예외 없이 적용되는 SELECT 전용 sanitizer, 그리고 마스킹을 데이터 계약으로 다루는 프라이버시 처리입니다.
   </p>
   <p>
-    도입 관점의 권고는 단계적입니다. 1순위는 Analytics 키 하나로 배포해 참여도와 생산성 페이지를 확보하는 것입니다. 이것만으로 DAU/WAU/MAU, 수락률, 활동 점수가 동작합니다. 비용 축이 필요해지면 같은 키의 cost 계열이 이미 커버하므로 Cost 페이지를 열고, 감사 요건이 있으면 Compliance 접근을 추가합니다. 점수 산식(활동 점수, 경제 생산성 v3)은 코드에 순수 함수로 분리되어 있어 조직의 정의에 맞게 가중치를 조정하기 쉽습니다.
+    도입 관점의 권고는 단계적입니다. 1순위는 Analytics 키 하나로 배포해 참여도와 생산성 페이지를 확보하는 것입니다. 이것만으로 DAU/WAU/MAU, 수락률, 활동 점수가 동작합니다.
+  </p>
+  <p>
+    비용 축이 필요해지면 같은 키의 cost 계열이 이미 커버하므로 Cost 페이지를 열면 됩니다. 감사 요건이 있으면 Compliance 접근을 추가합니다. 점수 산식(활동 점수, 경제 생산성 v3)은 코드에 순수 함수로 분리되어 있어 조직의 정의에 맞게 가중치를 조정하기 쉽습니다.
   </p>
   <p class="lead-def">
-    <b>결론:</b> 이 프로젝트의 가치는 차트가 아니라, 제약이 많은 관측 API를 보존 가능하고 조인 가능하며 질의 가능한 데이터 계층으로 바꾸는 파이프라인 설계에 있습니다.
+    <b>한 문장으로 요약하면,</b> 이 프로젝트의 가치는 차트가 아니라, 제약이 많은 관측 API를 보존 가능하고 조인 가능하며 질의 가능한 데이터 계층으로 바꾸는 파이프라인 설계에 있습니다.
   </p>
 </section>
 
@@ -986,10 +1067,10 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>claude-code-dashboard is a CloudFront-fronted dashboard that stitches together the Anthropic Analytics / Admin / Compliance APIs, Spend Report CSVs, and an S3 archive into <strong>19 pages</strong> showing an organization's Claude Code usage.</li>
-    <li>The Analytics API has a 90-day lookback window, a 3-day engagement buffer, a 31-day-per-request cap on the cost family, and a 60 rpm org-wide rate limit, which makes it hard to use directly for operational reporting. This project works around those constraints with a Lambda collector that writes daily NDJSON snapshots to S3 and a server that answers S3-first.</li>
-    <li>Productivity is quantified with the tool acceptance rate, the user activity score, and the economic productivity score (v3, weights 0.55 / 0.25 / 0.12 / 0.08 per the code), and Claude Sonnet 4.6 on Bedrock answers natural-language questions through Athena SQL passed through a SELECT-only sanitizer.</li>
-    <li>If you are evaluating adoption, you can start with a single Analytics API key. The Admin / Compliance keys and the CSV are optional; the corresponding pages are simply disabled when they are absent. Fixed infrastructure cost is roughly $66 to $70 per month per the README estimate.</li>
+    <li>claude-code-dashboard is an open-source dashboard that shows an organization's Claude Code usage across <strong>19 pages</strong>. It stitches together Anthropic's Analytics / Admin / Compliance APIs, Spend Report CSVs, and an S3 archive behind CloudFront.</li>
+    <li>Anthropic's usage-statistics API is hard to use directly: it has a 90-day lookback window, a 3-day delay on engagement data, a 31-day-per-request cap on cost queries, and an org-wide limit of 60 calls per minute. This project works around those constraints by copying the data to S3 every day and reading from S3 first.</li>
+    <li>Productivity is quantified with three scores: the tool acceptance rate, the user activity score, and the economic productivity score (v3, weights 0.55 / 0.25 / 0.12 / 0.08 per the code). Natural-language questions are answered by Claude Sonnet 4.6 on Bedrock, through SQL that must pass a SELECT-only validator.</li>
+    <li>You can start adoption with a single Analytics API key. The Admin / Compliance keys and the CSV are optional, the corresponding pages simply turn off when they are absent, and fixed infrastructure cost is roughly $66 to $70 per month per the README estimate.</li>
   </ul>
 </section>
 
@@ -1015,11 +1096,19 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Problem Definition - What to Measure in Organizational Adoption</h2>
   <p>
-    Once a team adopts Claude Code, the question "is it being used well" immediately splits into four different questions: who uses it and how often (engagement), what has it produced (productivity), how much is being spent (cost), and what exactly was done (audit). claude-code-dashboard unifies these four axes, plus a fifth one - "what does this data mean" (AI analysis) - into a single dashboard.
+    This section explains what questions the dashboard was built to answer, and why gathering the data is hard in the first place. Every design decision in the later sections starts here.
   </p>
   <p>
-    Anthropic provides the raw data to answer these questions via APIs, but each axis has a different source. Engagement and Claude Code productivity come from the Analytics API's engagement family, cost comes from the four cost-family endpoints of the same key, and audit events come from the Compliance API. No single source contains another axis's data, so to see, for example, "output versus spend per user" you have to <strong>join the two sources on email</strong>.
+    Once a team adopts Claude Code, the question "is it being used well" immediately splits into four: who uses it and how often (engagement), what has it produced (productivity), how much is being spent (cost), and what exactly was done (audit). claude-code-dashboard unifies these four axes, plus a fifth one - "what does this data mean" (AI analysis) - into a single dashboard.
   </p>
+  <p>
+    Anthropic provides the raw data to answer these questions via APIs. But each axis has a different source. Engagement and Claude Code productivity come from the engagement family (the bundle of user-activity data) of the Analytics API (the query API that serves an organization's usage statistics).
+  </p>
+  <p>
+    Cost comes from the four cost-family endpoints called with the same key. Audit events come from the Compliance API (the API that serves security events such as logins and permission changes). No single source contains another axis's data, so to see, for example, "output versus spend per user" you have to <strong>join the two sources on email</strong>.
+  </p>
+
+  <p>This table shows which source each of the five measurement axes comes from.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1038,11 +1127,17 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
   </div>
 
   <p>
-    The second problem is query-window limits. The Analytics API's lookback window is 90 days, the engagement family cannot be queried for dates within 3 days of today (the 3-day buffer), and the cost family allows at most a 31-day range per request. The rate limit is 60 rpm per organization rather than per key, so multiple concurrent viewers share the same budget. Quarterly reporting or year-over-year trend analysis is impossible by calling the API directly, and that is why this project adds an S3 archive layer.
+    So why not just call the APIs directly and draw the screens? The second problem, query-window limits, makes that hard. The Analytics API's lookback window is 90 days.
+  </p>
+  <p>
+    The engagement family cannot be queried for dates within 3 days of today (the 3-day buffer). The cost family allows at most a 31-day range per request. The rate limit (the cap on call frequency) is 60 rpm (60 calls per minute) per organization rather than per key, so multiple concurrent viewers share the same budget.
+  </p>
+  <p>
+    As a result, quarterly reporting or year-over-year trend analysis is impossible by calling the API directly. That is why this project adds an S3 archive layer.
   </p>
 
   <p class="lead-def">
-    <b>Principle:</b> the design problem of this dashboard is not "drawing charts" but restructuring APIs with fragmented sources and limited query windows into a joinable, retainable form.
+    <b>Principle:</b> the design problem of this dashboard is not "drawing charts". It is restructuring APIs with fragmented sources and limited query windows into a joinable, retainable form.
   </p>
 </section>
 
@@ -1050,7 +1145,10 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>How It Works - the Data Pipeline</h2>
   <p>
-    The overall structure has three layers: a React SPA in the browser (React 18 + Vite 5 + TypeScript 5, Recharts 2), an Express 4 proxy running on ECS Fargate, and an S3 + Glue + Athena archive responsible for retention beyond the 90-day API window. CloudFront and WAF sit in front of the ALB, and the ALB security group is locked to the CloudFront managed prefix list, blocking direct access.
+    This section follows the data from the Anthropic APIs to the screen. We look at it in three stages: collection, serving, and display.
+  </p>
+  <p>
+    The overall structure has three layers: a React SPA (a single-page app that loads once and then runs without page reloads; React 18 + Vite 5 + TypeScript 5, Recharts 2) in the browser, an Express 4 proxy running on ECS Fargate, and an S3 + Glue + Athena archive responsible for retention beyond the 90-day API window. CloudFront and WAF sit in front of the ALB, and the ALB security group is locked to the CloudFront managed prefix list, blocking direct access.
   </p>
 
   <figure class="diagram">
@@ -1072,25 +1170,37 @@ flowchart LR
 
   <h3>2.1 Collection - the collector Lambda</h3>
   <p>
-    A Node 20 Lambda (<span class="mono">collector/handler.js</span>) runs daily on an EventBridge schedule and snapshots the Analytics API's five engagement endpoints (users, summaries, skills, connectors, projects) plus the Compliance audit feed. Results are written as NDJSON partitions shaped like <span class="mono">s3://&lt;bucket&gt;/&lt;table&gt;/date=YYYY-MM-DD/</span>, read via partition projection by six tables in the Glue Data Catalog (<span class="mono">claude_code_analytics</span>, <span class="mono">summaries_daily</span>, <span class="mono">skills_daily</span>, <span class="mono">connectors_daily</span>, <span class="mono">projects_daily</span>, <span class="mono">compliance_daily</span>). A distinctive detail is the <strong>raw-record sidecar</strong> written under <span class="mono">raw/&lt;table&gt;/</span> so API fields not yet covered by the flattening mapping can be recovered later.
+    A Node 20 Lambda (<span class="mono">collector/handler.js</span>) runs daily on an EventBridge schedule. It snapshots the Analytics API's five engagement endpoints (users, summaries, skills, connectors, projects) plus the Compliance audit feed, exactly as they stand that day.
+  </p>
+  <p>
+    Results are written as NDJSON (a text format with one JSON record per line) into date-partitioned paths shaped like <span class="mono">s3://&lt;bucket&gt;/&lt;table&gt;/date=YYYY-MM-DD/</span>. Six tables in the Glue Data Catalog (<span class="mono">claude_code_analytics</span>, <span class="mono">summaries_daily</span>, <span class="mono">skills_daily</span>, <span class="mono">connectors_daily</span>, <span class="mono">projects_daily</span>, <span class="mono">compliance_daily</span>) read them via partition projection (a Glue feature that treats date folders as table partitions without registering each one).
+  </p>
+  <p>
+    A distinctive detail is the <strong>raw-record sidecar</strong>. The original responses are kept under <span class="mono">raw/&lt;table&gt;/</span> so API fields not yet covered by the flattening mapping can be recovered later.
   </p>
 
   <h3>2.2 Serving - the Express proxy's S3-first strategy</h3>
   <p>
-    Range queries (<span class="mono">/api/analytics/users/range</span> and friends) read the S3 archive first, going out to the live API only for cache-miss dates. The README describes S3-hit responses at roughly 150 ms. Responses carry a cache hint of the form <span class="mono">{"s3_hits": 14, "live_calls": 0}</span>, so archive freshness can be diagnosed at a glance. The server also has a 10-minute in-memory cache, a stale-while-revalidate cost cache, and a keep-warm scheduler that pre-warms the UI's preset windows, letting it sustain multiple viewers within the 60 rpm org-wide budget.
+    Range queries (<span class="mono">/api/analytics/users/range</span> and friends) read the S3 archive first. Only cache-miss dates go out to the live API. How fast is a read from S3? The README describes S3-hit responses at roughly 150 ms.
   </p>
   <p>
-    The 31-day-per-request cap of the cost family is absorbed by the server. <span class="mono">splitCostWindow()</span> (server/aws.js) splits long windows into up to six chunks of 31 days or less and merges them, so the dashboard shows an accurate aggregate for windows up to 186 days in a single query. Anything longer is clamped to the most recent range with a banner notice.
+    Responses carry a cache hint of the form <span class="mono">{"s3_hits": 14, "live_calls": 0}</span>, so archive freshness can be diagnosed at a glance. The server also has a 10-minute in-memory cache, a stale-while-revalidate cost cache (serve the stale copy now, refresh it in the background), and a keep-warm scheduler that pre-warms the UI's preset windows, letting it sustain multiple viewers within the 60 rpm org-wide budget.
+  </p>
+  <p>
+    Then how are queries longer than 31 days handled? The 31-day-per-request cap of the cost family is absorbed by the server. <span class="mono">splitCostWindow()</span> (server/aws.js) splits long windows into up to six chunks of 31 days or less and merges them, so the dashboard shows an accurate aggregate for windows up to 186 days in a single query.
+  </p>
+  <p>
+    Anything longer is clamped to the most recent range. A banner tells you the range was clamped.
   </p>
 
   <h3>2.3 Display - the React SPA</h3>
   <p>
-    The frontend consists of 19 routes, a runtime English/Korean toggle, a date-range control defaulting to 7 days, and a drill-down panel that opens when a user row is clicked. The Analyze, Cost, and Executive pages support PDF export based on print CSS.
+    The frontend consists of 19 routes. It offers a runtime English/Korean toggle, a date-range control defaulting to 7 days, and a drill-down panel that opens when a user row is clicked. The Analyze, Cost, and Executive pages support PDF export based on print CSS.
   </p>
 
   <div class="callout note">
     <span class="callout-title">Note - all three API keys are optional and composable</span>
-    <p>The Analytics, Admin, and Compliance keys are each injected as separate Secrets Manager secrets (ccd/analytics-key and so on), and only the pages backed by a missing key are quietly disabled. Engagement and productivity pages work with the Analytics key alone, and per CLAUDE.md the Analytics key's scope currently covers compliance reads as well, so the server falls back automatically without a dedicated Compliance key.</p>
+    <p>The Analytics, Admin, and Compliance keys are each injected as separate Secrets Manager secrets (ccd/analytics-key and so on). Only the pages backed by a missing key are quietly disabled. Engagement and productivity pages work with the Analytics key alone, and per CLAUDE.md the Analytics key's scope currently covers compliance reads as well, so the server falls back automatically without a dedicated Compliance key.</p>
   </div>
 </section>
 
@@ -1098,17 +1208,23 @@ flowchart LR
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Key Metrics and Formulas</h2>
   <p>
-    The derived metrics this dashboard computes are documented with formulas in docs/metrics-catalog.md. Here we look at four representative metrics used directly in decision-making, as implemented in the code.
+    This section covers how the numbers on the dashboard are actually computed. Knowing the formulas is what keeps you from misreading them.
+  </p>
+  <p>
+    All derived metrics are documented with formulas in docs/metrics-catalog.md. Here we look at four representative metrics used directly in decision-making, as implemented in the code.
   </p>
 
   <h3>3.1 Tool Acceptance Rate</h3>
   <p>
-    The most fundamental quality metric. It is the share of suggestions from Claude Code's four editing tools (<span class="mono">edit</span>, <span class="mono">multi_edit</span>, <span class="mono">write</span>, <span class="mono">notebook_edit</span>) that the user accepted, computed as <span class="mono">accepted / (accepted + rejected)</span>. It combines AI suggestion quality with user trust, and when the denominator is 0 it is left null to distinguish "no data" from "0%".
+    The most fundamental quality metric. It is the share of suggestions from Claude Code's four editing tools (<span class="mono">edit</span>, <span class="mono">multi_edit</span>, <span class="mono">write</span>, <span class="mono">notebook_edit</span>) that the user accepted. It is computed as <span class="mono">accepted / (accepted + rejected)</span>.
+  </p>
+  <p>
+    It combines AI suggestion quality with user trust. When the denominator is 0 it is left null, to distinguish "no data" from "0%".
   </p>
 
   <h3>3.2 User Activity Score</h3>
   <p>
-    A score that ranks users using Analytics data alone, without cost data. It is a weighted sum of five terms, each normalized against a target and clamped to 0..1.
+    A score that ranks users using Analytics data alone, without cost data. It is a weighted sum of five terms, each normalized against a target and then clamped (cut off) to the 0..1 range.
   </p>
 
   <div class="codeblock">
@@ -1122,7 +1238,10 @@ flowchart LR
 
   <h3>3.3 Cost-Efficiency Score v3</h3>
   <p>
-    A score that joins per-user spend (cost family) with output (Analytics) on email and ranks "output per dollar". The code (<span class="mono">scoreEconomicProductivity()</span> in server/aws.js) winsorizes per-surface output (code, cowork, office, design) within each surface's active-user cohort, normalizes it against a median anchor, then divides the average across active surfaces by spend and normalizes again within the cohort to produce the value term.
+    A score that joins per-user spend (cost family) with output (Analytics) on email and ranks "output per dollar". The code is <span class="mono">scoreEconomicProductivity()</span> in server/aws.js.
+  </p>
+  <p>
+    The computation has three steps. Per-surface output (code, cowork, office, design) is winsorized (a statistical treatment that presses extreme values into a bounded range) within each surface's active-user cohort, then normalized against a median anchor. The average across active surfaces is then divided by spend, and that value is normalized again within the cohort to produce the value term.
   </p>
 
   <div class="codeblock">
@@ -1139,12 +1258,15 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 
   <h3>3.4 Actions per Prompt</h3>
   <p>
-    The delegation metric on the Agentic page. Cowork is the only surface providing both <span class="mono">action_count</span> and <span class="mono">message_count</span>, so the metric is computed on Cowork as <span class="mono">sum(action_count) / sum(message_count)</span>; Claude Code has no prompt-count field, so accepted actions per session are used as a proxy. Higher values mean the team delegates more work per instruction.
+    The delegation metric on the Agentic page. It measures how much work the AI handles per single instruction. Higher values mean the team delegates more work per instruction.
+  </p>
+  <p>
+    Cowork is the only surface providing both <span class="mono">action_count</span> and <span class="mono">message_count</span>. So the metric is computed on Cowork as <span class="mono">sum(action_count) / sum(message_count)</span>. Claude Code has no prompt-count field, so accepted actions per session are used as a proxy (a stand-in measure).
   </p>
 
   <div class="callout warn">
     <span class="callout-title">Caution - LOC is not net growth</span>
-    <p><span class="mono">lines_of_code.added_count</span> in Analytics keeps accumulating even when the same code is written and deleted repeatedly within a session. This is why the v3 score in the code discounts churn as <span class="mono">added - 0.5 * removed</span>, and why a raw LOC ranking must not be used as-is for performance evaluation.</p>
+    <p>When counting LOC (lines of code written), <span class="mono">lines_of_code.added_count</span> in Analytics keeps accumulating even when the same code is written and deleted repeatedly within a session. This is why the v3 score in the code discounts churn (code written and then deleted) as <span class="mono">added - 0.5 * removed</span>. A raw LOC ranking must not be used as-is for performance evaluation.</p>
   </div>
 
 </section>
@@ -1153,15 +1275,27 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>The AI Query Layer and Privacy Handling</h2>
   <p>
-    The Analyze page lets you ask natural-language questions of Claude Sonnet 4.6 on Amazon Bedrock (cross-region inference profile <span class="mono">global.anthropic.claude-sonnet-4-6</span>). The server calls the model via <span class="mono">ConverseStream</span> and streams to the browser over SSE, with two modes: Direct mode analyzes the current live snapshot (summaries + users + skills + connectors), while Athena SQL mode has <strong>the model generate and execute SQL itself</strong>, then write a report from the result rows.
+    This section covers how the "ask your data in plain language" feature is implemented, and how personal information is protected along the way. It shows what to watch for when you give an AI access to data.
   </p>
   <p>
-    The model runs as a tool-use chatbot and, per the code (server/chat-tools.js), autonomously calls five tools: <span class="mono">get_analytics_overview</span>, <span class="mono">run_athena_sql</span>, <span class="mono">get_cost_summary</span>, <span class="mono">search_users</span>, and <span class="mono">get_user_usage</span> (per-user live usage up to today), added in v2.0.3. docs/architecture.md still describes four tools, so the code is ahead of the documentation.
+    The Analyze page lets you ask natural-language questions of Claude Sonnet 4.6 on Amazon Bedrock (cross-region inference profile <span class="mono">global.anthropic.claude-sonnet-4-6</span>). The server calls the model via <span class="mono">ConverseStream</span> and delivers the answer over SSE (a streaming technique where the server pushes the response to the browser piece by piece).
+  </p>
+  <p>
+    There are two modes. Direct mode analyzes the current live snapshot (summaries + users + skills + connectors). Athena SQL mode has <strong>the model generate and execute SQL itself</strong>, then write a report from the result rows.
+  </p>
+  <p>
+    The model runs as a tool-use chatbot (tool use means the model picks and calls predefined tools on its own to fetch data). Per the code (server/chat-tools.js), it autonomously calls five tools: <span class="mono">get_analytics_overview</span>, <span class="mono">run_athena_sql</span>, <span class="mono">get_cost_summary</span>, <span class="mono">search_users</span>, and <span class="mono">get_user_usage</span> (per-user live usage up to today), added in v2.0.3. docs/architecture.md still describes four tools, so the code is ahead of the documentation.
   </p>
 
   <h3>4.1 SQL sanitizer - no exception for LLM-generated SQL</h3>
   <p>
-    Every SQL statement headed to Athena, whether typed by a user or generated by the model, must pass the same <span class="mono">sanitizeAthenaQuery()</span>. The validation order is the point. Comments are stripped first and any remaining semicolon is rejected, catching the "second statement hidden behind a comment" attack; then it checks that the query starts with SELECT/WITH, contains no forbidden keywords (23 patterns including INSERT, DROP, ALTER, CREATE, GRANT - the code adds EXEC, DESCRIBE, SHOW, EXPLAIN to the 19 listed in the metrics catalog), and that every FROM/JOIN target is on the table allowlist. The allowlist covers the 6 default tables plus their 6 org2 twins, 12 in total, and validation recurses into CTE aliases and subquery-internal FROMs. IAM restricts the workgroup and database scope once more as a second line of defense.
+    The sanitizer (a validator that filters out dangerous SQL) makes no exceptions. Every SQL statement headed to Athena, whether typed by a user or generated by the model, must pass the same <span class="mono">sanitizeAthenaQuery()</span>.
+  </p>
+  <p>
+    The validation order is the point. Comments are stripped first and any remaining semicolon is rejected, catching the "second statement hidden behind a comment" attack. It then checks that the query starts with SELECT/WITH and contains no forbidden keywords (23 patterns including INSERT, DROP, ALTER, CREATE, GRANT - the code adds EXEC, DESCRIBE, SHOW, EXPLAIN to the 19 listed in the metrics catalog).
+  </p>
+  <p>
+    Finally it checks that every FROM/JOIN target is on the table allowlist (the list of permitted tables). The allowlist covers the 6 default tables plus their 6 org2 twins, 12 in total, and validation recurses into CTE aliases and subquery-internal FROMs. IAM restricts the workgroup and database scope once more as a second line of defense.
   </p>
 
   <div class="codeblock">
@@ -1174,12 +1308,15 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 
   <h3>4.2 Email masking - de-identified by default</h3>
   <p>
-    Every email shown in the UI passes through <span class="mono">maskEmail()</span> (src/lib/format.ts). It keeps only the first 2 characters of the local part, replaces the rest with at least 3 asterisks, and preserves the domain (<span class="mono">alice.kim@acme.com &rarr; al*******@acme.com</span>). The server's LLM system prompt enforces the same masking in responses. Per the v2.0.3 release notes, an early implementation of the new chat tool returned real names alongside masked emails; a pre-release review judged this a re-identification risk and <strong>the real-name field was removed from the tool results</strong>. It is a case of masking being treated as a data contract, not UI decoration.
+    Every email shown in the UI passes through <span class="mono">maskEmail()</span> (src/lib/format.ts). It keeps only the first 2 characters of the local part (the part before the @), replaces the rest with at least 3 asterisks, and preserves the domain (<span class="mono">alice.kim@acme.com &rarr; al*******@acme.com</span>). The server's LLM system prompt enforces the same masking in responses.
+  </p>
+  <p>
+    There is a case where this principle actually kicked in. Per the v2.0.3 release notes, an early implementation of the new chat tool returned real names alongside masked emails. A pre-release review judged this a re-identification risk, <strong>the real-name field was removed from the tool results</strong>, and it stands as a case of masking being treated as a data contract, not UI decoration.
   </p>
 
   <div class="callout warn">
     <span class="callout-title">Caution - IPs and UAs in the audit feed are PII</span>
-    <p>Compliance API events include the actor's IP address and User-Agent. The dashboard displays these in the UI, but the metrics catalog recommends masking them when passing them into LLM prompts. If you adapt this dashboard and wire audit data into the chat tools, apply the same standard.</p>
+    <p>Compliance API events include the actor's IP address and User-Agent (browser identification string), which are PII (personally identifiable information). The dashboard displays these in the UI, but the metrics catalog recommends masking them when passing them into LLM prompts. If you adapt this dashboard and wire audit data into the chat tools, apply the same standard.</p>
   </div>
 </section>
 
@@ -1187,8 +1324,13 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Page Structure Overview</h2>
   <p>
-    There are 19 pages as of v2.0.3 (the route count in <span class="mono">src/pages/</span>). Rather than listing every page, grouping them by data source makes the structure clear: pages in the same group are different views over the same server routes.
+    This section lays out which screens the dashboard has and how they relate to each other. The point is that the page count is large but the structure is simple.
   </p>
+  <p>
+    How many pages are there? 19 as of v2.0.3 (the route count in <span class="mono">src/pages/</span>). Rather than listing every page, grouping them by data source makes the structure clear, and pages in the same group are different views over the same server routes.
+  </p>
+
+  <p>This table shows how the 19 pages fall into six domains and which source each domain reads.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1208,26 +1350,37 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
   </div>
 
   <p>
-    The recurring UI patterns are fewer than the page count. A KPI card row, Recharts chart cards, sortable user tables, the date-range control (7d / 14d / 30d presets plus custom, shareable via URL query), and the row-click drill-down panel are reused on nearly every page. The Executive page condenses these building blocks into a single CFO/CTO snapshot with 12 range-linked KPIs and PDF export.
+    The recurring UI patterns are fewer than the page count. A KPI card row, Recharts chart cards, sortable user tables, the date-range control (7d / 14d / 30d presets plus custom, shareable via URL query), and the row-click drill-down panel are reused on nearly every page.
+  </p>
+  <p>
+    The Executive page condenses these building blocks into a single CFO/CTO snapshot. It offers 12 range-linked KPIs and PDF export.
   </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Operations in Practice - Deployment and Collection Cadence</h2>
+  <p>
+    This section covers what it takes to actually stand up and run this dashboard. That means the effort and money of deployment, plus the rhythm at which the data refreshes.
+  </p>
 
   <h3>6.1 Deployment</h3>
   <p>
-    The infrastructure is defined as four AWS CDK (TypeScript) stacks (network / storage / compute / collector). The runtime is two ECS Fargate ARM64 tasks (0.5 vCPU, 1 GB each), and deployment is a single <span class="mono">npx cdk deploy --all</span>. After deployment, injecting the API keys into Secrets Manager switches the dashboard to live data. Authentication is handled by Cognito Hosted UI and <strong>four Lambda@Edge functions</strong> (check-auth, parse-auth, refresh-auth, sign-out); unauthenticated traffic is blocked at the CloudFront edge before it ever reaches WAF / ALB / ECS.
+    The infrastructure is defined as four AWS CDK (TypeScript) stacks (network / storage / compute / collector). The runtime is two ECS Fargate ARM64 tasks (0.5 vCPU, 1 GB each), and deployment is a single <span class="mono">npx cdk deploy --all</span>. After deployment, injecting the API keys into Secrets Manager switches the dashboard to live data.
   </p>
   <p>
-    The README's cost estimate (ap-northeast-2, reusing an existing VPC) is roughly $66 to $70 per month of fixed infrastructure, and depending on Bedrock analysis query volume, roughly $80 per month for light use, $130 for moderate, and $250 for heavy. Creating a new VPC adds about $43 of NAT Gateway cost.
+    Authentication is handled by Cognito Hosted UI and <strong>four Lambda@Edge functions</strong> (check-auth, parse-auth, refresh-auth, sign-out). Unauthenticated traffic is blocked at the CloudFront edge before it ever reaches WAF / ALB / ECS.
+  </p>
+  <p>
+    How much does it cost? The README's estimate (ap-northeast-2, reusing an existing VPC) is roughly $66 to $70 per month of fixed infrastructure. Depending on Bedrock analysis query volume it is roughly $80 per month for light use, $130 for moderate, and $250 for heavy, and creating a new VPC adds about $43 of NAT Gateway cost.
   </p>
 
   <h3>6.2 Collection cadence</h3>
   <p>
     Collection runs twice a day on schedules with different purposes. The chosen times have reasons.
   </p>
+
+  <p>This table shows the two schedules' run times and why each time was chosen.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1243,7 +1396,10 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
   </div>
 
   <p>
-    The live path has its own cadence. The server pre-warms the audit cache and engagement preset windows every 5 minutes and the cost cache every 8 minutes, so the first visitor never waits for the 12-to-30-second upstream group queries. The cost-family data itself refreshes on a roughly 4-hour watermark (<span class="mono">data_refreshed_at</span>) and can be corrected for up to about 30 days after the usage date, so same-day figures are shown as partial data.
+    The live path has its own cadence. The server pre-warms the audit cache and engagement preset windows every 5 minutes, and the cost cache every 8 minutes. As a result, the first visitor never waits for the 12-to-30-second upstream group queries.
+  </p>
+  <p>
+    The cost-family data itself refreshes on a roughly 4-hour watermark (a timestamp marking how far the data has been updated, <span class="mono">data_refreshed_at</span>). It can be corrected for up to about 30 days after the usage date, so same-day figures are shown as partial data.
   </p>
 </section>
 
@@ -1251,14 +1407,14 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Limitations</h2>
   <p>
-    Most of this dashboard's limitations are limitations of the source APIs. Here is what you should know before an adoption decision.
+    This section collects the traps to know about before you trust the dashboard's numbers. Most of them are limitations of the source APIs rather than of the dashboard itself, and they are worth checking before an adoption decision.
   </p>
   <ul class="plain">
     <li><strong>Usage via Bedrock / Vertex counts as zero.</strong> Both the Analytics API and the Spend Report CSV reflect only the Anthropic 1st-party path, so organizations running Claude Code through Bedrock will see dashboard numbers diverge from actual usage.</li>
     <li>Engagement data is finalized after a 3-day buffer. Only the cost family can be queried for "today", and even that is partial data on a roughly 4-hour watermark.</li>
     <li>The API has no dimension linking users to skills. The skill cards in the user detail panel are org-wide, and the UI says so explicitly.</li>
     <li>The Spend Report CSV contains only period-to-date totals with no per-day breakdown, and since the Console offers no export API, uploads are manual.</li>
-    <li>The join key between spend and output is email, so case variations cause mismatches, and in an organization of around 10 people a single outlier dominates the score distribution - read the scores as relative rankings within the organization, not absolute values.</li>
+    <li>The join key between spend and output is email, so case variations cause mismatches. In an organization of around 10 people a single outlier dominates the score distribution, so read the scores as relative rankings within the organization, not absolute values.</li>
   </ul>
 </section>
 
@@ -1266,13 +1422,19 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
 <section class="sec" id="s8-en">
   <h2><span class="no">08</span>Conclusion</h2>
   <p>
+    This section turns the analysis so far into a recommendation you can use for an adoption decision.
+  </p>
+  <p>
     claude-code-dashboard is a project that binds Anthropic's scattered observability APIs into a single operational tool. What deserves technical attention is not the screens but the decisions underneath them: the S3-first strategy that steps past the 90-day window with an S3 archive, the server that absorbs the 31-day cap by chunk-merging to aggregate windows up to 186 days accurately, the SELECT-only sanitizer applied without exception to LLM-generated SQL, and the privacy handling that treats masking as a data contract.
   </p>
   <p>
-    The adoption recommendation is incremental. Priority one is deploying with a single Analytics key to get the engagement and productivity pages - that alone gives you DAU/WAU/MAU, acceptance rate, and the activity score. When the cost axis becomes necessary, the same key's cost family already covers it, so open the Cost page; add Compliance access when audit requirements appear. The scoring formulas (activity score, economic productivity v3) are isolated as pure functions in the code, making it easy to tune the weights to your organization's definitions.
+    The adoption recommendation is incremental. Priority one is deploying with a single Analytics key to get the engagement and productivity pages. That alone gives you DAU/WAU/MAU, acceptance rate, and the activity score.
+  </p>
+  <p>
+    When the cost axis becomes necessary, the same key's cost family already covers it, so just open the Cost page. Add Compliance access when audit requirements appear. The scoring formulas (activity score, economic productivity v3) are isolated as pure functions in the code, making it easy to tune the weights to your organization's definitions.
   </p>
   <p class="lead-def">
-    <b>Bottom line:</b> the value of this project is not the charts but the pipeline design that turns heavily constrained observability APIs into a retainable, joinable, queryable data layer.
+    <b>To sum it up in one sentence,</b> the value of this project is not the charts but the pipeline design that turns heavily constrained observability APIs into a retainable, joinable, queryable data layer.
   </p>
 </section>
 

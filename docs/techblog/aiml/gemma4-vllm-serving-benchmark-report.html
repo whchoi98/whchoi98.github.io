@@ -573,7 +573,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <p class="eyebrow">LLM SERVING / BENCHMARK REPORT</p>
   <h1>Gemma-4-31B vLLM 서빙 PoC 벤치마크 상세 결과</h1>
   <p class="subtitle">
-    Gemma-4-31B를 EKS와 Karpenter 위 vLLM으로 서빙하며 처리량, 기동 시간, 한국어 수용률을 측정한 PoC입니다. L40S(g6e) 기준선 28조합에서 시작해 스타트업 단축 A/B, FP8과 한국어 speculative decoding 후속 실험을 거쳐 g7e(RTX PRO 6000 Blackwell) 본판정까지의 실측치를 정리합니다.
+    Gemma-4-31B 모델을 vLLM으로 서빙하며 처리량, 기동 시간, 한국어 수용률을 측정한 PoC입니다. 실험은 EKS와 Karpenter 위에서 진행했습니다. L40S(g6e) 기준선 28조합에서 출발해 스타트업 단축 A/B, FP8과 한국어 speculative decoding 후속 실험을 지나 g7e(RTX PRO 6000 Blackwell) 본판정까지의 실측치를 정리합니다.
   </p>
 
   <div class="stat" role="img" aria-label="S1 채팅 최대 처리량이 L40S 536 tok/s에서 g7e 1,871 tok/s로 증가">
@@ -600,10 +600,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>L40S(g6e.2xlarge)에서 S1 채팅 최대 <strong>536 tok/s</strong>, 동일 워크로드를 g7e(RTX PRO 6000 Blackwell)로 옮기면 1,871 tok/s로 전 시나리오 3.49배에서 4.83배 높습니다.</li>
-    <li>g7e의 우위는 FP4 텐서코어 네이티브 커널과 96GB GDDR7에서 나옵니다. KV 캐시가 125,023 tokens까지 확보되어 L40S가 포화하던 고동시성 구간의 preemption이 사라집니다.</li>
-    <li>PoC 판정 기준인 처리량/GPU 1.5배를 3배에서 5배까지 상회하며, Spot 가격($1.50/hr)을 반영한 비용 효율은 6배에서 9배입니다. 다만 당근 현행 GPU당 처리량 수치가 아직 입력되지 않아 배율 확정은 그 값 확보 후로 남습니다.</li>
-    <li>스타트업은 runai_streamer S3 직결과 compile 캐시 영속화로 콜드 537초에서 웜 155초로 줄었고, 가중치 로드는 12xlarge NVMe와 g7e에서 19~18초까지 내려갑니다. 한국어 지연은 공식 MTP assistant(수용률 56%)로 2.6배 단축됩니다. 권장 프로덕션 구성은 6절에 정리합니다.</li>
+    <li>기존 GPU인 L40S(g6e.2xlarge)에서 S1 채팅 처리량은 최대 <strong>536 tok/s</strong>입니다. 같은 작업을 신형 g7e(RTX PRO 6000 Blackwell)로 옮기면 1,871 tok/s가 되고, 네 시나리오 전부에서 3.49배에서 4.83배 높습니다.</li>
+    <li>g7e의 우위는 4비트 연산(FP4)을 하드웨어가 직접 처리하는 커널과 96GB GDDR7 메모리에서 나옵니다. 문맥 저장 공간인 KV 캐시가 125,023 tokens까지 확보되어, L40S가 포화하던 고동시성 구간의 강제 중단(preemption)이 사라집니다.</li>
+    <li>합격 기준인 GPU당 처리량 1.5배를 3배에서 5배까지 상회하며, Spot 가격($1.50/hr)을 반영한 비용 효율은 6배에서 9배입니다. 다만 당근 현행 GPU당 처리량 수치가 아직 입력되지 않아 배율 확정은 그 값 확보 후로 남습니다.</li>
+    <li>서버 기동은 로더 교체(runai_streamer S3 직결)와 compile 캐시 영속화로 콜드 537초에서 웜 155초로 줄었고, 가중치 로드는 12xlarge NVMe와 g7e에서 19~18초까지 내려갑니다. 한국어 지연은 공식 MTP assistant(수용률 56%)로 2.6배 단축되며, 권장 프로덕션 구성은 별도 절에 정리합니다.</li>
   </ul>
 </section>
 
@@ -629,10 +629,22 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>배경과 판정 기준</h2>
   <p>
-    이 PoC의 질문은 하나입니다. Gemma-4-31B를 vLLM으로 서빙할 때 <strong>GPU당 처리량이 현행 대비 1.5배 이상</strong>이면 동일 트래픽을 더 적은 레플리카로 감당할 수 있고, 그러면 서빙 레플리카를 12개에서 8개로 줄이는 근거가 됩니다. 판정 대상은 채팅, 요약, 분류, 장문 RAG 네 가지 실사용형 워크로드입니다.
+    이 절은 이번 측정을 왜 했고, 어떤 결과가 나오면 성공으로 볼지 정리합니다. 판정 기준을 먼저 정해 두어야 뒤의 수치를 같은 잣대로 읽을 수 있습니다.
   </p>
   <p>
-    측정은 두 단계로 진행했습니다. 먼저 확보가 쉬운 L40S(g6e) 위에서 기준선을 잡고 서빙 파이프라인의 병목(스타트업, 양자화 포맷, 한국어 지연)을 정리한 뒤, FP4 텐서코어를 네이티브로 갖춘 g7e(RTX PRO 6000 Blackwell)를 Spot으로 확보해 본판정을 냈습니다. 처리량 지표는 output tok/s와 req/s, 지연 지표는 TTFT(첫 토큰까지)와 ITL(토큰 사이 간격)을 봅니다.
+    이 PoC의 질문은 하나입니다. Gemma-4-31B를 vLLM으로 서빙할 때 <strong>GPU당 처리량이 현행 대비 1.5배 이상</strong> 나오는지입니다. vLLM은 대규모 언어 모델을 API 서비스 형태로 돌리는 오픈소스 서빙 엔진입니다.
+  </p>
+  <p>
+    처리량이 1.5배가 되면 같은 트래픽을 더 적은 서버로 감당할 수 있습니다. 그러면 서빙 레플리카를 12개에서 8개로 줄이는 근거가 됩니다. 판정 대상은 채팅, 요약, 분류, 장문 RAG 네 가지 실사용형 워크로드입니다.
+  </p>
+  <p>
+    측정은 두 단계로 진행했습니다. 먼저 확보가 쉬운 L40S(g6e) 위에서 기준선을 잡고, 서빙 파이프라인의 병목인 스타트업, 양자화 포맷, 한국어 지연을 정리했습니다. 양자화는 모델 가중치를 낮은 정밀도 숫자로 줄여 메모리와 연산을 아끼는 기법입니다.
+  </p>
+  <p>
+    그다음 FP4 텐서코어를 네이티브로 갖춘 g7e(RTX PRO 6000 Blackwell)를 Spot으로 확보해 본판정을 냈습니다. Spot은 클라우드의 남는 용량을 할인가에 빌리는 방식입니다.
+  </p>
+  <p>
+    지표는 네 가지를 봅니다. 처리량은 output tok/s(초당 생성 토큰 수)와 req/s(초당 처리 요청 수)로 잽니다. 지연은 TTFT(첫 토큰이 나올 때까지 걸리는 시간)와 ITL(토큰과 토큰 사이 간격)로 잽니다.
   </p>
 
   <div class="callout note">
@@ -645,7 +657,13 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s2">
   <h2><span class="no">02</span>실험 환경과 방법</h2>
   <p>
-    서울 리전 EKS 클러스터(GPU01)의 <span class="mono">serving</span> 네임스페이스에 vLLM v0.26.0을 배포하고, 모델 가중치는 S3 버킷에서 <span class="mono">runai_streamer</span>로 직접 적재했습니다. 세 가지 인스턴스 세대를 용도에 맞게 나눠 썼습니다.
+    이 절은 실험을 돌린 장비와 측정 방법을 설명합니다. 뒤에 나오는 모든 수치는 여기서 정한 조건 위에서 읽어야 합니다.
+  </p>
+  <p>
+    서울 리전 EKS 클러스터(GPU01)의 <span class="mono">serving</span> 네임스페이스에 vLLM v0.26.0을 배포했습니다. EKS는 AWS의 관리형 Kubernetes 서비스이고, GPU 노드 확보는 자동 프로비저너인 Karpenter가 맡습니다. 모델 가중치는 S3 버킷에서 <span class="mono">runai_streamer</span>로 직접 적재했는데, 이는 가중치 파일을 S3에서 GPU로 병렬 스트리밍하는 vLLM 로더입니다.
+  </p>
+  <p>
+    인스턴스는 세 가지 세대를 용도에 맞게 나눠 썼습니다. 표 1에서는 각 인스턴스의 GPU 사양과 어떤 실험에 썼는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -664,7 +682,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <h3>2.1 워크로드 정의</h3>
   <p>
-    네 시나리오는 입력 길이와 출력 길이로 실사용 패턴을 모사합니다. 각 시나리오를 동시성 1, 2, 4, 8, 16, 32, 64로 스윕해 시나리오당 7조합, 전체 28조합을 <span class="mono">vllm bench serve</span>로 측정했습니다.
+    네 시나리오는 입력 길이와 출력 길이로 실사용 패턴을 모사합니다. 각 시나리오를 동시성 1, 2, 4, 8, 16, 32, 64로 바꿔 가며 재서 시나리오당 7조합, 전체 28조합을 <span class="mono">vllm bench serve</span>로 측정했습니다. 프리필은 입력 프롬프트를 한꺼번에 읽어 들이는 첫 단계를 가리킵니다.
+  </p>
+  <p>
+    표 2에서는 각 시나리오의 입력/출력 토큰 길이와 그것이 흉내 내는 실제 작업을 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -684,7 +705,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <div class="callout note">
     <span class="callout-title">참고 - 양자화 포맷별 커널 경로</span>
-    <p>같은 NVFP4 가중치라도 GPU 세대에 따라 실행 커널이 다릅니다. L40S(SM89)는 FP4 텐서코어가 없어 NVFP4가 <span class="mono">Marlin</span> W4A16으로 자동 폴백되고, g7e(Blackwell)는 <span class="mono">FlashInferCutlassNvFp4</span> 네이티브로 돕니다. FP8 W8A8은 L40S에서도 Ada FP8 텐서코어로 네이티브 실행이며 폴백이 아닙니다.</p>
+    <p>NVFP4는 4비트, FP8은 8비트 부동소수점 양자화 포맷입니다. 같은 NVFP4 가중치라도 GPU 세대에 따라 실행 커널이 다릅니다. L40S(SM89)는 FP4 텐서코어가 없어 NVFP4가 <span class="mono">Marlin</span> W4A16 커널로 자동 폴백(대체 실행)되고, g7e(Blackwell)는 <span class="mono">FlashInferCutlassNvFp4</span> 네이티브로 돕니다. FP8 W8A8은 L40S에서도 Ada FP8 텐서코어로 네이티브 실행이며 폴백이 아닙니다.</p>
   </div>
 </section>
 
@@ -692,7 +713,13 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s3">
   <h2><span class="no">03</span>L40S 기준선 28조합</h2>
   <p>
-    nvidia/Gemma-4-31B-IT-NVFP4를 8K 컨텍스트, KV 캐시 31,344 tokens, speculative decoding 끔 조건으로 측정했습니다. 시나리오별 최대 처리량과 그 지점의 동시성은 아래와 같습니다.
+    이 절은 기존 세대 GPU인 L40S에서 잰 출발점 수치를 다룹니다. 뒤에서 g7e가 얼마나 빨라졌는지 계산할 때 이 값이 분모가 됩니다.
+  </p>
+  <p>
+    측정 조건은 nvidia/Gemma-4-31B-IT-NVFP4, 8K 컨텍스트, KV 캐시 31,344 tokens, speculative decoding 끔입니다. KV 캐시는 앞서 처리한 문맥의 중간 계산을 담아 두는 GPU 메모리 영역이고, 이 용량이 동시 처리 한도를 정합니다. speculative decoding은 작은 모델이 미리 추측한 토큰을 본 모델이 한 번에 검증하는 가속 기법인데, 이 라운드에서는 껐습니다.
+  </p>
+  <p>
+    첫 질문은 각 시나리오가 최대 몇 tok/s까지 나오는가입니다. 표 3에서는 시나리오별 최대 처리량과 그 최대가 나온 동시성 지점을 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -711,7 +738,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    S1 채팅의 동시성 곡선을 펼치면 포화 구조가 드러납니다. 처리량은 동시성 64까지 계속 오르지만 TTFT는 동시성 32를 넘어서며 <strong>급격히 나빠집니다</strong>. 짧은 입력/출력이라 KV 압박이 가장 덜한 시나리오인데도 그렇습니다.
+    S1 채팅의 동시성 곡선을 펼치면 포화 구조가 드러납니다. 처리량은 동시성 64까지 계속 오릅니다. 그러나 첫 토큰 지연(TTFT)은 동시성 32를 넘어서며 <strong>급격히 나빠집니다</strong>.
+  </p>
+  <p>
+    짧은 입력과 출력이라 KV 압박이 가장 덜한 시나리오인데도 그렇습니다. 표 4에서는 동시성을 올릴 때 처리량과 지연이 어느 지점에서 갈라지는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -734,7 +764,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <div class="callout warn">
     <span class="callout-title">주의 - 기준선은 g7e 판정치가 아닙니다</span>
-    <p>이 표의 값은 L40S에서 NVFP4가 Marlin W4A16으로 폴백 실행된 결과입니다. FP4 네이티브인 g7e 판정과 직접 비교하면 안 되고, 6절의 배율 계산에서만 분모로 씁니다. 또한 이 라운드는 수집 스크립트 버그로 GPU 사용률 컬럼이 기록되지 않았습니다.</p>
+    <p>이 표의 값은 L40S에서 NVFP4가 Marlin W4A16으로 폴백 실행된 결과입니다. FP4 네이티브인 g7e 판정과 직접 비교하면 안 됩니다. 6절의 배율 계산에서 분모로만 씁니다. 또한 이 라운드는 수집 스크립트 버그로 GPU 사용률 컬럼이 기록되지 않았습니다.</p>
   </div>
 </section>
 
@@ -742,16 +772,25 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s4">
   <h2><span class="no">04</span>스타트업 단축 A/B</h2>
   <p>
-    콜드 스타트 537초(8분 57초)를 분해하면 가중치 로드 149초, torch.compile 73초, 신규 노드 확보 48초, 이미지 pull 82초입니다. 구성을 바꿔가며 이 병목을 어디까지 줄일 수 있는지 측정했습니다. 측정 구간은 pod 생성부터 <span class="mono">/health</span> 200 도달까지이고, 구간 분해는 vLLM 기동 로그 기준입니다(vLLM v0.26.0, 2026-08-05~06 수동 계측).
+    이 절은 서버가 켜져서 요청을 받기까지 걸리는 시간, 즉 스타트업을 어디까지 줄일 수 있는지 다룹니다. 새 GPU 노드가 뜰 때마다 반복되는 비용이라 운영에서 체감이 큰 항목입니다.
   </p>
   <p>
-    비교 기준선은 당근 현행 경로입니다. HuggingFace &rarr; S3 sync &rarr; S3 Mountpoint 위에서
-    <span class="mono">runai_streamer</span>(concurrency 32, memory_limit 8GiB)로 로드하는 구성으로,
-    기동 시간은 16분에서 5분까지 개선된 상태였습니다. 이번 실측은 같은 경로의 병목을 구간별로 확인하고
-    구성만 바꿔 재측정한 것입니다.
+    먼저 콜드 스타트(캐시가 전혀 없는 첫 기동) 537초(8분 57초)를 단계별로 분해했습니다. 가중치 로드 149초, torch.compile 73초, 신규 노드 확보 48초, 이미지 pull 82초입니다. torch.compile은 모델 실행 코드를 첫 기동 때 최적화 컴파일하는 단계입니다.
+  </p>
+  <p>
+    구성을 바꿔가며 이 병목을 어디까지 줄일 수 있는지 측정했습니다. 측정 구간은 pod 생성부터 <span class="mono">/health</span> 200 도달까지이고, 구간 분해는 vLLM 기동 로그 기준입니다(vLLM v0.26.0, 2026-08-05~06 수동 계측).
+  </p>
+  <p>
+    비교 기준선은 당근 현행 경로입니다. HuggingFace &rarr; S3 sync &rarr; S3 Mountpoint 위에서 <span class="mono">runai_streamer</span>(concurrency 32, memory_limit 8GiB)로 로드하는 구성입니다. Mountpoint는 S3 버킷을 파일시스템처럼 마운트해 주는 FUSE 도구입니다.
+  </p>
+  <p>
+    이 경로의 기동 시간은 이미 16분에서 5분까지 개선된 상태였습니다. 이번 실측은 같은 경로의 병목을 구간별로 확인하고 구성만 바꿔 재측정한 것입니다.
   </p>
 
   <h3>4.1 구성별 A/B - g6e.2xlarge</h3>
+  <p>
+    어떤 구성이 몇 초를 아끼는지가 질문입니다. 표 5에서는 구성별 총 기동 시간과, 그중 가중치 로드와 torch.compile이 차지하는 몫을 봅니다.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -792,7 +831,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </figure>
 
   <p>
-    가장 큰 효과는 가중치 로드 경로 교체에서 나왔습니다. Mountpoint FUSE는 149초(실효 1.75Gbps)가 걸린 반면 <span class="mono">runai_streamer</span> S3 직결은 29초에서 32초(실효 8.2Gbps, concurrency 64, memory_limit 24GiB)로 <strong>약 5배 빠릅니다</strong>. compile 캐시를 노드에 영속화하면 재기동 시 컴파일 73초가 8.5초로 줄어 공짜로 55초를 회수하고, 엔진 초기화도 93초에서 25초로 줄어듭니다.
+    가장 큰 효과는 가중치 로드 경로 교체에서 나왔습니다. Mountpoint FUSE는 149초(실효 1.75Gbps)가 걸렸습니다. 반면 <span class="mono">runai_streamer</span> S3 직결은 29초에서 32초(실효 8.2Gbps, concurrency 64, memory_limit 24GiB)로 <strong>약 5배 빠릅니다</strong>.
+  </p>
+  <p>
+    compile 캐시를 노드에 영속화하면 재기동 시 컴파일이 73초에서 8.5초로 줄어 55초를 공짜로 회수합니다. 엔진 초기화도 93초에서 25초로 줄어듭니다.
   </p>
 
   <figure class="diagram">
@@ -810,23 +852,22 @@ flowchart LR
 
   <div class="callout note">
     <span class="callout-title">참고 - sleep 모드로 유휴 GPU 반납</span>
-    <p>유휴 시 <span class="mono">/sleep</span>으로 26.8초 만에 GPU 메모리 45.4GB에서 14.7GB로 30GB를 반납하고, 수요가 오면 <span class="mono">/wake_up</span>으로 3.6초에 복귀했습니다. 155초 풀 재기동 대비 약 40배 빠른 복귀라, 자동 GPU 할당의 구조적 대안이 됩니다.</p>
+    <p>sleep 모드는 놀고 있는 서버의 GPU 메모리를 잠시 반납해 두는 vLLM 기능입니다. 유휴 시 <span class="mono">/sleep</span>으로 26.8초 만에 GPU 메모리 45.4GB에서 14.7GB로 30GB를 반납하고, 수요가 오면 <span class="mono">/wake_up</span>으로 3.6초에 복귀했습니다. 155초 풀 재기동 대비 약 40배 빠른 복귀라, 자동 GPU 할당의 구조적 대안이 됩니다.</p>
   </div>
 
   <h3>4.2 인스턴스 / 스토리지 축 - 12xlarge NVMe와 g7e</h3>
   <p>
-    같은 <span class="mono">runai_streamer</span> 직결이라도 인스턴스와 스토리지에 따라 로드 시간이 더 내려갑니다.
-    가중치 로드만 보면 Mountpoint 149초 &rarr; 2xlarge 직결 29~32초 &rarr; 12xlarge 19초 &rarr; g7e 18초의 계열입니다.
+    같은 <span class="mono">runai_streamer</span> 직결이라도 인스턴스와 스토리지에 따라 로드 시간이 더 내려갑니다. 가중치 로드만 보면 Mountpoint 149초 &rarr; 2xlarge 직결 29~32초 &rarr; 12xlarge 19초 &rarr; g7e 18초의 계열입니다. NVMe는 노드에 직접 붙은 고속 로컬 SSD를 말합니다.
   </p>
   <ul class="plain">
-    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - 가중치 로드 <strong>19초</strong>. FP8과 NVFP4 두 모델(합계 66GB)을 같은 노드에서 동시에 로드하는 중에도 이 값이었고, Mountpoint 대비 7.8배입니다. 콜드 스타트(신규 노드 확보 + 이미지 pull + 로딩)는 2모델 동시 기준 380초였습니다. Karpenter NodePool에 <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 인스턴스 스토어 3.8TB가 자동 구성되고, runai는 concurrency 128 / memory_limit 64GiB를 사용했습니다.</li>
+    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - 가중치 로드 <strong>19초</strong>. FP8과 NVFP4 두 모델(합계 66GB)을 같은 노드에서 동시에 로드하는 중에도 이 값이었고, Mountpoint 대비 7.8배입니다. 콜드 스타트(신규 노드 확보 + 이미지 pull + 로딩)는 2모델 동시 기준 380초였습니다. Karpenter NodePool에 <span class="mono">instanceStorePolicy: RAID0</span> 한 줄만 넣으면 인스턴스 스토어 3.8TB가 자동 구성됩니다. runai는 concurrency 128 / memory_limit 64GiB를 사용했습니다.</li>
     <li><b>g7e.2xlarge (Spot)</b> - 6절 본판정 환경에서 가중치 로드 <strong>18초</strong>였습니다. 로딩 구간 분해는 g6e 계열에서만 수행했으므로 g7e는 가중치 로드 단일 값입니다.</li>
   </ul>
 
   <h3>4.3 한계</h3>
   <ul class="plain">
-    <li>콜드 스타트는 재현 비용이 커서 반복 측정하지 못했습니다. 신규 노드에는 compile 캐시가 없으므로 최적 구성의 콜드 기동은 약 4.5분으로 추정치입니다.</li>
-    <li>concurrency는 인스턴스와 함께 바뀌어(32 &rarr; 64 &rarr; 128) 단독 효과를 분리하지 못했습니다.</li>
+    <li>콜드 스타트는 재현 비용이 커서 반복 측정하지 못했습니다. 신규 노드에는 compile 캐시가 없으므로, 최적 구성의 콜드 기동 약 4.5분은 추정치입니다.</li>
+    <li>concurrency 값이 인스턴스와 함께 바뀌어(32 &rarr; 64 &rarr; 128) 단독 효과를 분리하지 못했습니다.</li>
     <li>NVMe 프리스테이징 후 로컬 로드, fastsafetensors + GDS, FSx for Lustre, EBS 스냅샷 FSR, S3 Express One Zone은 미측정 대안으로 남아 있습니다.</li>
   </ul>
 </section>
@@ -834,10 +875,16 @@ flowchart LR
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
   <h2><span class="no">05</span>후속 실험: FP8, 스케일업, 한국어 draft</h2>
+  <p>
+    이 절은 기준선 이후에 남은 세 가지 질문을 실험으로 확인합니다. 양자화 포맷은 무엇이 나은지, 더 큰 인스턴스가 얼마나 이득인지, 한국어 응답을 빠르게 할 초안(draft) 모델은 무엇인지입니다.
+  </p>
 
   <h3>5.1 FP8-dynamic 대 NVFP4</h3>
   <p>
     g6e.12xlarge 한 노드에 FP8 pod와 NVFP4 pod를 GPU 격리로 동시에 올려 같은 조건에서 비교했습니다. 결론은 워크로드에 따라 갈립니다. 초저지연 채팅은 NVFP4가, 요약과 RAG 같은 고동시성 종합 워크로드는 <strong>FP8에 fp8 KV를 켠 구성</strong>이 앞섭니다.
+  </p>
+  <p>
+    fp8 KV는 KV 캐시 자체도 8비트로 저장해 같은 메모리에 더 긴 문맥을 담는 옵션입니다. 표 6에서는 시나리오와 동시성 조합별로 어느 포맷이 이겼는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -858,17 +905,26 @@ flowchart LR
 
   <div class="callout warn">
     <span class="callout-title">주의 - FP8 체크포인트는 fp8 KV를 명시해야 합니다</span>
-    <p>FP8-dynamic 체크포인트는 <span class="mono">kv_cache_scheme</span>이 <span class="mono">None</span>이라 기본 KV가 BF16으로 잡히고, 고동시성에서 KV 부족으로 실력을 못 냅니다. <span class="mono">--kv-cache-dtype fp8</span>을 붙이면 KV 용량이 12,150에서 23,320 tokens로 늘어 S2와 S4에서 NVFP4를 역전합니다. 이 플래그를 빠뜨린 채 FP8이 느리다고 판단하는 것이 가장 흔한 실수입니다.</p>
+    <p>FP8-dynamic 체크포인트는 <span class="mono">kv_cache_scheme</span>이 <span class="mono">None</span>이라 기본 KV가 BF16으로 잡힙니다. 그래서 고동시성에서 KV 부족으로 실력을 못 냅니다. <span class="mono">--kv-cache-dtype fp8</span>을 붙이면 KV 용량이 12,150에서 23,320 tokens로 늘어 S2와 S4에서 NVFP4를 역전합니다. 이 플래그를 빠뜨린 채 FP8이 느리다고 판단하는 것이 가장 흔한 실수입니다.</p>
   </div>
 
   <h3>5.2 g6e.12xlarge 스케일업</h3>
   <p>
-    100Gbps NIC과 NVMe RAID0를 갖춘 12xlarge에서는 <span class="mono">runai_streamer</span> 가중치 로드가 두 모델(66GB)을 동시에 올리는 중에도 19초로 끝났습니다. Mountpoint 149초 대비 <strong>7.8배</strong>입니다. <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 NVMe 3.8TB가 kubelet ephemeral-storage로 자동 구성됩니다.
+    더 큰 인스턴스는 로딩을 얼마나 앞당길까가 질문입니다. 100Gbps NIC과 NVMe RAID0를 갖춘 12xlarge에서는 <span class="mono">runai_streamer</span> 가중치 로드가 두 모델(66GB)을 동시에 올리는 중에도 19초로 끝났습니다. Mountpoint 149초 대비 <strong>7.8배</strong>입니다.
+  </p>
+  <p>
+    설정도 간단합니다. <span class="mono">instanceStorePolicy: RAID0</span> 한 줄로 NVMe 3.8TB가 kubelet ephemeral-storage로 자동 구성됩니다.
   </p>
 
   <h3>5.3 한국어 speculative decoding</h3>
   <p>
-    당근형 한국어 프롬프트 200개로 draft 모델의 수용률을 측정했습니다. 공식 MTP speculator인 <span class="mono">google/gemma-4-31B-it-assistant</span>가 <strong>수용률 56%</strong>로, 축소 어휘(32K vocab) EAGLE3의 5.6% 대비 10배 높았습니다. 전체 262K vocab을 그대로 쓰기 때문에 한국어를 커버합니다.
+    speculative decoding에서는 작은 draft 모델이 토큰을 미리 추측하고 본 모델이 한 번에 검증합니다. 추측이 검증을 통과하는 비율이 수용률이고, 수용률이 높을수록 응답이 빨라집니다. 당근형 한국어 프롬프트 200개로 draft 모델별 수용률을 측정했습니다.
+  </p>
+  <p>
+    공식 MTP speculator인 <span class="mono">google/gemma-4-31B-it-assistant</span>가 <strong>수용률 56%</strong>로, 축소 어휘(32K vocab) EAGLE3의 5.6% 대비 10배 높았습니다. MTP는 본 모델에 붙여 여러 토큰을 한 번에 예측하게 하는 공식 초안 모듈입니다. 전체 262K vocab을 그대로 쓰기 때문에 한국어를 커버합니다.
+  </p>
+  <p>
+    표 7에서는 구성별 수용률과 함께 동시성 1(c1)과 8(c8)에서의 속도 변화를 봅니다. E2E p50은 요청 시작부터 응답 완료까지 걸린 시간의 중앙값입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -885,7 +941,7 @@ flowchart LR
     </table>
   </div>
   <p>
-    MTP assistant는 c1 종단 지연을 6.85초에서 2.69초로 2.6배, c8 처리량을 122.9에서 281.5 tok/s로 2.3배 끌어올립니다. 모델 크기도 0.94GB로 EAGLE3(4.5GB)의 5분의 1입니다. 한국어 draft는 별도 학습 없이 공식 MTP assistant 채택이 정답이라는 결론입니다.
+    MTP assistant는 c1 종단 지연을 6.85초에서 2.69초로 2.6배, c8 처리량을 122.9에서 281.5 tok/s로 2.3배 개선합니다. 모델 크기도 0.94GB로 EAGLE3(4.5GB)의 5분의 1입니다. 한국어 draft는 별도 학습 없이 공식 MTP assistant 채택이 정답이라는 결론입니다.
   </p>
 </section>
 
@@ -893,7 +949,13 @@ flowchart LR
 <section class="sec" id="s6">
   <h2><span class="no">06</span>g7e 본판정</h2>
   <p>
+    이 절이 이 문서의 본판정입니다. FP4 연산을 하드웨어로 직접 실행하는 신형 g7e에서 같은 벤치마크를 다시 돌려 L40S 기준선과 비교합니다.
+  </p>
+  <p>
     Spot으로 확보한 g7e.2xlarge에서 NVFP4를 네이티브 커널로 돌렸습니다. KV 캐시가 125,023 tokens까지 잡히고 가중치 로드는 18초입니다. 동일 워크로드, 동일 8K 컨텍스트로 L40S 기준선과 비교한 결과 전 시나리오에서 <strong>3.49배에서 4.83배</strong> 높았습니다.
+  </p>
+  <p>
+    표 8에서는 시나리오별 최대 처리량의 배율과, 시간당 가격까지 반영한 비용 효율 배율을 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -912,7 +974,7 @@ flowchart LR
   </div>
 
   <p class="lead-def">
-    <b>핵심:</b> g7e의 우위는 고동시성에서 커집니다. 96GB GDDR7이 KV를 125,023 tokens까지 확보해 L40S가 포화하던 구간의 preemption을 없애기 때문입니다.
+    <b>핵심:</b> g7e의 우위는 고동시성에서 커집니다. preemption은 KV 캐시가 모자랄 때 진행 중인 요청을 중단했다가 다시 계산하는 동작입니다. 96GB GDDR7이 KV를 125,023 tokens까지 확보해 L40S가 포화하던 구간의 preemption을 없애기 때문입니다.
   </p>
 
   <ul class="plain">
@@ -931,7 +993,10 @@ flowchart LR
 <section class="sec" id="s7">
   <h2><span class="no">07</span>권장 프로덕션 구성</h2>
   <p>
-    L40S 환경 기준으로 후속 실험 결과를 합치면 다음 구성이 종합 성능과 한국어 지연을 동시에 잡습니다. FP8-dynamic 체크포인트에 fp8 KV와 MTP assistant를 얹고, 기동은 <span class="mono">runai_streamer</span>와 compile 캐시로 단축합니다.
+    이 절은 앞 실험들의 결론을 지금 바로 적용할 수 있는 하나의 실행 명령으로 합칩니다. 각 옵션이 어느 실험에서 왔는지는 4절과 5절에서 확인할 수 있습니다.
+  </p>
+  <p>
+    L40S 환경 기준으로 후속 실험 결과를 합치면 다음 구성이 종합 성능과 한국어 지연을 동시에 잡습니다. FP8-dynamic 체크포인트에 fp8 KV와 MTP assistant를 얹습니다. 기동은 <span class="mono">runai_streamer</span>와 compile 캐시로 단축합니다.
   </p>
 
   <div class="codeblock">
@@ -946,7 +1011,7 @@ flowchart LR
   </div>
 
   <p>
-    이 조합의 예상 효과는 웜 기동 2분에서 3분, 한국어 응답 지연 2.5배 단축, 프리필 처리량 약 1.25배입니다. g7e를 확보하면 같은 구성을 NVFP4 네이티브로 재판정해 6절의 배율을 다시 검증합니다.
+    이 조합에서 무엇을 기대할 수 있을까요. 예상 효과는 웜 기동 2분에서 3분, 한국어 응답 지연 2.5배 단축, 프리필 처리량 약 1.25배입니다. g7e를 확보하면 같은 구성을 NVFP4 네이티브로 재판정해 6절의 배율을 다시 검증합니다.
   </p>
 </section>
 
@@ -954,7 +1019,13 @@ flowchart LR
 <section class="sec" id="s8">
   <h2><span class="no">08</span>결론과 남은 과제</h2>
   <p>
-    처리량 관점에서 g7e는 L40S 대비 3.5배에서 4.8배, 비용 효율은 6배에서 9배입니다. PoC 판정 기준인 1.5배를 크게 상회하므로, 당근 현행 GPU가 L40S급 이하라면 <strong>레플리카 12개에서 8개를 넘어 4개 수준까지</strong> 검토할 여지가 있습니다. 스타트업과 한국어 지연도 각각 실용 범위로 들어왔습니다.
+    마지막으로 전체 결과를 판정 기준에 대입하고, 아직 확인하지 못한 항목을 정리합니다. 한 문장으로 요약하면, g7e로 옮기는 것만으로 처리량 3.5배 이상과 비용 효율 6배 이상을 얻고 기동 시간과 한국어 지연 문제도 함께 풀린다는 것입니다.
+  </p>
+  <p>
+    처리량 관점에서 g7e는 L40S 대비 3.5배에서 4.8배, 비용 효율은 6배에서 9배입니다. PoC 판정 기준인 1.5배를 크게 상회합니다.
+  </p>
+  <p>
+    따라서 당근 현행 GPU가 L40S급 이하라면 <strong>레플리카 12개에서 8개를 넘어 4개 수준까지</strong> 검토할 여지가 있습니다. 스타트업과 한국어 지연도 각각 실용 범위로 들어왔습니다. 표 9에서는 운영 상황별로 어떤 구성을 고르면 되는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -974,8 +1045,13 @@ flowchart LR
   </div>
 
   <p>
-    남은 과제는 세 가지입니다. 첫째, 판정식을 닫으려면 당근 현행 GPU당 처리량 수치가 필요합니다. 둘째, MTP와 fp8 KV, 고동시성의 상호작용 스윕(num_speculative_tokens 4 대 8)이 미완입니다. 셋째, 70B급을 대비한 TP=2/4(PCIe) 실측이 남아 있습니다.
+    남은 과제는 세 가지입니다.
   </p>
+  <ul class="plain">
+    <li>첫째, 판정식을 닫으려면 당근 현행 GPU당 처리량 수치가 필요합니다.</li>
+    <li>둘째, MTP와 fp8 KV, 고동시성의 상호작용 스윕(num_speculative_tokens 4 대 8)이 미완입니다.</li>
+    <li>셋째, 70B급을 대비한 TP=2/4(PCIe) 실측이 남아 있습니다. TP는 한 모델을 여러 GPU에 나눠 싣는 텐서 병렬화입니다.</li>
+  </ul>
 </section>
 
 <figure class="flow">
@@ -1057,7 +1133,7 @@ flowchart LR
   <p class="eyebrow">LLM SERVING / BENCHMARK REPORT</p>
   <h1>Gemma-4-31B vLLM Serving PoC Benchmark: Detailed Results</h1>
   <p class="subtitle">
-    A PoC serving Gemma-4-31B with vLLM on EKS and Karpenter, measuring throughput, startup time, and Korean acceptance rate. Starting from a 28-combination baseline on L40S (g6e), it walks through the startup-reduction A/B tests and the follow-up experiments on FP8 and Korean speculative decoding, all the way to the final verdict on g7e (RTX PRO 6000 Blackwell).
+    A PoC serving the Gemma-4-31B model with vLLM, measuring throughput, startup time, and Korean acceptance rate. The experiments ran on EKS and Karpenter. Starting from a 28-combination baseline on L40S (g6e), it walks through the startup-reduction A/B tests and the follow-up experiments on FP8 and Korean speculative decoding, all the way to the final verdict on g7e (RTX PRO 6000 Blackwell).
   </p>
 
   <div class="stat" role="img" aria-label="S1 chat peak throughput rises from 536 tok/s on L40S to 1,871 tok/s on g7e">
@@ -1084,10 +1160,10 @@ flowchart LR
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">Summary</h2>
   <ul>
-    <li>On L40S (g6e.2xlarge), S1 chat peaks at <strong>536 tok/s</strong>. Moving the same workload to g7e (RTX PRO 6000 Blackwell) reaches 1,871 tok/s, 3.49x to 4.83x higher across every scenario.</li>
-    <li>The g7e advantage comes from native FP4 tensor-core kernels and 96GB of GDDR7. The KV cache grows to 125,023 tokens, eliminating the preemption that saturated L40S in the high-concurrency range.</li>
+    <li>On the current-generation L40S GPU (g6e.2xlarge), S1 chat throughput peaks at <strong>536 tok/s</strong>. Moving the same workload to the newer g7e (RTX PRO 6000 Blackwell) reaches 1,871 tok/s, 3.49x to 4.83x higher across all four scenarios.</li>
+    <li>The g7e advantage comes from kernels that run 4-bit math (FP4) directly in hardware and from 96GB of GDDR7 memory. The context store, the KV cache, grows to 125,023 tokens, eliminating the forced restarts (preemption) that saturated L40S in the high-concurrency range.</li>
     <li>The PoC pass bar of 1.5x throughput per GPU is exceeded by 3x to 5x, and cost efficiency with the Spot price ($1.50/hr) applied is 6x to 9x. However, Karrot's current per-GPU throughput number has not been provided yet, so the final ratio against production remains open until that value arrives.</li>
-    <li>Startup drops from 537 s cold to 155 s warm with runai_streamer direct-to-S3 loading and a persisted compile cache, and weight loading goes down to 19-18 s on 12xlarge NVMe and g7e. Korean latency is cut 2.6x with the official MTP assistant (56% acceptance). The recommended production configuration is summarized in Section 6.</li>
+    <li>Server startup drops from 537 s cold to 155 s warm by switching the loader (runai_streamer direct to S3) and persisting the compile cache, and weight loading goes down to 19-18 s on 12xlarge NVMe and g7e. Korean latency is cut 2.6x with the official MTP assistant (56% acceptance), and the recommended production configuration is summarized in its own section.</li>
   </ul>
 </section>
 
@@ -1113,10 +1189,22 @@ flowchart LR
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Background and Success Criteria</h2>
   <p>
-    This PoC asks a single question. If serving Gemma-4-31B with vLLM delivers <strong>1.5x or more throughput per GPU versus the current setup</strong>, the same traffic can be handled with fewer replicas, which justifies shrinking the serving fleet from 12 replicas to 8. The verdict covers four realistic workloads: chat, summarization, moderation, and long-context RAG.
+    This section explains why the measurements were made and what outcome counts as success. Fixing the pass criteria first lets every number that follows be read against the same yardstick.
   </p>
   <p>
-    Measurement proceeded in two stages. First, a baseline was established on L40S (g6e), which is easy to procure, and the serving-pipeline bottlenecks (startup, quantization format, Korean latency) were worked through. Then g7e (RTX PRO 6000 Blackwell), which has native FP4 tensor cores, was secured as Spot capacity for the final verdict. Throughput is reported as output tok/s and req/s; latency as TTFT (time to first token) and ITL (inter-token latency).
+    This PoC asks a single question. Does serving Gemma-4-31B with vLLM deliver <strong>1.5x or more throughput per GPU versus the current setup</strong>? vLLM is an open-source serving engine that runs large language models as an API service.
+  </p>
+  <p>
+    At 1.5x throughput, the same traffic can be handled with fewer servers. That justifies shrinking the serving fleet from 12 replicas to 8. The verdict covers four realistic workloads: chat, summarization, moderation, and long-context RAG.
+  </p>
+  <p>
+    Measurement proceeded in two stages. First, a baseline was established on L40S (g6e), which is easy to procure, and the serving-pipeline bottlenecks were worked through: startup, quantization format, and Korean latency. Quantization is the technique of storing model weights in lower-precision numbers to save memory and compute.
+  </p>
+  <p>
+    Then g7e (RTX PRO 6000 Blackwell), which has native FP4 tensor cores, was secured as Spot capacity for the final verdict. Spot means renting the cloud's spare capacity at a discount.
+  </p>
+  <p>
+    Four metrics are used. Throughput is reported as output tok/s (generated tokens per second) and req/s (requests per second). Latency is reported as TTFT (time until the first token appears) and ITL (the gap between consecutive tokens).
   </p>
 
   <div class="callout note">
@@ -1129,7 +1217,13 @@ flowchart LR
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>Test Environment and Method</h2>
   <p>
-    vLLM v0.26.0 was deployed to the <span class="mono">serving</span> namespace of an EKS cluster (GPU01) in the Seoul region, and model weights were loaded directly from an S3 bucket with <span class="mono">runai_streamer</span>. Three instance generations were used, each for a distinct purpose.
+    This section describes the hardware the experiments ran on and how they were measured. Every number that follows should be read against the conditions fixed here.
+  </p>
+  <p>
+    vLLM v0.26.0 was deployed to the <span class="mono">serving</span> namespace of an EKS cluster (GPU01) in the Seoul region. EKS is AWS's managed Kubernetes service, and GPU nodes are provisioned automatically by Karpenter. Model weights were loaded directly from an S3 bucket with <span class="mono">runai_streamer</span>, a vLLM loader that streams weight files from S3 to the GPU in parallel.
+  </p>
+  <p>
+    Three instance generations were used, each for a distinct purpose. Table 1 shows each instance's GPU specification and which experiment it served.
   </p>
 
   <div class="tbl-wrap">
@@ -1148,7 +1242,10 @@ flowchart LR
 
   <h3>2.1 Workload definitions</h3>
   <p>
-    The four scenarios model real usage patterns through input and output lengths. Each scenario was swept across concurrency 1, 2, 4, 8, 16, 32, and 64, giving 7 combinations per scenario and 28 in total, measured with <span class="mono">vllm bench serve</span>.
+    The four scenarios model real usage patterns through input and output lengths. Each scenario was swept across concurrency 1, 2, 4, 8, 16, 32, and 64, giving 7 combinations per scenario and 28 in total, measured with <span class="mono">vllm bench serve</span>. Prefill refers to the first phase, where the input prompt is read in all at once.
+  </p>
+  <p>
+    Table 2 shows each scenario's input/output token lengths and the real task it imitates.
   </p>
 
   <div class="tbl-wrap">
@@ -1168,7 +1265,7 @@ flowchart LR
 
   <div class="callout note">
     <span class="callout-title">Note - Kernel paths per quantization format</span>
-    <p>The same NVFP4 weights execute on different kernels depending on GPU generation. L40S (SM89) has no FP4 tensor cores, so NVFP4 automatically falls back to <span class="mono">Marlin</span> W4A16, while g7e (Blackwell) runs it natively with <span class="mono">FlashInferCutlassNvFp4</span>. FP8 W8A8 runs natively on L40S too, on Ada FP8 tensor cores, and is not a fallback.</p>
+    <p>NVFP4 is a 4-bit and FP8 an 8-bit floating-point quantization format. The same NVFP4 weights execute on different kernels depending on GPU generation. L40S (SM89) has no FP4 tensor cores, so NVFP4 automatically falls back to the <span class="mono">Marlin</span> W4A16 kernel (a substitute path), while g7e (Blackwell) runs it natively with <span class="mono">FlashInferCutlassNvFp4</span>. FP8 W8A8 runs natively on L40S too, on Ada FP8 tensor cores, and is not a fallback.</p>
   </div>
 </section>
 
@@ -1176,7 +1273,13 @@ flowchart LR
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>L40S Baseline: 28 Combinations</h2>
   <p>
-    nvidia/Gemma-4-31B-IT-NVFP4 was measured with an 8K context, a KV cache of 31,344 tokens, and speculative decoding off. Peak throughput per scenario and the concurrency at which it occurs are as follows.
+    This section covers the starting-point numbers measured on the previous-generation L40S GPU. These values become the denominator later, when computing how much faster g7e is.
+  </p>
+  <p>
+    The conditions were nvidia/Gemma-4-31B-IT-NVFP4, an 8K context, a KV cache of 31,344 tokens, and speculative decoding off. The KV cache is the GPU memory area that stores intermediate results for the context processed so far, and its size sets the concurrency ceiling. Speculative decoding, a speed-up where a small model guesses tokens ahead and the main model verifies them in one pass, was disabled in this round.
+  </p>
+  <p>
+    The first question is how many tok/s each scenario reaches at its peak. Table 3 shows peak throughput per scenario and the concurrency at which it occurs.
   </p>
 
   <div class="tbl-wrap">
@@ -1195,7 +1298,10 @@ flowchart LR
   </div>
 
   <p>
-    Unrolling the S1 chat concurrency curve exposes the saturation pattern. Throughput keeps climbing up to concurrency 64, but TTFT <strong>degrades sharply</strong> past concurrency 32. This happens even though short inputs and outputs make it the scenario with the least KV pressure.
+    Unrolling the S1 chat concurrency curve exposes the saturation pattern. Throughput keeps climbing up to concurrency 64. First-token latency (TTFT), however, <strong>degrades sharply</strong> past concurrency 32.
+  </p>
+  <p>
+    This happens even though short inputs and outputs make it the scenario with the least KV pressure. Table 4 shows where throughput and latency part ways as concurrency rises.
   </p>
 
   <div class="tbl-wrap">
@@ -1218,7 +1324,7 @@ flowchart LR
 
   <div class="callout warn">
     <span class="callout-title">Warning - The baseline is not the g7e verdict</span>
-    <p>The values in this table come from NVFP4 running on L40S through the Marlin W4A16 fallback. They must not be compared directly with the FP4-native g7e verdict; they serve only as the denominator in the ratio calculations of Section 6. Also, a collection-script bug in this round left the GPU utilization column unrecorded.</p>
+    <p>The values in this table come from NVFP4 running on L40S through the Marlin W4A16 fallback. They must not be compared directly with the FP4-native g7e verdict. They serve only as the denominator in the ratio calculations of Section 6. Also, a collection-script bug in this round left the GPU utilization column unrecorded.</p>
   </div>
 </section>
 
@@ -1226,16 +1332,25 @@ flowchart LR
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Startup Reduction A/B</h2>
   <p>
-    Breaking down the 537 s (8 min 57 s) cold start gives weight loading 149 s, torch.compile 73 s, new-node provisioning 48 s, and image pull 82 s. Configurations were varied to see how far each bottleneck could be pushed down. The measured window runs from pod creation to <span class="mono">/health</span> returning 200, and the phase breakdown follows the vLLM startup logs (vLLM v0.26.0, manually instrumented on 2026-08-05 to 06).
+    This section asks how far startup, the time from launching a server to it accepting requests, can be pushed down. The cost repeats every time a new GPU node comes up, so it is keenly felt in operations.
   </p>
   <p>
-    The comparison baseline is Karrot's current path: HuggingFace &rarr; S3 sync &rarr; loading with
-    <span class="mono">runai_streamer</span> (concurrency 32, memory_limit 8GiB) on top of S3 Mountpoint,
-    a setup whose startup time had already improved from 16 minutes to 5. This round verified the bottlenecks
-    of that same path phase by phase and re-measured with only the configuration changed.
+    First, the 537 s (8 min 57 s) cold start (a first boot with no caches at all) was broken into phases. Weight loading takes 149 s, torch.compile 73 s, new-node provisioning 48 s, and image pull 82 s. torch.compile is the phase that optimizes and compiles the model's execution code on first boot.
+  </p>
+  <p>
+    Configurations were varied to see how far each bottleneck could be pushed down. The measured window runs from pod creation to <span class="mono">/health</span> returning 200, and the phase breakdown follows the vLLM startup logs (vLLM v0.26.0, manually instrumented on 2026-08-05 to 06).
+  </p>
+  <p>
+    The comparison baseline is Karrot's current path: HuggingFace &rarr; S3 sync &rarr; loading with <span class="mono">runai_streamer</span> (concurrency 32, memory_limit 8GiB) on top of S3 Mountpoint. Mountpoint is a FUSE tool that mounts an S3 bucket like a filesystem.
+  </p>
+  <p>
+    That path's startup time had already improved from 16 minutes to 5. This round verified the bottlenecks of the same path phase by phase and re-measured with only the configuration changed.
   </p>
 
   <h3>4.1 Per-configuration A/B - g6e.2xlarge</h3>
+  <p>
+    The question is which configuration saves how many seconds. Table 5 shows total startup time per configuration and the share taken by weight loading and torch.compile.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -1276,7 +1391,10 @@ flowchart LR
   </figure>
 
   <p>
-    The biggest gain came from replacing the weight-loading path. Mountpoint FUSE took 149 s (effective 1.75Gbps), while <span class="mono">runai_streamer</span> direct to S3 took 29 to 32 s (effective 8.2Gbps, concurrency 64, memory_limit 24GiB), <strong>about 5x faster</strong>. Persisting the compile cache on the node cuts compilation from 73 s to 8.5 s on restart, reclaiming 55 s for free, and engine initialization also drops from 93 s to 25 s.
+    The biggest gain came from replacing the weight-loading path. Mountpoint FUSE took 149 s (effective 1.75Gbps). By contrast, <span class="mono">runai_streamer</span> direct to S3 took 29 to 32 s (effective 8.2Gbps, concurrency 64, memory_limit 24GiB), <strong>about 5x faster</strong>.
+  </p>
+  <p>
+    Persisting the compile cache on the node cuts compilation from 73 s to 8.5 s on restart, reclaiming 55 s for free. Engine initialization also drops from 93 s to 25 s.
   </p>
 
   <figure class="diagram">
@@ -1294,16 +1412,15 @@ flowchart LR
 
   <div class="callout note">
     <span class="callout-title">Note - Returning idle GPU memory with sleep mode</span>
-    <p>When idle, <span class="mono">/sleep</span> released 30GB of GPU memory (45.4GB down to 14.7GB) in 26.8 s, and <span class="mono">/wake_up</span> restored it in 3.6 s when demand returned. That is roughly 40x faster than the 155 s full restart, making it a structural alternative to automatic GPU allocation.</p>
+    <p>Sleep mode is a vLLM feature that temporarily hands back the GPU memory of an idle server. When idle, <span class="mono">/sleep</span> released 30GB of GPU memory (45.4GB down to 14.7GB) in 26.8 s, and <span class="mono">/wake_up</span> restored it in 3.6 s when demand returned. That is roughly 40x faster than the 155 s full restart, making it a structural alternative to automatic GPU allocation.</p>
   </div>
 
   <h3>4.2 Instance / storage axis - 12xlarge NVMe and g7e</h3>
   <p>
-    Even with the same <span class="mono">runai_streamer</span> direct connection, load time keeps dropping with instance and storage.
-    Looking at weight load alone, the series is Mountpoint 149 s &rarr; 2xlarge direct 29-32 s &rarr; 12xlarge 19 s &rarr; g7e 18 s.
+    Even with the same <span class="mono">runai_streamer</span> direct connection, load time keeps dropping with instance and storage. Looking at weight load alone, the series is Mountpoint 149 s &rarr; 2xlarge direct 29-32 s &rarr; 12xlarge 19 s &rarr; g7e 18 s. NVMe means fast local SSDs attached directly to the node.
   </p>
   <ul class="plain">
-    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - weight load <strong>19 s</strong>. This held even while loading two models (FP8 and NVFP4, 66GB combined) on the same node at once, 7.8x faster than Mountpoint. Cold start (new node provisioning + image pull + loading) was 380 s with both models. A single <span class="mono">instanceStorePolicy: RAID0</span> line in the Karpenter NodePool auto-configures 3.8TB of instance store, and runai used concurrency 128 / memory_limit 64GiB.</li>
+    <li><b>g6e.12xlarge (100Gbps, NVMe RAID0)</b> - weight load <strong>19 s</strong>. This held even while loading two models (FP8 and NVFP4, 66GB combined) on the same node at once, 7.8x faster than Mountpoint. Cold start (new node provisioning + image pull + loading) was 380 s with both models. A single <span class="mono">instanceStorePolicy: RAID0</span> line in the Karpenter NodePool auto-configures 3.8TB of instance store. runai used concurrency 128 / memory_limit 64GiB.</li>
     <li><b>g7e.2xlarge (Spot)</b> - weight load was <strong>18 s</strong> in the Section 6 verdict environment. The load-phase breakdown was performed only on the g6e family, so g7e has a single weight-load value.</li>
   </ul>
 
@@ -1318,10 +1435,16 @@ flowchart LR
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Follow-ups: FP8, Scale-up, Korean Draft</h2>
+  <p>
+    This section answers three questions left open after the baseline. Which quantization format is better, how much does a larger instance help, and which draft model should speed up Korean responses?
+  </p>
 
   <h3>5.1 FP8-dynamic vs NVFP4</h3>
   <p>
-    An FP8 pod and an NVFP4 pod were run side by side on one g6e.12xlarge node with GPU isolation, compared under identical conditions. The conclusion depends on the workload: NVFP4 wins for ultra-low-latency chat, while <strong>FP8 with fp8 KV enabled</strong> wins for high-concurrency mixed workloads like summarization and RAG.
+    An FP8 pod and an NVFP4 pod were run side by side on one g6e.12xlarge node with GPU isolation, compared under identical conditions. The conclusion depends on the workload. NVFP4 wins for ultra-low-latency chat, while <strong>FP8 with fp8 KV enabled</strong> wins for high-concurrency mixed workloads like summarization and RAG.
+  </p>
+  <p>
+    fp8 KV is an option that stores the KV cache itself in 8 bits, fitting more context into the same memory. Table 6 shows which format won for each scenario and concurrency combination.
   </p>
 
   <div class="tbl-wrap">
@@ -1342,17 +1465,26 @@ flowchart LR
 
   <div class="callout warn">
     <span class="callout-title">Warning - FP8 checkpoints need fp8 KV set explicitly</span>
-    <p>FP8-dynamic checkpoints ship with <span class="mono">kv_cache_scheme</span> set to <span class="mono">None</span>, so the KV cache defaults to BF16 and the model underperforms at high concurrency for lack of KV space. Adding <span class="mono">--kv-cache-dtype fp8</span> grows KV capacity from 12,150 to 23,320 tokens, and FP8 overtakes NVFP4 on S2 and S4. Judging FP8 as slow while missing this flag is the most common mistake.</p>
+    <p>FP8-dynamic checkpoints ship with <span class="mono">kv_cache_scheme</span> set to <span class="mono">None</span>, so the KV cache defaults to BF16. The model then underperforms at high concurrency for lack of KV space. Adding <span class="mono">--kv-cache-dtype fp8</span> grows KV capacity from 12,150 to 23,320 tokens, and FP8 overtakes NVFP4 on S2 and S4. Judging FP8 as slow while missing this flag is the most common mistake.</p>
   </div>
 
   <h3>5.2 g6e.12xlarge scale-up</h3>
   <p>
-    On the 12xlarge with a 100Gbps NIC and NVMe RAID0, <span class="mono">runai_streamer</span> finished loading weights in 19 s even while bringing up two models (66GB) at once, <strong>7.8x</strong> faster than Mountpoint's 149 s. A single <span class="mono">instanceStorePolicy: RAID0</span> line auto-configures 3.8TB of NVMe as kubelet ephemeral-storage.
+    The question is how much a larger instance speeds up loading. On the 12xlarge with a 100Gbps NIC and NVMe RAID0, <span class="mono">runai_streamer</span> finished loading weights in 19 s even while bringing up two models (66GB) at once, <strong>7.8x</strong> faster than Mountpoint's 149 s.
+  </p>
+  <p>
+    Setup is simple too. A single <span class="mono">instanceStorePolicy: RAID0</span> line auto-configures 3.8TB of NVMe as kubelet ephemeral-storage.
   </p>
 
   <h3>5.3 Korean speculative decoding</h3>
   <p>
-    Draft-model acceptance was measured with 200 Karrot-style Korean prompts. The official MTP speculator, <span class="mono">google/gemma-4-31B-it-assistant</span>, reached <strong>56% acceptance</strong>, 10x higher than the 5.6% of the reduced-vocabulary (32K vocab) EAGLE3. It covers Korean because it keeps the full 262K vocabulary.
+    In speculative decoding, a small draft model guesses tokens ahead and the main model verifies them in one pass. The share of guesses that pass verification is the acceptance rate, and higher acceptance means faster responses. Draft-model acceptance was measured with 200 Karrot-style Korean prompts.
+  </p>
+  <p>
+    The official MTP speculator, <span class="mono">google/gemma-4-31B-it-assistant</span>, reached <strong>56% acceptance</strong>, 10x higher than the 5.6% of the reduced-vocabulary (32K vocab) EAGLE3. MTP is the official drafting module attached to the main model to predict several tokens at once. It covers Korean because it keeps the full 262K vocabulary.
+  </p>
+  <p>
+    Table 7 shows acceptance per configuration together with the speed change at concurrency 1 (c1) and 8 (c8). E2E p50 is the median time from request start to response completion.
   </p>
 
   <div class="tbl-wrap">
@@ -1369,7 +1501,7 @@ flowchart LR
     </table>
   </div>
   <p>
-    The MTP assistant brings c1 end-to-end latency from 6.85 s down to 2.69 s (2.6x) and raises c8 throughput from 122.9 to 281.5 tok/s (2.3x). The model is also small at 0.94GB, one fifth of EAGLE3 (4.5GB). The conclusion: for a Korean draft, adopting the official MTP assistant with no extra training is the right answer.
+    The MTP assistant improves c1 end-to-end latency from 6.85 s to 2.69 s (2.6x) and c8 throughput from 122.9 to 281.5 tok/s (2.3x). The model is also small at 0.94GB, one fifth of EAGLE3 (4.5GB). The conclusion: for a Korean draft, adopting the official MTP assistant with no extra training is the right answer.
   </p>
 </section>
 
@@ -1377,7 +1509,13 @@ flowchart LR
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Final Verdict on g7e</h2>
   <p>
+    This section is the document's final verdict. The same benchmark was re-run on the newer g7e, which executes FP4 math directly in hardware, and compared against the L40S baseline.
+  </p>
+  <p>
     NVFP4 ran on native kernels on a Spot g7e.2xlarge. The KV cache reaches 125,023 tokens and weights load in 18 s. Compared against the L40S baseline on the same workloads and the same 8K context, g7e came out <strong>3.49x to 4.83x</strong> higher across every scenario.
+  </p>
+  <p>
+    Table 8 shows the peak-throughput ratio per scenario, plus the cost-efficiency ratio once hourly price is factored in.
   </p>
 
   <div class="tbl-wrap">
@@ -1396,7 +1534,7 @@ flowchart LR
   </div>
 
   <p class="lead-def">
-    <b>Key point:</b> the g7e advantage widens at high concurrency, because 96GB of GDDR7 holds up to 125,023 KV tokens and removes the preemption in the range where L40S used to saturate.
+    <b>Key point:</b> the g7e advantage widens at high concurrency. Preemption is what happens when the KV cache runs short: an in-flight request is stopped and recomputed. 96GB of GDDR7 holds up to 125,023 KV tokens and removes that preemption in the range where L40S used to saturate.
   </p>
 
   <ul class="plain">
@@ -1415,7 +1553,10 @@ flowchart LR
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Recommended Production Configuration</h2>
   <p>
-    Combining the follow-up results on the L40S environment, the following configuration captures both overall performance and Korean latency: an FP8-dynamic checkpoint with fp8 KV and the MTP assistant on top, with startup shortened by <span class="mono">runai_streamer</span> and the compile cache.
+    This section folds the conclusions of the preceding experiments into one command you can apply right away. Sections 4 and 5 show which experiment each option came from.
+  </p>
+  <p>
+    Combining the follow-up results on the L40S environment, the following configuration captures both overall performance and Korean latency. It puts fp8 KV and the MTP assistant on top of an FP8-dynamic checkpoint. Startup is shortened by <span class="mono">runai_streamer</span> and the compile cache.
   </p>
 
   <div class="codeblock">
@@ -1430,7 +1571,7 @@ flowchart LR
   </div>
 
   <p>
-    The expected effect of this combination is a warm startup of 2 to 3 minutes, Korean response latency cut 2.5x, and prefill throughput of about 1.25x. Once g7e is secured, the same configuration is re-verified with native NVFP4 to re-validate the ratios of Section 6.
+    What should this combination deliver? The expected effect is a warm startup of 2 to 3 minutes, Korean response latency cut 2.5x, and prefill throughput of about 1.25x. Once g7e is secured, the same configuration is re-verified with native NVFP4 to re-validate the ratios of Section 6.
   </p>
 </section>
 
@@ -1438,7 +1579,13 @@ flowchart LR
 <section class="sec" id="s8-en">
   <h2><span class="no">08</span>Conclusion and Remaining Work</h2>
   <p>
-    On throughput, g7e is 3.5x to 4.8x over L40S, and 6x to 9x on cost efficiency. It clears the PoC pass bar of 1.5x by a wide margin, so if Karrot's current GPUs are at L40S level or below, there is room to consider going <strong>beyond 12-to-8 replicas, down to around 4</strong>. Startup and Korean latency have each moved into practical range as well.
+    Finally, the overall results are placed against the pass criteria, along with the items still to be confirmed. To sum up in one sentence: moving to g7e alone brings 3.5x or more throughput and 6x or more cost efficiency, and it resolves the startup-time and Korean-latency problems along the way.
+  </p>
+  <p>
+    On throughput, g7e is 3.5x to 4.8x over L40S, and 6x to 9x on cost efficiency. It clears the PoC pass bar of 1.5x by a wide margin.
+  </p>
+  <p>
+    So if Karrot's current GPUs are at L40S level or below, there is room to consider going <strong>beyond 12-to-8 replicas, down to around 4</strong>. Startup and Korean latency have each moved into practical range as well. Table 9 shows which configuration to pick for each operating situation.
   </p>
 
   <div class="tbl-wrap">
@@ -1458,8 +1605,13 @@ flowchart LR
   </div>
 
   <p>
-    Three items remain. First, closing the pass formula requires Karrot's current per-GPU throughput number. Second, the interaction sweep of MTP, fp8 KV, and high concurrency (num_speculative_tokens 4 vs 8) is unfinished. Third, TP=2/4 (PCIe) measurements in preparation for 70B-class models are still to be done.
+    Three items remain.
   </p>
+  <ul class="plain">
+    <li>First, closing the pass formula requires Karrot's current per-GPU throughput number.</li>
+    <li>Second, the interaction sweep of MTP, fp8 KV, and high concurrency (num_speculative_tokens 4 vs 8) is unfinished.</li>
+    <li>Third, TP=2/4 (PCIe) measurements in preparation for 70B-class models are still to be done. TP is tensor parallelism, splitting one model across several GPUs.</li>
+  </ul>
 </section>
 
 <figure class="flow">

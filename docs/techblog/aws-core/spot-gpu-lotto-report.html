@@ -572,8 +572,9 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <p class="eyebrow">AWS Core / Architecture Deep Dive</p>
   <h1>GPU Spot Lotto 아키텍처 분석 - 멀티 리전 GPU Spot 가격 모니터링과 워크로드 디스패치</h1>
   <p class="subtitle">
-    서울 컨트롤 플레인이 3개 미국 리전의 GPU Spot 가격을 감시하고 최저가 리전 EKS에
-    워크로드를 배치하는 시스템의 구조를 소스 코드와 IaC 설정 기준으로 분석합니다.
+    서울의 제어 시스템이 3개 미국 리전의 GPU Spot 가격을 감시합니다. 그리고 가장 싼
+    리전의 EKS에 워크로드를 배치합니다. 이 문서는 그 구조를 소스 코드와 IaC 설정
+    기준으로 분석합니다.
   </p>
 
   <div class="meta">
@@ -588,11 +589,11 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>서울(ap-northeast-2) 컨트롤 플레인이 3개 미국 리전(us-east-1, us-east-2, us-west-2)의 GPU Spot 가격을 수집해 Redis Sorted Set에 저장하고, 디스패처가 최저가 리전 EKS에 GPU Pod를 생성합니다. 폴링 주기는 코드 기본값 <strong>60초</strong>, 배포 설정(Helm values) 기준 30초입니다.</li>
-    <li>데이터는 서울 S3 허브 버킷에 모입니다. 기본값 <span class="mono">storage_mode=s3</span>에서는 GPU Pod가 S3 Mountpoint CSI로 허브를 직접 마운트하고, <span class="mono">storage_mode=fsx</span>를 명시한 작업만 리전별 FSx Lustre의 자동 가져오기/내보내기(Hub-and-Spoke) 동기화를 사용합니다.</li>
-    <li>Spot 중단 시 Reaper가 10초 주기로 Pod 상태를 확인합니다. 실패 리전을 제외한 재배치는 <span class="mono">reap_job</span>과 <span class="mono">select_region</span>에 인터페이스로 설계되어 있으나, dispatcher 엔트리포인트(<span class="mono">main.py</span>)가 <span class="mono">requeue_fn</span>을 연결하지 않아 현재 코드에서는 Failed 작업이 재배치 없이 실패로 종결됩니다.</li>
-    <li>Strands Agents SDK 기반 에이전트(도구 5개)가 Bedrock AgentCore Runtime에서 실행되고, AgentCore Gateway가 REST API 6개 오퍼레이션을 MCP 도구로 노출해 외부 에이전트가 이 시스템을 도구로 쓸 수 있습니다.</li>
-    <li>운영 values 파일의 <span class="mono">k8sMode: "real"</span>은 코드가 인식하는 값(<span class="mono">live</span>)과 달라 그대로 배포하면 <strong>Pod가 실제로 생성되지 않습니다</strong>. 배포 전 이 값을 먼저 교정해야 합니다.</li>
+    <li>서울(ap-northeast-2)의 제어 시스템이 3개 미국 리전(us-east-1, us-east-2, us-west-2)의 GPU Spot 가격을 계속 수집해, 가장 싼 리전의 EKS(AWS 관리형 Kubernetes)에 GPU 작업을 배치합니다. 가격 확인 주기는 코드 기본값이 <strong>60초</strong>, 실제 배포 설정(Helm values) 기준으로는 30초입니다.</li>
+    <li>모든 데이터는 서울의 S3 허브 버킷 한 곳에 모입니다. 기본값 <span class="mono">storage_mode=s3</span>에서는 GPU Pod가 허브 버킷을 파일시스템처럼 직접 마운트하고, <span class="mono">storage_mode=fsx</span>를 지정한 작업만 리전별 FSx Lustre와 허브 사이의 자동 동기화(Hub-and-Spoke)를 사용합니다.</li>
+    <li>Spot 회수 등으로 작업이 실패하면 Reaper라는 감시 루프가 10초마다 상태를 확인합니다. 다른 리전으로 다시 배치하는 기능은 설계(<span class="mono">reap_job</span>, <span class="mono">select_region</span>)만 있고 연결 코드(<span class="mono">requeue_fn</span>)가 빠져 있어, 현재 코드에서는 실패한 작업이 재배치 없이 그대로 종결됩니다.</li>
+    <li>자연어로 작업을 관리하는 AI 에이전트(도구 5개)가 Bedrock AgentCore Runtime에서 실행됩니다. 반대로 AgentCore Gateway는 REST API 6개 오퍼레이션을 MCP(AI 에이전트가 외부 도구를 부르는 표준 프로토콜) 도구로 노출해, 외부 에이전트도 이 시스템을 도구처럼 쓸 수 있습니다.</li>
+    <li>운영 values 파일의 <span class="mono">k8sMode: "real"</span>은 코드가 인식하는 값(<span class="mono">live</span>)과 다릅니다. 그대로 배포하면 <strong>Pod가 실제로 생성되지 않으므로</strong> 배포 전에 이 값부터 고쳐야 합니다.</li>
   </ul>
 </section>
 
@@ -600,12 +601,12 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <nav class="toc" aria-label="목차">
   <p class="toc-title">목차</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1">문제 정의 - Spot 가격 변동성과 리전 간 격차</a></li>
-    <li><span class="no">02</span><a href="#s2">동작 원리 - 서울 컨트롤 플레인과 3개 스팟 리전</a></li>
-    <li><span class="no">03</span><a href="#s3">딥다이브 1 - 최저가 리전 선택과 디스패치</a></li>
-    <li><span class="no">04</span><a href="#s4">딥다이브 2 - Hub-and-Spoke 스토리지</a></li>
-    <li><span class="no">05</span><a href="#s5">딥다이브 3 - Spot 중단 대응</a></li>
-    <li><span class="no">06</span><a href="#s6">에이전트 인터페이스 - AgentCore와 MCP Gateway</a></li>
+    <li><span class="no">01</span><a href="#s1">왜 필요한가 - Spot 가격 변동과 리전 간 가격 차이</a></li>
+    <li><span class="no">02</span><a href="#s2">전체 구조 - 서울에서 제어하고 미국에서 실행</a></li>
+    <li><span class="no">03</span><a href="#s3">가장 싼 리전 고르기 - 가격 수집과 디스패치</a></li>
+    <li><span class="no">04</span><a href="#s4">데이터는 어디에 두나 - Hub-and-Spoke 스토리지</a></li>
+    <li><span class="no">05</span><a href="#s5">Spot 중단에 대응하는 방법</a></li>
+    <li><span class="no">06</span><a href="#s6">AI 에이전트 연동 - AgentCore와 MCP Gateway</a></li>
     <li><span class="no">07</span><a href="#s7">실제 운영 흐름</a></li>
     <li><span class="no">08</span><a href="#s8">한계와 결론</a></li>
     <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
@@ -616,20 +617,33 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
 <!-- ===================== 01 ===================== -->
 <section class="sec" id="s1">
-  <h2><span class="no">01</span>문제 정의 - Spot 가격 변동성과 리전 간 격차</h2>
+  <h2><span class="no">01</span>왜 필요한가 - Spot 가격 변동과 리전 간 가격 차이</h2>
   <p>
-    EC2 Spot 인스턴스는 온디맨드 대비 저렴하지만 두 가지 비용이 따라옵니다.
-    가격이 리전과 가용 영역마다 다르게 움직이고, EC2가 용량을 회수할 때
-    <strong>2분 중단 통지</strong> 후 인스턴스가 종료됩니다(EC2 공식 문서 기준).
-    GPU 학습 워크로드를 한 리전에 고정하면 더 싼 리전의 가격을 놓치고,
-    중단이 발생하면 체크포인트 복구와 재배치를 사람이 처리해야 합니다.
+    이 절은 시스템이 풀려는 문제를 설명합니다. GPU를 싸게 쓰려 할 때 어떤 어려움이
+    생기는지부터 짚습니다.
   </p>
   <p>
-    GPU Spot Lotto는 이 두 문제를 겨냥합니다. 여러 리전의 가격을 상시 비교해
-    제출 시점의 최저가 리전에 작업을 배치하고, 중단이 감지되면 다른 리전으로
-    재스케줄링하는 것을 설계 목표로 합니다(재배치 경로의 현재 구현 상태는
-    5.1절과 8.1절에서 다룹니다). 감시 대상은 <span class="mono">src/common/config.py</span>에
-    정의된 6개 GPU 인스턴스 타입입니다.
+    EC2 Spot 인스턴스는 AWS의 남는 서버 용량을 할인가로 빌려 쓰는 방식입니다.
+    온디맨드(정가로 쓰는 방식)보다 저렴하지만 두 가지 부담이 따라옵니다.
+    첫째, 가격이 리전과 가용 영역(리전 안의 독립된 데이터센터 구역)마다 다르게
+    움직입니다.
+  </p>
+  <p>
+    둘째, AWS가 용량을 회수할 때는 <strong>2분 중단 통지</strong> 뒤에 인스턴스가
+    종료됩니다(EC2 공식 문서 기준). GPU 학습 워크로드를 한 리전에 고정하면 더 싼
+    리전의 가격을 놓칩니다. 중단이 발생하면 체크포인트 복구와 재배치를 사람이
+    처리해야 합니다.
+  </p>
+  <p>
+    GPU Spot Lotto는 이 두 문제를 겨냥합니다. 여러 리전의 가격을 상시 비교해,
+    제출 시점에 가장 싼 리전에 작업을 배치합니다. 중단이 감지되면 다른 리전으로
+    다시 스케줄링하는 것까지가 설계 목표입니다(재배치 경로의 현재 구현 상태는
+    5.1절과 8.1절에서 다룹니다).
+  </p>
+  <p>
+    그러면 어떤 GPU를 감시할까요? 감시 대상은 <span class="mono">src/common/config.py</span>에
+    정의된 6개 GPU 인스턴스 타입입니다. 아래 표에서는 타입별 GPU 종류와
+    GPU 메모리(VRAM) 용량을 확인할 수 있습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -661,14 +675,22 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2">
-  <h2><span class="no">02</span>동작 원리 - 서울 컨트롤 플레인과 3개 스팟 리전</h2>
+  <h2><span class="no">02</span>전체 구조 - 서울에서 제어하고 미국에서 실행</h2>
   <p>
-    컨트롤 플레인 전체가 서울 리전에 있습니다. 사용자는 CloudFront와 WAF, ALB를 거쳐
-    FastAPI 기반 API 서버에 도달하고, API 서버는 Redis(ElastiCache)를 가격 저장소이자
-    작업 큐로 사용합니다. 가격 수집(Price Watcher), 큐 소비(Dispatcher),
-    완료 정리(Reaper)가 각각 독립 프로세스로 돌면서 하나의 파이프라인을 이룹니다.
-    GPU가 실제로 도는 곳은 3개 미국 리전의 EKS 클러스터이고, 노드는 Karpenter가
-    Spot으로만 프로비저닝합니다.
+    이 절은 시스템 전체가 어떻게 배치되어 있는지 조망합니다. 판단하는 부분과
+    GPU가 실제로 도는 부분이 지리적으로 분리되어 있다는 점이 핵심입니다.
+  </p>
+  <p>
+    컨트롤 플레인(작업을 접수하고 배치를 판단하는 제어 계층) 전체가 서울 리전에
+    있습니다. 사용자는 CloudFront와 WAF, ALB를 거쳐 FastAPI(Python 웹 프레임워크)
+    기반 API 서버에 도달합니다. API 서버는 Redis(인메모리 데이터 저장소, 여기서는
+    ElastiCache)를 가격 저장소이자 작업 큐로 사용합니다.
+  </p>
+  <p>
+    그 위에서 세 개의 독립 프로세스가 하나의 파이프라인을 이룹니다. 가격 수집은
+    Price Watcher, 큐 소비는 Dispatcher, 완료 정리는 Reaper가 맡습니다.
+    GPU가 실제로 도는 곳은 3개 미국 리전의 EKS 클러스터이고, 노드는
+    Karpenter(Kubernetes용 노드 자동 증설 도구)가 Spot으로만 프로비저닝합니다.
   </p>
 
   <figure class="diagram">
@@ -693,8 +715,12 @@ flowchart LR
 
   <p>
     상태 저장소는 Redis 하나로 통일되어 있습니다. 가격, 큐, 작업 레코드, 리전별 용량
-    카운터가 모두 Redis 자료구조 하나씩에 대응하므로, 컴포넌트 간 통신에 별도의
-    메시지 브로커가 없습니다.
+    카운터가 모두 Redis 자료구조 하나씩에 대응합니다. 그래서 컴포넌트 간 통신에
+    별도의 메시지 브로커가 없습니다.
+  </p>
+  <p>
+    아래 표에서는 어떤 데이터가 어떤 Redis 자료구조에 담기는지, 각 키의 역할과
+    함께 확인할 수 있습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -715,27 +741,38 @@ flowchart LR
   </div>
 
   <p>
-    API 표면은 <span class="mono">openapi.json</span> 기준으로 <strong>17개 경로, 19개 오퍼레이션</strong>입니다.
-    작업 CRUD와 SSE 스트림, 가격 조회, S3 presigned 업로드, 템플릿, 관리자 6종,
-    헬스 체크와 Prometheus 메트릭으로 구성됩니다. README는 "18개 엔드포인트"로
-    기술하고 있으나 이 문서는 OpenAPI 스펙에서 센 값을 기준으로 합니다.
-    인프라는 Terraform 모듈 13개(vpc, eks, karpenter, elasticache, cognito, alb,
-    cloudfront, ecr, fsx, s3, pod_identity, github_oidc, monitoring)와
-    Helm 차트(templates 디렉터리 20개 파일)로 정의됩니다.
+    API는 얼마나 될까요? <span class="mono">openapi.json</span> 기준으로
+    <strong>17개 경로, 19개 오퍼레이션</strong>입니다. 작업 CRUD와 SSE(서버가
+    상태 변화를 실시간으로 밀어주는 스트리밍 방식) 스트림, 가격 조회, S3 presigned
+    업로드, 템플릿, 관리자 6종, 헬스 체크와 Prometheus 메트릭으로 구성됩니다.
+  </p>
+  <p>
+    README는 "18개 엔드포인트"로 기술하고 있으나, 이 문서는 OpenAPI 스펙에서
+    직접 센 값을 기준으로 합니다. 인프라는 Terraform 모듈 13개(vpc, eks, karpenter,
+    elasticache, cognito, alb, cloudfront, ecr, fsx, s3, pod_identity, github_oidc,
+    monitoring)와 Helm 차트(templates 디렉터리 20개 파일)로 정의됩니다.
   </p>
 </section>
 
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3">
-  <h2><span class="no">03</span>딥다이브 1 - 최저가 리전 선택과 디스패치</h2>
+  <h2><span class="no">03</span>가장 싼 리전 고르기 - 가격 수집과 디스패치</h2>
+  <p>
+    이 절은 시스템의 핵심 로직을 따라갑니다. 가격을 모으고, 가장 싼 리전을 고르고,
+    그 리전에 작업을 내려보내는 세 단계입니다.
+  </p>
 
   <h3>3.1 가격 수집</h3>
   <p>
-    Price Watcher는 리전별로 <span class="mono">describe_spot_price_history</span> API를
-    병렬 호출해 Linux/UNIX 기준 Spot 가격을 가져오고, 리전 안에서는 인스턴스 타입별
-    최저가 하나만 남깁니다. 결과는 <span class="mono">ZADD</span> upsert로 Sorted Set에
-    기록되므로 저장하는 순간 가격순 정렬이 끝나 있습니다. 수집 주기는
-    <span class="mono">poll_interval</span>로 제어되며 코드 기본값은 60초입니다.
+    Price Watcher는 리전별로 <span class="mono">describe_spot_price_history</span>
+    API(EC2의 Spot 가격 이력 조회 API)를 병렬 호출해 Linux/UNIX 기준 Spot 가격을
+    가져옵니다. 리전 안에서는 인스턴스 타입별 최저가 하나만 남깁니다.
+  </p>
+  <p>
+    결과는 <span class="mono">ZADD</span> upsert로 Sorted Set(점수 기준으로 자동
+    정렬되는 Redis 자료구조)에 기록됩니다. 그래서 저장하는 순간 가격순 정렬이
+    끝나 있습니다. 수집 주기는 <span class="mono">poll_interval</span>로 제어되며
+    코드 기본값은 60초입니다.
   </p>
 
   <div class="callout note">
@@ -751,10 +788,13 @@ flowchart LR
 
   <h3>3.2 리전 선택</h3>
   <p>
-    디스패처의 리전 선택은 30줄 남짓한 함수 하나입니다. Sorted Set 전체를 가격
-    오름차순으로 읽고, 요청된 인스턴스 타입과 일치하는 후보를 앞에서부터 순회하면서
-    용량 확보에 성공하는 첫 리전을 반환합니다. 용량 확보는 리전별 카운터의 원자적
-    감소이므로 디스패처가 여럿이어도 초과 배치가 없습니다.
+    가장 싼 리전을 고르는 코드는 얼마나 길까요? 30줄 남짓한 함수 하나입니다.
+    Sorted Set 전체를 가격 오름차순으로 읽고, 요청된 인스턴스 타입과 일치하는
+    후보를 앞에서부터 순회합니다. 용량 확보에 성공하는 첫 리전이 답입니다.
+  </p>
+  <p>
+    용량 확보는 리전별 카운터의 원자적 감소(중간에 다른 프로세스가 끼어들 수 없는
+    연산)입니다. 그래서 디스패처가 여럿이어도 초과 배치가 없습니다.
   </p>
 
   <div class="codeblock">
@@ -775,20 +815,27 @@ for region, price in candidates:
 
   <p>
     <span class="mono">exclude_regions</span> 인자가 이 함수의 두 번째 역할입니다.
-    실패한 작업을 재배치할 때 직전 실패 리전을 제외 목록에 넣어
-    "차순위로 저렴한 리전"이 선택되게 하려는 설계입니다. 다만 dispatcher
-    엔트리포인트(<span class="mono">main.py</span>)가 <span class="mono">requeue_fn</span>을
-    연결하지 않아, 현재 코드에서는 이 재배치 경로가 실제로 호출되지 않습니다(8.1절 참고).
+    실패한 작업을 재배치할 때 직전 실패 리전을 제외 목록에 넣습니다. 그러면
+    "차순위로 저렴한 리전"이 선택된다는 설계입니다.
+  </p>
+  <p>
+    다만 dispatcher 엔트리포인트(<span class="mono">main.py</span>)가
+    <span class="mono">requeue_fn</span>을 연결하지 않습니다. 그래서 현재 코드에서는
+    이 재배치 경로가 실제로 호출되지 않습니다(8.1절 참고).
   </p>
 
   <h3>3.3 큐 소비와 배치</h3>
   <p>
-    디스패처 본체는 <span class="mono">BRPOP</span>(타임아웃 5초) 무한 루프입니다.
-    작업을 꺼내면 리전을 선택하고, Kubernetes API로 대상 리전 EKS의
-    <span class="mono">gpu-jobs</span> 네임스페이스에 Pod를 생성한 뒤 작업 레코드를
-    기록하고 webhook과 Pub/Sub으로 사용자에게 알립니다. 가용 리전이 하나도 없으면
-    작업을 다시 큐에 넣으며, 재시도 한도는 <span class="mono">max_retries</span> 기본값
-    <strong>2회</strong>입니다. 리전별 용량 기본값은 16슬롯입니다.
+    디스패처 본체는 <span class="mono">BRPOP</span>(큐에 항목이 들어올 때까지
+    기다렸다가 꺼내는 Redis 명령, 타임아웃 5초) 무한 루프입니다. 작업을 꺼내면
+    리전을 선택합니다. 그다음 Kubernetes API로 대상 리전 EKS의
+    <span class="mono">gpu-jobs</span> 네임스페이스에 Pod를 생성하고, 작업 레코드를
+    기록한 뒤 webhook과 Pub/Sub으로 사용자에게 알립니다.
+  </p>
+  <p>
+    가용 리전이 하나도 없으면 어떻게 될까요? 작업을 다시 큐에 넣으며, 재시도
+    한도는 <span class="mono">max_retries</span> 기본값 <strong>2회</strong>입니다.
+    리전별 용량 기본값은 16슬롯입니다.
   </p>
 
   <p class="lead-def">
@@ -799,20 +846,28 @@ for region, price in candidates:
 
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
-  <h2><span class="no">04</span>딥다이브 2 - Hub-and-Spoke 스토리지</h2>
+  <h2><span class="no">04</span>데이터는 어디에 두나 - Hub-and-Spoke 스토리지</h2>
   <p>
-    작업이 매번 다른 리전에 떨어지는 구조에서는 "데이터를 어느 리전에 둘 것인가"가
-    핵심 설계 문제가 됩니다. 이 시스템의 답은 서울 S3 버킷을 단일 허브로 두는
-    것입니다. 모델, 데이터셋, 체크포인트, 결과물이 모두 허브에 모이고, GPU Pod는
-    기본값인 <span class="mono">storage_mode=s3</span>에서 S3 Mountpoint CSI로 허브
-    버킷을 직접 마운트합니다. 반복 읽기가 많아 파일시스템 성능이 필요한 작업은
-    <span class="mono">storage_mode=fsx</span>를 명시해, 각 스팟 리전에 스포크로
-    배치된 FSx for Lustre를 선택할 수 있습니다.
+    이 절은 데이터 배치 전략을 다룹니다. 작업이 매번 다른 리전에 떨어지는 구조에서는
+    "데이터를 어느 리전에 둘 것인가"가 핵심 설계 문제가 되기 때문입니다.
   </p>
   <p>
-    FSx 모드의 동기화는 애플리케이션 코드가 아니라 FSx의 Data Repository Association이
-    담당합니다. Terraform 모듈이 S3 경로와 파일시스템의 <span class="mono">/data</span>
-    경로를 연결하고, 생성/변경/삭제 이벤트에 대해 양방향 자동 동기화를 설정합니다.
+    이 시스템의 답은 서울 S3 버킷을 단일 허브로 두는 것입니다. 모델, 데이터셋,
+    체크포인트, 결과물이 모두 허브에 모입니다. GPU Pod는 기본값인
+    <span class="mono">storage_mode=s3</span>에서 S3 Mountpoint CSI(S3 버킷을
+    파일시스템처럼 마운트해 주는 Kubernetes 스토리지 드라이버)로 허브 버킷을 직접
+    마운트합니다.
+  </p>
+  <p>
+    반복 읽기가 많아 파일시스템 성능이 필요한 작업은 어떻게 할까요?
+    <span class="mono">storage_mode=fsx</span>를 명시하면, 각 스팟 리전에 스포크로
+    배치된 FSx for Lustre(고성능 병렬 파일시스템 관리형 서비스)를 선택할 수 있습니다.
+  </p>
+  <p>
+    FSx 모드의 동기화는 애플리케이션 코드가 아니라 FSx의 Data Repository
+    Association(S3 경로와 파일시스템을 연결해 자동 동기화하는 기능)이 담당합니다.
+    Terraform 모듈이 S3 경로와 파일시스템의 <span class="mono">/data</span> 경로를
+    연결합니다. 그리고 생성/변경/삭제 이벤트에 대해 양방향 자동 동기화를 설정합니다.
   </p>
 
   <div class="codeblock">
@@ -835,48 +890,60 @@ resource "aws_fsx_data_repository_association" "this" {
 
   <p>
     Kubernetes 쪽에서는 FSx CSI 드라이버 기반 PersistentVolume(용량 1,200Gi,
-    ReadWriteMany)이 각 리전 클러스터에 배포되어 있어,
+    ReadWriteMany)이 각 리전 클러스터에 배포되어 있습니다. 그래서
     <span class="mono">storage_mode=fsx</span>를 명시한 작업의 GPU Pod가
     <span class="mono">/data</span> 아래에서 모델을 읽고 체크포인트를 씁니다.
     코드 기본값은 <span class="mono">storage_mode=s3</span>이므로, 짧은 추론처럼
-    반복 읽기가 없는 작업은 별도 지정 없이 S3 Mountpoint CSI 마운트로 파일시스템
-    비용 없이 S3에 직접 접근합니다.
+    반복 읽기가 없는 작업은 별도 지정 없이 파일시스템 비용 없이 S3에 직접
+    접근합니다.
   </p>
   <p>
     이 구조의 효과는 <span class="mono">storage_mode=fsx</span> 작업의 Spot 중단
-    시나리오에서 드러납니다. us-east-1에서 쓴 체크포인트가
-    자동 내보내기로 서울 허브에 올라가고, 작업이 us-west-2로 다시 배치되면 그쪽 FSx가
-    같은 파일을 자동 가져오기로 받아오므로,
-    <strong>리전을 옮겨도 체크포인트 경로가 동일</strong>합니다.
+    시나리오에서 드러납니다. us-east-1에서 쓴 체크포인트가 자동 내보내기로 서울
+    허브에 올라갑니다. 작업이 us-west-2로 다시 배치되면 그쪽 FSx가 같은 파일을
+    자동 가져오기로 받아옵니다.
+  </p>
+  <p>
+    결과적으로 <strong>리전을 옮겨도 체크포인트 경로가 동일</strong>합니다.
     애플리케이션은 리전 이동을 인지할 필요가 없습니다.
   </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
-  <h2><span class="no">05</span>딥다이브 3 - Spot 중단 대응</h2>
+  <h2><span class="no">05</span>Spot 중단에 대응하는 방법</h2>
+  <p>
+    이 절은 Spot 인스턴스가 갑자기 회수될 때 시스템이 무엇을 하는지 다룹니다.
+    감지, 노드 교체, 재배치가 어느 계층에서 일어나는지가 관전 포인트입니다.
+  </p>
 
   <h3>5.1 Reaper의 상태 감시와 재배치</h3>
   <p>
-    중단 감지의 주체는 디스패처 안에서 함께 도는 Reaper 루프입니다.
-    <span class="mono">reap_interval</span> 기본값 <strong>10초</strong>마다 활성 작업
-    집합을 순회하며 각 Pod의 phase를 조회합니다. Succeeded면 Pod를 삭제하고 용량을
-    반환하고, 생성 후 7,200초(2시간)가 지난 작업은 타임아웃으로 정리합니다.
+    중단은 얼마나 빨리 알아챌까요? 감지 주체는 디스패처 안에서 함께 도는 Reaper
+    루프이며, <span class="mono">reap_interval</span> 기본값 <strong>10초</strong>마다
+    활성 작업 집합을 순회해 각 Pod의 phase(실행 상태)를 조회합니다. Succeeded면
+    Pod를 삭제하고 용량을 반환합니다. 생성 후 7,200초(2시간)가 지난 작업은
+    타임아웃으로 정리합니다.
+  </p>
+  <p>
     Failed 처리에는 재배치 설계가 들어 있습니다. <span class="mono">reap_job</span>은
     재시도 횟수가 한도(2회) 미만일 때 실패 리전을 제외 조건으로 붙여 작업을 다시
-    큐에 넣도록 <span class="mono">requeue_fn</span> 콜백을 받게 설계되어 있고,
-    3.2절의 <span class="mono">exclude_regions</span>가 그 짝입니다. 그러나 dispatcher
-    엔트리포인트(<span class="mono">main.py</span>)가 <span class="mono">requeue_fn</span>을
-    연결하지 않아, 현재 코드에서는 Spot 중단으로 Failed가 된 작업이 재배치 없이
-    실패로 종결됩니다(8.1절 참고).
+    큐에 넣도록 <span class="mono">requeue_fn</span> 콜백을 받게 설계되어 있습니다.
+    3.2절의 <span class="mono">exclude_regions</span>가 그 짝입니다.
+  </p>
+  <p>
+    그러나 dispatcher 엔트리포인트(<span class="mono">main.py</span>)가
+    <span class="mono">requeue_fn</span>을 연결하지 않습니다. 그래서 현재 코드에서는
+    Spot 중단으로 Failed가 된 작업이 재배치 없이 실패로 종결됩니다(8.1절 참고).
   </p>
 
   <h3>5.2 Karpenter NodePool</h3>
   <p>
-    노드 계층에서는 Karpenter NodePool이 GPU Spot 전용으로 제한되어 있습니다.
-    용량 타입은 spot만, 인스턴스 카테고리는 g 계열, 세대는 4 초과(g5, g6, g6e),
-    크기는 xlarge와 2xlarge로 좁혀져 있고 GPU 총량 한도는 16개입니다.
-    AMI는 GPU 드라이버가 내장된 Bottlerocket입니다.
+    노드 계층에서는 Karpenter NodePool(노드를 어떤 조건으로 만들지 정의하는
+    리소스)이 GPU Spot 전용으로 제한되어 있습니다. 용량 타입은 spot만 허용하고,
+    인스턴스는 g 계열의 4세대 초과(g5, g6, g6e), 크기는 xlarge와 2xlarge로
+    좁혀져 있습니다. GPU 총량 한도는 16개이고, AMI는 GPU 드라이버가 내장된
+    Bottlerocket(컨테이너 전용 경량 OS)입니다.
   </p>
 
   <div class="codeblock">
@@ -897,29 +964,44 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 
   <p>
     중단 대응은 계층별로 분담됩니다. Karpenter가 대체 Spot 노드를 프로비저닝하고,
-    애플리케이션은 <span class="mono">/data/checkpoints/</span>에 주기적으로 체크포인트를
-    남기며, 디스패처(Reaper)가 Pod 실패를 감지해 정리합니다. 다른 리전으로의
-    재시도는 5.1절에서 본 대로 <span class="mono">requeue_fn</span> 배선이 복구되어야
-    동작합니다.
-    ARCHITECTURE.md는 여기에 EKS Auto Mode의 Node Monitoring Agent가 GPU 장애 노드를
-    복구하는 계층을 추가로 서술합니다. 노드 최대 수명 2시간은 오래된 Spot 가격
-    조건에 노드가 묶이는 것을 막는 비용 장치이기도 합니다.
+    애플리케이션은 <span class="mono">/data/checkpoints/</span>에 주기적으로
+    체크포인트를 남깁니다. 디스패처(Reaper)는 Pod 실패를 감지해 정리합니다.
+  </p>
+  <p>
+    다른 리전으로의 재시도는 5.1절에서 본 대로 <span class="mono">requeue_fn</span>
+    배선이 복구되어야 동작합니다. ARCHITECTURE.md는 여기에 EKS Auto Mode의
+    Node Monitoring Agent가 GPU 장애 노드를 복구하는 계층을 추가로 서술합니다.
+    노드 최대 수명 2시간은 오래된 Spot 가격 조건에 노드가 묶이는 것을 막는
+    비용 장치이기도 합니다.
   </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6">
-  <h2><span class="no">06</span>에이전트 인터페이스 - AgentCore와 MCP Gateway</h2>
+  <h2><span class="no">06</span>AI 에이전트 연동 - AgentCore와 MCP Gateway</h2>
+  <p>
+    이 절은 사람 대신 AI가 이 시스템을 조작하는 두 가지 경로를 소개합니다.
+    시스템 안에 사는 에이전트와, 밖에서 이 시스템을 도구로 부르는 에이전트입니다.
+  </p>
 
   <h3>6.1 Strands 에이전트 (AgentCore Runtime)</h3>
   <p>
     규칙 기반 디스패치와 별개로, 자연어로 작업을 관리하는 AI 에이전트 경로가
-    있습니다. <span class="mono">src/agent/app.py</span>가 Bedrock AgentCore Runtime의
-    엔트리포인트이고, Strands Agents SDK의 Agent가 도구 5개와 시스템 프롬프트를
-    갖고 생성됩니다. 모델은 <span class="mono">agent_model</span> 설정의
-    <span class="mono">global.anthropic.claude-sonnet-4-6</span>입니다. 시스템 프롬프트는
-    표 1의 VRAM-인스턴스 매핑과 "최저가이면서 용량이 있는 리전 선호, 최저가 리전에
-    최근 선점 실패가 2회 이상이면 차순위 권고" 같은 판단 지침을 담습니다.
+    있습니다. <span class="mono">src/agent/app.py</span>가 Bedrock AgentCore
+    Runtime(AWS의 에이전트 실행 관리형 환경)의 엔트리포인트입니다. 여기서
+    Strands Agents SDK(AWS의 에이전트 개발 프레임워크)의 Agent가 도구 5개와
+    시스템 프롬프트를 갖고 생성됩니다.
+  </p>
+  <p>
+    모델은 <span class="mono">agent_model</span> 설정의
+    <span class="mono">global.anthropic.claude-sonnet-4-6</span>입니다.
+    시스템 프롬프트는 표 1의 VRAM-인스턴스 매핑과 판단 지침을 담습니다.
+    지침의 예는 "최저가이면서 용량이 있는 리전 선호, 최저가 리전에 최근 선점
+    실패가 2회 이상이면 차순위 권고"입니다.
+  </p>
+  <p>
+    에이전트가 쓸 수 있는 도구는 무엇일까요? 아래 표에서 도구 5개의 이름과 동작을
+    확인할 수 있습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -939,19 +1021,24 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
   </div>
 
   <p>
-    각 도구는 async <span class="mono">_impl</span> 함수와 동기 <span class="mono">@tool</span>
-    래퍼로 나뉩니다. <span class="mono">_impl</span>은 Redis 클라이언트를 인자로 받아
-    fakeredis로 단위 테스트가 가능하고, 래퍼는 호출 시점에 의존성을 해석해
-    <span class="mono">asyncio.run</span>으로 실행합니다. 디스패치 경로 전환은
-    <span class="mono">dispatch_mode</span> 설정(rule 또는 agent)으로 제어합니다.
+    각 도구는 async <span class="mono">_impl</span> 함수와 동기
+    <span class="mono">@tool</span> 래퍼로 나뉩니다.
+    <span class="mono">_impl</span>은 Redis 클라이언트를 인자로 받으므로
+    fakeredis(가짜 Redis 테스트 라이브러리)로 단위 테스트가 가능합니다. 래퍼는
+    호출 시점에 의존성을 해석해 <span class="mono">asyncio.run</span>으로 실행합니다.
+    디스패치 경로 전환은 <span class="mono">dispatch_mode</span> 설정(rule 또는
+    agent)으로 제어합니다.
   </p>
 
   <h3>6.2 MCP Gateway</h3>
   <p>
     반대 방향의 통합도 있습니다. AgentCore Gateway가 OpenAPI 스펙을 읽어 REST API를
-    MCP Protocol 도구로 노출하므로, 외부 AI 에이전트가 GPU Spot Lotto 자체를 도구로
-    호출할 수 있습니다. Gateway에 주입되는 스펙은 전체 API가 아니라 에이전트에게
-    유의미한 것만 추린 <span class="mono">openapi-gateway.json</span>이며,
+    MCP(AI 에이전트가 외부 도구를 부르는 표준 프로토콜) 도구로 노출합니다.
+    그래서 외부 AI 에이전트가 GPU Spot Lotto 자체를 도구로 호출할 수 있습니다.
+  </p>
+  <p>
+    노출 범위는 얼마나 될까요? Gateway에 주입되는 스펙은 전체 API가 아니라
+    에이전트에게 유의미한 것만 추린 <span class="mono">openapi-gateway.json</span>이며,
     5개 경로에 <strong>6개 오퍼레이션</strong>(가격 조회, 작업 제출/조회/취소,
     관리자 작업 목록, 통계)을 담습니다. 인증은 Gateway가 프로비저닝하는
     Cognito JWT를 사용한다고 ARCHITECTURE.md가 서술합니다.
@@ -962,9 +1049,17 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 <section class="sec" id="s7">
   <h2><span class="no">07</span>실제 운영 흐름</h2>
   <p>
-    배포 단위는 Helm 차트 하나입니다. api-server, dispatcher, price-watcher,
-    frontend 네 서비스가 같은 차트에서 나오고, dev와 prod의 차이는 values 파일로
-    갈립니다.
+    이 절은 배포와 운영이 실제로 어떻게 돌아가는지 다룹니다. 작업 하나가 제출부터
+    완료까지 지나는 길도 따라갑니다.
+  </p>
+  <p>
+    배포 단위는 Helm 차트(Kubernetes 배포 패키지) 하나입니다. api-server,
+    dispatcher, price-watcher, frontend 네 서비스가 같은 차트에서 나옵니다.
+    dev와 prod의 차이는 values 파일(환경별 설정값 파일)로 갈립니다.
+  </p>
+  <p>
+    아래 표에서는 dev와 prod가 어떤 설정에서 갈라지는지 항목별로 확인할 수
+    있습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -984,31 +1079,43 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
   </div>
 
   <p>
-    한 작업의 수명주기는 다음과 같이 흐릅니다. 사용자가 S3 presigned URL로 학습
-    데이터를 허브 버킷에 직접 올리고, <span class="mono">POST /api/jobs</span>로 작업을
-    제출합니다. 디스패처가 최저가 리전에 Pod를 만들면 Pod가 허브 데이터를
-    마운트하고(기본값 <span class="mono">storage_mode=s3</span>는 S3 Mountpoint 직접
-    마운트, <span class="mono">storage_mode=fsx</span>는 FSx 자동 가져오기),
-    학습 중 체크포인트와 결과물이 다시 허브에 모입니다. 사용자는
-    <span class="mono">/api/jobs/{job_id}/stream</span> SSE로 상태 변화를 실시간
-    수신하거나 webhook 알림을 받습니다. 이 흐름은 저장소의 데모 스크립트 4종
-    (비용 최적화 배치, Spot 중단 복구, 전체 수명주기, AI 에이전트 배치)이 실제 API
-    호출로 재연합니다.
+    한 작업의 수명주기는 다음과 같이 흐릅니다. 사용자가 S3 presigned URL(자격 증명
+    없이 일정 시간 업로드를 허용하는 서명된 주소)로 학습 데이터를 허브 버킷에 직접
+    올립니다. 그리고 <span class="mono">POST /api/jobs</span>로 작업을 제출합니다.
   </p>
   <p>
-    관측은 Prometheus 중심입니다. API 서버 <span class="mono">/metrics</span>와
-    디스패처의 별도 메트릭 포트에서 <span class="mono">JOBS_DISPATCHED</span>,
-    <span class="mono">QUEUE_DEPTH</span>, <span class="mono">SPOT_PRICE</span> 등의 지표를
-    노출하고, ServiceMonitor와 Grafana 대시보드 ConfigMap이 차트에 포함됩니다.
-    로그는 structlog 기반 JSON입니다. 테스트는 fakeredis 기반 단위 테스트 11개 모듈과
-    httpx ASGITransport + fakeredis 기반 API 통합 테스트 5개 모듈로 구성됩니다
-    (testcontainers는 dev 의존성에 선언만 되어 있고 실제로는 사용되지 않습니다).
+    디스패처가 최저가 리전에 Pod를 만들면 Pod가 허브 데이터를 마운트합니다.
+    기본값 <span class="mono">storage_mode=s3</span>는 S3 Mountpoint 직접 마운트이고,
+    <span class="mono">storage_mode=fsx</span>는 FSx 자동 가져오기입니다.
+    학습 중 체크포인트와 결과물은 다시 허브에 모입니다.
+  </p>
+  <p>
+    사용자는 <span class="mono">/api/jobs/{job_id}/stream</span> SSE로 상태 변화를
+    실시간 수신하거나 webhook 알림을 받습니다. 이 흐름은 저장소의 데모 스크립트
+    4종(비용 최적화 배치, Spot 중단 복구, 전체 수명주기, AI 에이전트 배치)이
+    실제 API 호출로 재연합니다.
+  </p>
+  <p>
+    관측은 Prometheus(오픈소스 지표 수집 시스템) 중심입니다. API 서버
+    <span class="mono">/metrics</span>와 디스패처의 별도 메트릭 포트에서
+    <span class="mono">JOBS_DISPATCHED</span>, <span class="mono">QUEUE_DEPTH</span>,
+    <span class="mono">SPOT_PRICE</span> 등의 지표를 노출합니다. ServiceMonitor와
+    Grafana 대시보드 ConfigMap이 차트에 포함되고, 로그는 structlog 기반 JSON입니다.
+  </p>
+  <p>
+    테스트는 fakeredis 기반 단위 테스트 11개 모듈과 httpx ASGITransport + fakeredis
+    기반 API 통합 테스트 5개 모듈로 구성됩니다. testcontainers는 dev 의존성에
+    선언만 되어 있고 실제로는 사용되지 않습니다.
   </p>
 </section>
 
 <!-- ===================== 08 ===================== -->
 <section class="sec" id="s8">
   <h2><span class="no">08</span>한계와 결론</h2>
+  <p>
+    이 절은 코드에서 확인한 문제점과 구조적 한계를 정리합니다. 이 시스템을 참고하려는
+    팀이 무엇을 먼저 고쳐야 하는지도 짚습니다.
+  </p>
 
   <h3>8.1 설정과 코드의 불일치</h3>
   <div class="callout warn">
@@ -1017,30 +1124,38 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
       <span class="mono">queue_processor.py</span>는 <span class="mono">k8s_mode == "live"</span>일
       때만 실제 Kubernetes API로 Pod를 생성합니다. 그런데
       <span class="mono">values.yaml</span>과 <span class="mono">values-prod.yaml</span>은
-      <span class="mono">k8sMode: "real"</span>을 지정하므로, 이 값으로 배포하면 운영
-      환경에서도 dry-run 분기를 타서 <strong>Pod가 생성되지 않습니다</strong>.
+      <span class="mono">k8sMode: "real"</span>을 지정합니다. 이 값으로 배포하면 운영
+      환경에서도 dry-run(실제 생성 없이 흉내만 내는 모드) 분기를 타서
+      <strong>Pod가 생성되지 않습니다</strong>.
       <span class="mono">priceMode: "real"</span>은 코드가 mock 여부만 검사하기 때문에
       우연히 실가격 수집으로 동작하지만, k8sMode는 배포 전 교정이 필요합니다.
     </p>
   </div>
   <p>
     문서와 코드의 어긋남도 몇 곳 있습니다. README의 환경 변수 표는
-    <span class="mono">AUTH_ENABLED</span> 기본값을 false, <span class="mono">K8S_MODE</span>
-    기본값을 dry-run으로 적지만 <span class="mono">config.py</span>의 실제 기본값은
-    각각 <span class="mono">True</span>와 <span class="mono">live</span>입니다.
+    <span class="mono">AUTH_ENABLED</span> 기본값을 false,
+    <span class="mono">K8S_MODE</span> 기본값을 dry-run으로 적습니다. 그러나
+    <span class="mono">config.py</span>의 실제 기본값은 각각
+    <span class="mono">True</span>와 <span class="mono">live</span>입니다.
+  </p>
+  <p>
     ARCHITECTURE.md가 에이전트 런타임 설정으로 참조하는
-    <span class="mono">.bedrock_agentcore.yaml</span> 파일은 저장소에 존재하지 않습니다.
-    폴링 주기(60초 대 30초)와 엔드포인트 수(18 대 19 오퍼레이션)의 차이는 앞
-    섹션에서 다뤘습니다.
+    <span class="mono">.bedrock_agentcore.yaml</span> 파일은 저장소에 존재하지
+    않습니다. 폴링 주기(60초 대 30초)와 엔드포인트 수(18 대 19 오퍼레이션)의
+    차이는 앞 섹션에서 다뤘습니다.
   </p>
   <p>
     설계와 배선의 불일치도 있습니다. <span class="mono">reap_job</span>과
-    <span class="mono">select_region</span>에는 실패 리전 제외 기반 재배치 인터페이스
-    (<span class="mono">requeue_fn</span>, <span class="mono">exclude_regions</span>)가
-    갖춰져 있지만, dispatcher 엔트리포인트인 <span class="mono">main.py</span>가
-    <span class="mono">requeue_fn</span>을 연결하지 않습니다. 그 결과 현재 코드에서는
-    Spot 중단으로 Failed가 된 작업이 재배치 없이 실패로 종결되므로, 5.1절의 재배치
-    설계를 실제로 동작시키려면 k8sMode 교정과 함께 이 배선도 복구해야 합니다.
+    <span class="mono">select_region</span>에는 실패 리전 제외 기반 재배치
+    인터페이스(<span class="mono">requeue_fn</span>,
+    <span class="mono">exclude_regions</span>)가 갖춰져 있습니다. 그러나 dispatcher
+    엔트리포인트인 <span class="mono">main.py</span>가
+    <span class="mono">requeue_fn</span>을 연결하지 않습니다.
+  </p>
+  <p>
+    그 결과 현재 코드에서는 Spot 중단으로 Failed가 된 작업이 재배치 없이 실패로
+    종결됩니다. 5.1절의 재배치 설계를 실제로 동작시키려면 k8sMode 교정과 함께
+    이 배선도 복구해야 합니다.
   </p>
 
   <h3>8.2 구조적 한계</h3>
@@ -1059,14 +1174,22 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 
   <h3>8.3 결론</h3>
   <p>
-    GPU Spot Lotto는 "Redis 자료구조에 문제를 정확히 대응시키는" 설계가 돋보이는
-    시스템입니다. 가격 정렬은 Sorted Set, 큐는 List와 BRPOP, 동시성 제어는 원자적
-    카운터로 풀고, 리전 간 데이터 문제는 애플리케이션이 아니라 S3 허브(기본값)와
-    FSx 자동 동기화(선택)에 위임합니다. 그 결과 디스패치 핵심 로직이 수십 줄 단위로
-    유지되고 fakeredis만으로 검증 가능합니다. 멀티 리전 Spot 운영을 검토하는 팀이라면
-    최저가 선택과 Hub-and-Spoke 스토리지 패턴을 그대로 참고할 만합니다. 다만 제외
-    목록 기반 재배치는 인터페이스만 설계된 상태이므로, 적용 전에는 8.1절의 k8sMode
-    값 교정과 <span class="mono">requeue_fn</span> 배선 복구가 첫 번째 할 일입니다.
+    한 문장으로 요약하면, GPU Spot Lotto는 가격 비교와 데이터 동기화를 각각 Redis와
+    스토리지 서비스에 맡겨 코드를 최소화한 멀티 리전 GPU Spot 시스템이지만, 재배치
+    배선과 k8sMode 설정을 고쳐야 설계대로 동작합니다.
+  </p>
+  <p>
+    이 시스템은 "Redis 자료구조에 문제를 정확히 대응시키는" 설계가 돋보입니다.
+    가격 정렬은 Sorted Set, 큐는 List와 BRPOP, 동시성 제어는 원자적 카운터로
+    풉니다. 리전 간 데이터 문제는 애플리케이션이 아니라 S3 허브(기본값)와 FSx
+    자동 동기화(선택)에 위임합니다.
+  </p>
+  <p>
+    그 결과 디스패치 핵심 로직이 수십 줄 단위로 유지되고 fakeredis만으로 검증
+    가능합니다. 멀티 리전 Spot 운영을 검토하는 팀이라면 최저가 선택과
+    Hub-and-Spoke 스토리지 패턴을 그대로 참고할 만합니다. 다만 제외 목록 기반
+    재배치는 인터페이스만 설계된 상태이므로, 적용 전에는 8.1절의 k8sMode 값 교정과
+    <span class="mono">requeue_fn</span> 배선 복구가 첫 번째 할 일입니다.
   </p>
 </section>
 
@@ -1168,9 +1291,9 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
   <p class="eyebrow">AWS Core / Architecture Deep Dive</p>
   <h1>GPU Spot Lotto Architecture Analysis - Multi-Region GPU Spot Price Monitoring and Workload Dispatch</h1>
   <p class="subtitle">
-    An analysis of a system in which a Seoul control plane watches GPU Spot prices across
-    three US regions and places workloads on the cheapest region's EKS cluster, based on
-    the source code and IaC configuration.
+    A control system in Seoul watches GPU Spot prices across three US regions. It then
+    places workloads on the cheapest region's EKS cluster. This document analyzes that
+    structure based on the source code and IaC configuration.
   </p>
 
   <div class="meta">
@@ -1185,11 +1308,11 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>A control plane in Seoul (ap-northeast-2) collects GPU Spot prices from three US regions (us-east-1, us-east-2, us-west-2) into a Redis Sorted Set, and a dispatcher creates GPU Pods on the cheapest region's EKS. The polling cycle defaults to <strong>60 seconds</strong> in code and 30 seconds in the deployment configuration (Helm values).</li>
-    <li>Data converges on an S3 hub bucket in Seoul. Under the default <span class="mono">storage_mode=s3</span>, GPU Pods mount the hub directly via the S3 Mountpoint CSI driver; only jobs that explicitly set <span class="mono">storage_mode=fsx</span> use the per-region FSx Lustre auto-import/auto-export (Hub-and-Spoke) synchronization.</li>
-    <li>On Spot interruption, a Reaper checks Pod status every 10 seconds. Rescheduling that excludes the failed region is designed as an interface in <span class="mono">reap_job</span> and <span class="mono">select_region</span>, but the dispatcher entrypoint (<span class="mono">main.py</span>) never wires up <span class="mono">requeue_fn</span>, so in the current code Failed jobs end as failures without rescheduling.</li>
-    <li>A Strands Agents SDK-based agent (5 tools) runs on Bedrock AgentCore Runtime, and AgentCore Gateway exposes 6 REST API operations as MCP tools so external agents can use this system as a tool.</li>
-    <li>The production values file's <span class="mono">k8sMode: "real"</span> differs from the value the code recognizes (<span class="mono">live</span>), so deploying it as-is means <strong>no Pods are actually created</strong>. This value must be corrected before deployment.</li>
+    <li>A control system in Seoul (ap-northeast-2) continuously collects GPU Spot prices from three US regions (us-east-1, us-east-2, us-west-2) and places GPU jobs on the cheapest region's EKS (AWS managed Kubernetes). The price-check cycle defaults to <strong>60 seconds</strong> in code and to 30 seconds in the actual deployment configuration (Helm values).</li>
+    <li>All data converges on a single S3 hub bucket in Seoul. Under the default <span class="mono">storage_mode=s3</span>, GPU Pods mount the hub bucket directly like a filesystem; only jobs that set <span class="mono">storage_mode=fsx</span> use automatic synchronization (Hub-and-Spoke) between per-region FSx Lustre and the hub.</li>
+    <li>When a job fails, for example because Spot capacity is reclaimed, a watchdog loop called the Reaper checks status every 10 seconds. Re-placing the job in another region exists only as a design (<span class="mono">reap_job</span>, <span class="mono">select_region</span>) with the connecting code (<span class="mono">requeue_fn</span>) missing, so in the current code failed jobs simply end without rescheduling.</li>
+    <li>An AI agent that manages jobs in natural language (5 tools) runs on Bedrock AgentCore Runtime. In the other direction, AgentCore Gateway exposes 6 REST API operations as MCP (a standard protocol that lets AI agents call external tools) tools, so outside agents can use this system as a tool too.</li>
+    <li>The production values file's <span class="mono">k8sMode: "real"</span> differs from the value the code recognizes (<span class="mono">live</span>). Deployed as-is, <strong>no Pods are actually created</strong>, so this value must be fixed before deployment.</li>
   </ul>
 </section>
 
@@ -1197,12 +1320,12 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 <nav class="toc" aria-label="Table of contents">
   <p class="toc-title">Contents</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1-en">Problem Definition - Spot Price Volatility and Cross-Region Gaps</a></li>
-    <li><span class="no">02</span><a href="#s2-en">How It Works - A Seoul Control Plane and Three Spot Regions</a></li>
-    <li><span class="no">03</span><a href="#s3-en">Deep Dive 1 - Cheapest-Region Selection and Dispatch</a></li>
-    <li><span class="no">04</span><a href="#s4-en">Deep Dive 2 - Hub-and-Spoke Storage</a></li>
-    <li><span class="no">05</span><a href="#s5-en">Deep Dive 3 - Handling Spot Interruptions</a></li>
-    <li><span class="no">06</span><a href="#s6-en">The Agent Interface - AgentCore and the MCP Gateway</a></li>
+    <li><span class="no">01</span><a href="#s1-en">Why This Exists - Spot Price Swings and Regional Gaps</a></li>
+    <li><span class="no">02</span><a href="#s2-en">The Big Picture - Control in Seoul, Execution in the US</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Picking the Cheapest Region - Price Collection and Dispatch</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Where the Data Lives - Hub-and-Spoke Storage</a></li>
+    <li><span class="no">05</span><a href="#s5-en">How Spot Interruptions Are Handled</a></li>
+    <li><span class="no">06</span><a href="#s6-en">AI Agent Integration - AgentCore and the MCP Gateway</a></li>
     <li><span class="no">07</span><a href="#s7-en">Operations in Practice</a></li>
     <li><span class="no">08</span><a href="#s8-en">Limitations and Conclusion</a></li>
     <li><span class="no">--</span><a href="#refs-en">References</a></li>
@@ -1213,23 +1336,34 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 
 <!-- ===================== 01 (EN) ===================== -->
 <section class="sec" id="s1-en">
-  <h2><span class="no">01</span>Problem Definition - Spot Price Volatility and Cross-Region Gaps</h2>
+  <h2><span class="no">01</span>Why This Exists - Spot Price Swings and Regional Gaps</h2>
   <p>
-    EC2 Spot instances are cheaper than On-Demand, but they come with two costs.
-    Prices move differently in every region and Availability Zone, and when EC2
-    reclaims capacity, the instance is terminated after a
+    This section explains the problem the system tries to solve. It starts with why
+    using GPUs cheaply is harder than it sounds.
+  </p>
+  <p>
+    EC2 Spot instances let you rent AWS's spare server capacity at a discount. They
+    are cheaper than On-Demand (the pay-full-price model), but two burdens come with
+    them. First, prices move differently in every region and Availability Zone
+    (an isolated data center group within a region).
+  </p>
+  <p>
+    Second, when AWS reclaims capacity, the instance is terminated after a
     <strong>2-minute interruption notice</strong> (per the official EC2 documentation).
-    Pinning a GPU training workload to one region means missing cheaper prices in other
-    regions, and when an interruption happens, checkpoint recovery and re-placement
+    Pinning a GPU training workload to one region means missing cheaper prices
+    elsewhere. And when an interruption happens, checkpoint recovery and re-placement
     become manual work.
   </p>
   <p>
     GPU Spot Lotto targets both problems. It continuously compares prices across
-    regions, places a job in the cheapest region at submission time, and is designed
-    to reschedule work to another region when an interruption is detected (the current
-    implementation status of the rescheduling path is covered in sections 5.1 and 8.1).
-    The watch list is the 6 GPU instance types defined in
-    <span class="mono">src/common/config.py</span>.
+    regions and places a job in the cheapest region at submission time. Rescheduling
+    work to another region on interruption is also a design goal (the current
+    implementation status of that path is covered in sections 5.1 and 8.1).
+  </p>
+  <p>
+    So which GPUs does it watch? The watch list is the 6 GPU instance types defined in
+    <span class="mono">src/common/config.py</span>. The table below shows each type's
+    GPU model and GPU memory (VRAM) capacity.
   </p>
 
   <div class="tbl-wrap">
@@ -1261,15 +1395,25 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># 노드 최대 수명 2�
 
 <!-- ===================== 02 (EN) ===================== -->
 <section class="sec" id="s2-en">
-  <h2><span class="no">02</span>How It Works - A Seoul Control Plane and Three Spot Regions</h2>
+  <h2><span class="no">02</span>The Big Picture - Control in Seoul, Execution in the US</h2>
   <p>
-    The entire control plane lives in the Seoul region. Users reach a FastAPI-based
-    API server through CloudFront, WAF, and an ALB, and the API server uses Redis
-    (ElastiCache) as both the price store and the job queue. Price collection
-    (Price Watcher), queue consumption (Dispatcher), and completion cleanup (Reaper)
-    each run as independent processes that together form one pipeline. GPUs actually
-    run on EKS clusters in three US regions, and Karpenter provisions the nodes as
-    Spot only.
+    This section gives a bird's-eye view of how the system is laid out. The key point
+    is that the part that decides and the part that actually runs GPUs are
+    geographically separated.
+  </p>
+  <p>
+    The entire control plane (the control layer that accepts jobs and decides
+    placement) lives in the Seoul region. Users reach a FastAPI (a Python web
+    framework) based API server through CloudFront, WAF, and an ALB. The API server
+    uses Redis (an in-memory data store, here ElastiCache) as both the price store
+    and the job queue.
+  </p>
+  <p>
+    On top of that, three independent processes form one pipeline. The Price Watcher
+    collects prices, the Dispatcher consumes the queue, and the Reaper cleans up
+    completed work. GPUs actually run on EKS clusters in three US regions, and
+    Karpenter (an autoscaling tool that adds Kubernetes nodes on demand) provisions
+    the nodes as Spot only.
   </p>
 
   <figure class="diagram">
@@ -1294,8 +1438,12 @@ flowchart LR
 
   <p>
     State is unified in a single Redis. Prices, the queue, job records, and per-region
-    capacity counters each map to exactly one Redis data structure, so there is no
+    capacity counters each map to exactly one Redis data structure. So there is no
     separate message broker between components.
+  </p>
+  <p>
+    The table below shows which data lives in which Redis structure, along with each
+    key's role.
   </p>
 
   <div class="tbl-wrap">
@@ -1316,28 +1464,42 @@ flowchart LR
   </div>
 
   <p>
-    Per <span class="mono">openapi.json</span>, the API surface is <strong>17 paths and
-    19 operations</strong>: job CRUD and an SSE stream, price queries, S3 presigned
-    uploads, templates, six admin operations, health checks, and Prometheus metrics.
-    The README says "18 endpoints", but this document uses the counts taken from the
-    OpenAPI spec. The infrastructure is defined by 13 Terraform modules (vpc, eks,
-    karpenter, elasticache, cognito, alb, cloudfront, ecr, fsx, s3, pod_identity,
-    github_oidc, monitoring) and one Helm chart (20 files in the templates directory).
+    How big is the API? Per <span class="mono">openapi.json</span>, the surface is
+    <strong>17 paths and 19 operations</strong>: job CRUD and an SSE (a streaming
+    method where the server pushes status changes in real time) stream, price
+    queries, S3 presigned uploads, templates, six admin operations, health checks,
+    and Prometheus metrics.
+  </p>
+  <p>
+    The README says "18 endpoints", but this document uses the counts taken directly
+    from the OpenAPI spec. The infrastructure is defined by 13 Terraform modules
+    (vpc, eks, karpenter, elasticache, cognito, alb, cloudfront, ecr, fsx, s3,
+    pod_identity, github_oidc, monitoring) and one Helm chart (20 files in the
+    templates directory).
   </p>
 </section>
 
 <!-- ===================== 03 (EN) ===================== -->
 <section class="sec" id="s3-en">
-  <h2><span class="no">03</span>Deep Dive 1 - Cheapest-Region Selection and Dispatch</h2>
+  <h2><span class="no">03</span>Picking the Cheapest Region - Price Collection and Dispatch</h2>
+  <p>
+    This section follows the system's core logic. There are three steps: collect
+    prices, pick the cheapest region, and send the job there.
+  </p>
 
   <h3>3.1 Price collection</h3>
   <p>
     The Price Watcher calls the <span class="mono">describe_spot_price_history</span>
-    API in parallel per region to fetch Linux/UNIX Spot prices, and keeps only the
-    single lowest price per instance type within each region. Results are written to
-    the Sorted Set with a <span class="mono">ZADD</span> upsert, so the data is already
-    sorted by price the moment it is stored. The collection cycle is controlled by
-    <span class="mono">poll_interval</span>, with a code default of 60 seconds.
+    API (EC2's Spot price history query API) in parallel per region to fetch
+    Linux/UNIX Spot prices. Within each region, it keeps only the single lowest price
+    per instance type.
+  </p>
+  <p>
+    Results are written with a <span class="mono">ZADD</span> upsert to a Sorted Set
+    (a Redis structure that keeps members automatically ordered by score). So the
+    data is already sorted by price the moment it is stored. The collection cycle is
+    controlled by <span class="mono">poll_interval</span>, with a code default of
+    60 seconds.
   </p>
 
   <div class="callout note">
@@ -1354,12 +1516,15 @@ flowchart LR
 
   <h3>3.2 Region selection</h3>
   <p>
-    The dispatcher's region selection is a single function of roughly 30 lines. It
-    reads the entire Sorted Set in ascending price order, walks the candidates that
-    match the requested instance type from the front, and returns the first region
-    where capacity acquisition succeeds. Capacity acquisition is an atomic decrement
-    of the per-region counter, so there is no over-placement even with multiple
-    dispatchers.
+    How much code does it take to pick the cheapest region? A single function of
+    roughly 30 lines. It reads the entire Sorted Set in ascending price order and
+    walks the candidates that match the requested instance type from the front.
+    The first region where capacity acquisition succeeds is the answer.
+  </p>
+  <p>
+    Capacity acquisition is an atomic decrement (an operation no other process can
+    interrupt midway) of the per-region counter. So there is no over-placement even
+    with multiple dispatchers.
   </p>
 
   <div class="codeblock">
@@ -1380,21 +1545,28 @@ for region, price in candidates:
 
   <p>
     The <span class="mono">exclude_regions</span> argument is this function's second
-    role. The design intent is that when a failed job is rescheduled, the region it
-    just failed in goes on the exclusion list so the "next-cheapest region" gets
-    picked. However, the dispatcher entrypoint (<span class="mono">main.py</span>)
-    never wires up <span class="mono">requeue_fn</span>, so in the current code this
+    role. When a failed job is rescheduled, the region it just failed in goes on the
+    exclusion list. The design intent is that the "next-cheapest region" then gets
+    picked.
+  </p>
+  <p>
+    However, the dispatcher entrypoint (<span class="mono">main.py</span>) never
+    wires up <span class="mono">requeue_fn</span>. So in the current code this
     rescheduling path is never actually invoked (see section 8.1).
   </p>
 
   <h3>3.3 Queue consumption and placement</h3>
   <p>
-    The dispatcher body is an infinite <span class="mono">BRPOP</span> loop (5-second
-    timeout). When it pops a job, it selects a region, creates a Pod in the
-    <span class="mono">gpu-jobs</span> namespace of the target region's EKS via the
-    Kubernetes API, writes the job record, and notifies the user via webhook and
-    Pub/Sub. If no region is available at all, the job is pushed back onto the queue;
-    the retry limit is the <span class="mono">max_retries</span> default of
+    The dispatcher body is an infinite <span class="mono">BRPOP</span> (a Redis
+    command that waits for an item to arrive on a queue and then pops it; 5-second
+    timeout) loop. When it pops a job, it selects a region. It then creates a Pod in
+    the <span class="mono">gpu-jobs</span> namespace of the target region's EKS via
+    the Kubernetes API, writes the job record, and notifies the user via webhook and
+    Pub/Sub.
+  </p>
+  <p>
+    What if no region is available at all? The job is pushed back onto the queue,
+    and the retry limit is the <span class="mono">max_retries</span> default of
     <strong>2</strong>. The per-region capacity default is 16 slots.
   </p>
 
@@ -1407,22 +1579,31 @@ for region, price in candidates:
 
 <!-- ===================== 04 (EN) ===================== -->
 <section class="sec" id="s4-en">
-  <h2><span class="no">04</span>Deep Dive 2 - Hub-and-Spoke Storage</h2>
+  <h2><span class="no">04</span>Where the Data Lives - Hub-and-Spoke Storage</h2>
   <p>
-    In a structure where each job may land in a different region, "which region holds
-    the data" becomes the central design problem. This system's answer is a single
-    hub: an S3 bucket in Seoul. Models, datasets, checkpoints, and outputs all
-    converge on the hub, and under the default <span class="mono">storage_mode=s3</span>
-    the GPU Pod mounts the hub bucket directly via the S3 Mountpoint CSI driver. Jobs
-    with heavy repeated reads that need filesystem performance can explicitly set
-    <span class="mono">storage_mode=fsx</span> to use FSx for Lustre deployed as a
-    spoke in each Spot region.
+    This section covers the data placement strategy. In a structure where each job
+    may land in a different region, "which region holds the data" becomes the central
+    design problem.
+  </p>
+  <p>
+    This system's answer is a single hub: an S3 bucket in Seoul. Models, datasets,
+    checkpoints, and outputs all converge on the hub. Under the default
+    <span class="mono">storage_mode=s3</span>, the GPU Pod mounts the hub bucket
+    directly via the S3 Mountpoint CSI driver (a Kubernetes storage driver that
+    mounts an S3 bucket like a filesystem).
+  </p>
+  <p>
+    What about jobs with heavy repeated reads that need filesystem performance? They
+    can explicitly set <span class="mono">storage_mode=fsx</span> to use FSx for
+    Lustre (a managed high-performance parallel filesystem) deployed as a spoke in
+    each Spot region.
   </p>
   <p>
     In FSx mode, synchronization is handled not by application code but by FSx's
-    Data Repository Association. The Terraform module links the S3 path to the
-    filesystem's <span class="mono">/data</span> path and configures bidirectional
-    automatic sync for create/change/delete events.
+    Data Repository Association (a feature that links an S3 path to the filesystem
+    and syncs them automatically). The Terraform module links the S3 path to the
+    filesystem's <span class="mono">/data</span> path. It then configures
+    bidirectional automatic sync for create/change/delete events.
   </p>
 
   <div class="codeblock">
@@ -1445,50 +1626,64 @@ resource "aws_fsx_data_repository_association" "this" {
 
   <p>
     On the Kubernetes side, an FSx CSI driver-based PersistentVolume (1,200Gi,
-    ReadWriteMany) is deployed to each regional cluster, so the GPU Pods of jobs that
+    ReadWriteMany) is deployed to each regional cluster. So the GPU Pods of jobs that
     explicitly set <span class="mono">storage_mode=fsx</span> read models and write
     checkpoints under <span class="mono">/data</span>. Since the code default is
     <span class="mono">storage_mode=s3</span>, jobs without repeated reads - short
-    inference runs, for example - access S3 directly through the S3 Mountpoint CSI
-    mount with no filesystem cost.
+    inference runs, for example - access S3 directly with no filesystem cost.
   </p>
   <p>
     The payoff of this structure shows in the Spot interruption scenario for
-    <span class="mono">storage_mode=fsx</span> jobs. A checkpoint written in us-east-1
-    is auto-exported to the Seoul hub, and when the job is re-placed in us-west-2 that
-    region's FSx auto-imports the same files, so
-    <strong>the checkpoint path stays identical across regions</strong>.
+    <span class="mono">storage_mode=fsx</span> jobs. A checkpoint written in
+    us-east-1 is auto-exported to the Seoul hub. When the job is re-placed in
+    us-west-2, that region's FSx auto-imports the same files.
+  </p>
+  <p>
+    As a result, <strong>the checkpoint path stays identical across regions</strong>.
     The application never needs to know it moved.
   </p>
 </section>
 
 <!-- ===================== 05 (EN) ===================== -->
 <section class="sec" id="s5-en">
-  <h2><span class="no">05</span>Deep Dive 3 - Handling Spot Interruptions</h2>
+  <h2><span class="no">05</span>How Spot Interruptions Are Handled</h2>
+  <p>
+    This section covers what the system does when a Spot instance is suddenly
+    reclaimed. The thing to watch is which layer handles detection, node replacement,
+    and rescheduling.
+  </p>
 
   <h3>5.1 The Reaper's status watch and rescheduling</h3>
   <p>
-    Interruption detection is done by the Reaper loop that runs inside the dispatcher.
-    Every <span class="mono">reap_interval</span> (default <strong>10 seconds</strong>)
-    it iterates the active job set and checks each Pod's phase. If Succeeded, it
-    deletes the Pod and returns the capacity; jobs older than 7,200 seconds (2 hours)
-    are cleaned up as timeouts. The Failed path carries the rescheduling design:
+    How quickly is an interruption noticed? Detection is done by the Reaper loop that
+    runs inside the dispatcher, which iterates the active job set every
+    <span class="mono">reap_interval</span> (default <strong>10 seconds</strong>) and
+    checks each Pod's phase (execution state). If Succeeded, it deletes the Pod and
+    returns the capacity. Jobs older than 7,200 seconds (2 hours) are cleaned up as
+    timeouts.
+  </p>
+  <p>
+    The Failed path carries the rescheduling design.
     <span class="mono">reap_job</span> is designed to take a
     <span class="mono">requeue_fn</span> callback that re-enqueues the job with the
-    failed region attached as an exclusion when the retry count is under the limit (2),
-    pairing with <span class="mono">exclude_regions</span> from section 3.2. However,
-    the dispatcher entrypoint (<span class="mono">main.py</span>) never wires up
-    <span class="mono">requeue_fn</span>, so in the current code a job that becomes
-    Failed due to a Spot interruption ends as a failure without rescheduling
+    failed region attached as an exclusion when the retry count is under the
+    limit (2). It pairs with <span class="mono">exclude_regions</span> from
+    section 3.2.
+  </p>
+  <p>
+    However, the dispatcher entrypoint (<span class="mono">main.py</span>) never
+    wires up <span class="mono">requeue_fn</span>. So in the current code, a job that
+    becomes Failed due to a Spot interruption ends as a failure without rescheduling
     (see section 8.1).
   </p>
 
   <h3>5.2 Karpenter NodePool</h3>
   <p>
-    At the node layer, the Karpenter NodePool is restricted to GPU Spot only. The
-    capacity type is spot only, the instance category is the g family, the generation
-    is greater than 4 (g5, g6, g6e), the sizes are narrowed to xlarge and 2xlarge,
-    and the total GPU limit is 16. The AMI is Bottlerocket with GPU drivers built in.
+    At the node layer, the Karpenter NodePool (the resource that defines what kind of
+    nodes may be created) is restricted to GPU Spot only. The capacity type allows
+    spot only, and the instances are narrowed to the g family above generation 4
+    (g5, g6, g6e) in xlarge and 2xlarge sizes. The total GPU limit is 16, and the AMI
+    is Bottlerocket (a minimal container-focused OS) with GPU drivers built in.
   </p>
 
   <div class="codeblock">
@@ -1509,31 +1704,46 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
 
   <p>
     Interruption handling is split across layers. Karpenter provisions replacement
-    Spot nodes, the application periodically writes checkpoints to
-    <span class="mono">/data/checkpoints/</span>, and the dispatcher (Reaper) detects
-    Pod failures and cleans up. Retrying in another region only works once the
-    <span class="mono">requeue_fn</span> wiring from section 5.1 is restored.
-    ARCHITECTURE.md additionally describes a layer where EKS Auto Mode's Node
-    Monitoring Agent recovers nodes with GPU faults. The 2-hour node lifetime cap is
-    also a cost control that keeps nodes from staying pinned to stale Spot pricing.
+    Spot nodes, and the application periodically writes checkpoints to
+    <span class="mono">/data/checkpoints/</span>. The dispatcher (Reaper) detects Pod
+    failures and cleans up.
+  </p>
+  <p>
+    Retrying in another region only works once the <span class="mono">requeue_fn</span>
+    wiring from section 5.1 is restored. ARCHITECTURE.md additionally describes a
+    layer where EKS Auto Mode's Node Monitoring Agent recovers nodes with GPU faults.
+    The 2-hour node lifetime cap is also a cost control that keeps nodes from staying
+    pinned to stale Spot pricing.
   </p>
 </section>
 
 <!-- ===================== 06 (EN) ===================== -->
 <section class="sec" id="s6-en">
-  <h2><span class="no">06</span>The Agent Interface - AgentCore and the MCP Gateway</h2>
+  <h2><span class="no">06</span>AI Agent Integration - AgentCore and the MCP Gateway</h2>
+  <p>
+    This section introduces two paths where an AI operates this system instead of a
+    person. One is an agent living inside the system; the other is outside agents
+    calling this system as a tool.
+  </p>
 
   <h3>6.1 The Strands agent (AgentCore Runtime)</h3>
   <p>
     Separate from rule-based dispatch, there is an AI agent path that manages jobs in
-    natural language. <span class="mono">src/agent/app.py</span> is the Bedrock
-    AgentCore Runtime entrypoint, and a Strands Agents SDK Agent is created with 5
-    tools and a system prompt. The model is
-    <span class="mono">global.anthropic.claude-sonnet-4-6</span> from the
-    <span class="mono">agent_model</span> setting. The system prompt carries the
-    VRAM-to-instance mapping from Table 1 and judgment guidance such as "prefer the
-    cheapest region that has capacity; if the cheapest region has 2 or more recent
-    preemption failures, recommend the runner-up".
+    natural language. <span class="mono">src/agent/app.py</span> is the entrypoint
+    for Bedrock AgentCore Runtime (AWS's managed environment for running agents).
+    There, a Strands Agents SDK (AWS's agent development framework) Agent is created
+    with 5 tools and a system prompt.
+  </p>
+  <p>
+    The model is <span class="mono">global.anthropic.claude-sonnet-4-6</span> from
+    the <span class="mono">agent_model</span> setting. The system prompt carries the
+    VRAM-to-instance mapping from Table 1 plus judgment guidance. One example:
+    "prefer the cheapest region that has capacity; if the cheapest region has 2 or
+    more recent preemption failures, recommend the runner-up".
+  </p>
+  <p>
+    What tools does the agent get? The table below shows the 5 tools and what each
+    one does.
   </p>
 
   <div class="tbl-wrap">
@@ -1555,20 +1765,25 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
   <p>
     Each tool is split into an async <span class="mono">_impl</span> function and a
     synchronous <span class="mono">@tool</span> wrapper.
-    <span class="mono">_impl</span> takes a Redis client as an argument so it can be
-    unit-tested with fakeredis, and the wrapper resolves dependencies at call time and
-    runs with <span class="mono">asyncio.run</span>. Switching the dispatch path is
-    controlled by the <span class="mono">dispatch_mode</span> setting (rule or agent).
+    <span class="mono">_impl</span> takes a Redis client as an argument, so it can be
+    unit-tested with fakeredis (a fake Redis testing library). The wrapper resolves
+    dependencies at call time and runs with <span class="mono">asyncio.run</span>.
+    Switching the dispatch path is controlled by the
+    <span class="mono">dispatch_mode</span> setting (rule or agent).
   </p>
 
   <h3>6.2 MCP Gateway</h3>
   <p>
     The integration also runs in the opposite direction. AgentCore Gateway reads an
-    OpenAPI spec and exposes the REST API as MCP Protocol tools, so external AI agents
-    can call GPU Spot Lotto itself as a tool. The spec injected into the Gateway is
-    not the full API but <span class="mono">openapi-gateway.json</span>, trimmed to
-    what matters to agents: 5 paths with <strong>6 operations</strong> (price query,
-    job submit/get/cancel, admin job list, statistics). ARCHITECTURE.md states that
+    OpenAPI spec and exposes the REST API as MCP (a standard protocol that lets AI
+    agents call external tools) tools. So external AI agents can call GPU Spot Lotto
+    itself as a tool.
+  </p>
+  <p>
+    How much is exposed? The spec injected into the Gateway is not the full API but
+    <span class="mono">openapi-gateway.json</span>, trimmed to what matters to
+    agents: 5 paths with <strong>6 operations</strong> (price query, job
+    submit/get/cancel, admin job list, statistics). ARCHITECTURE.md states that
     authentication uses a Cognito JWT provisioned by the Gateway.
   </p>
 </section>
@@ -1577,9 +1792,17 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Operations in Practice</h2>
   <p>
-    The deployment unit is a single Helm chart. Four services - api-server,
-    dispatcher, price-watcher, and frontend - come out of the same chart, and dev
-    and prod diverge only through values files.
+    This section covers how deployment and operations actually work. It also follows
+    the road a single job travels from submission to completion.
+  </p>
+  <p>
+    The deployment unit is a single Helm chart (a Kubernetes deployment package).
+    Four services - api-server, dispatcher, price-watcher, and frontend - come out
+    of the same chart. dev and prod diverge only through values files (per-environment
+    configuration files).
+  </p>
+  <p>
+    The table below shows, item by item, where dev and prod differ.
   </p>
 
   <div class="tbl-wrap">
@@ -1599,34 +1822,46 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
   </div>
 
   <p>
-    A job's lifecycle flows as follows. The user uploads training data straight to the
-    hub bucket via an S3 presigned URL and submits the job with
-    <span class="mono">POST /api/jobs</span>. The dispatcher creates a Pod in the
-    cheapest region, the Pod mounts the hub data (the default
-    <span class="mono">storage_mode=s3</span> mounts S3 Mountpoint directly,
-    <span class="mono">storage_mode=fsx</span> relies on FSx auto-import), and
-    checkpoints and outputs flow back to the hub during training. The user receives
-    status changes in real time over the
-    <span class="mono">/api/jobs/{job_id}/stream</span> SSE endpoint or via webhook
-    notifications. The repository's four demo scripts (cost-optimized placement, Spot
-    interruption recovery, full lifecycle, AI agent placement) replay this flow with
-    real API calls.
+    A job's lifecycle flows as follows. The user uploads training data straight to
+    the hub bucket via an S3 presigned URL (a signed address that permits uploads for
+    a limited time without credentials). The job is then submitted with
+    <span class="mono">POST /api/jobs</span>.
   </p>
   <p>
-    Observability centers on Prometheus. The API server's
-    <span class="mono">/metrics</span> and the dispatcher's separate metrics port
-    expose indicators such as <span class="mono">JOBS_DISPATCHED</span>,
-    <span class="mono">QUEUE_DEPTH</span>, and <span class="mono">SPOT_PRICE</span>,
-    and a ServiceMonitor plus a Grafana dashboard ConfigMap ship with the chart.
-    Logs are structlog-based JSON. Tests consist of 11 fakeredis-based unit test
-    modules and 5 API integration test modules built on httpx ASGITransport +
-    fakeredis (testcontainers is declared as a dev dependency but never actually used).
+    The dispatcher creates a Pod in the cheapest region, and the Pod mounts the hub
+    data. The default <span class="mono">storage_mode=s3</span> mounts S3 Mountpoint
+    directly, while <span class="mono">storage_mode=fsx</span> relies on FSx
+    auto-import. Checkpoints and outputs flow back to the hub during training.
+  </p>
+  <p>
+    The user receives status changes in real time over the
+    <span class="mono">/api/jobs/{job_id}/stream</span> SSE endpoint or via webhook
+    notifications. The repository's four demo scripts (cost-optimized placement,
+    Spot interruption recovery, full lifecycle, AI agent placement) replay this flow
+    with real API calls.
+  </p>
+  <p>
+    Observability centers on Prometheus (an open-source metrics collection system).
+    The API server's <span class="mono">/metrics</span> and the dispatcher's separate
+    metrics port expose indicators such as <span class="mono">JOBS_DISPATCHED</span>,
+    <span class="mono">QUEUE_DEPTH</span>, and <span class="mono">SPOT_PRICE</span>.
+    A ServiceMonitor plus a Grafana dashboard ConfigMap ship with the chart, and logs
+    are structlog-based JSON.
+  </p>
+  <p>
+    Tests consist of 11 fakeredis-based unit test modules and 5 API integration test
+    modules built on httpx ASGITransport + fakeredis. testcontainers is declared as a
+    dev dependency but never actually used.
   </p>
 </section>
 
 <!-- ===================== 08 (EN) ===================== -->
 <section class="sec" id="s8-en">
   <h2><span class="no">08</span>Limitations and Conclusion</h2>
+  <p>
+    This section sums up the problems found in the code and the structural limits.
+    It also points out what a team referencing this system should fix first.
+  </p>
 
   <h3>8.1 Where configuration and code disagree</h3>
   <div class="callout warn">
@@ -1635,8 +1870,9 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
       <span class="mono">queue_processor.py</span> creates Pods through the real
       Kubernetes API only when <span class="mono">k8s_mode == "live"</span>. But
       <span class="mono">values.yaml</span> and <span class="mono">values-prod.yaml</span>
-      set <span class="mono">k8sMode: "real"</span>, so a deployment with these values
-      takes the dry-run branch even in production and <strong>no Pods are created</strong>.
+      set <span class="mono">k8sMode: "real"</span>. A deployment with these values
+      takes the dry-run (simulate-only, no actual creation) branch even in production,
+      and <strong>no Pods are created</strong>.
       <span class="mono">priceMode: "real"</span> happens to work for real price
       collection because the code only checks for mock, but k8sMode must be corrected
       before deployment.
@@ -1644,10 +1880,12 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
   </div>
   <p>
     There are a few more places where documentation and code diverge. The README's
-    environment variable table lists the <span class="mono">AUTH_ENABLED</span> default
-    as false and the <span class="mono">K8S_MODE</span> default as dry-run, but the
-    actual defaults in <span class="mono">config.py</span> are
+    environment variable table lists the <span class="mono">AUTH_ENABLED</span>
+    default as false and the <span class="mono">K8S_MODE</span> default as dry-run.
+    But the actual defaults in <span class="mono">config.py</span> are
     <span class="mono">True</span> and <span class="mono">live</span> respectively.
+  </p>
+  <p>
     The <span class="mono">.bedrock_agentcore.yaml</span> file that ARCHITECTURE.md
     references as the agent runtime configuration does not exist in the repository.
     The polling interval (60 vs 30 seconds) and the endpoint count (18 vs 19
@@ -1657,12 +1895,14 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
     There is also a gap between design and wiring. <span class="mono">reap_job</span>
     and <span class="mono">select_region</span> carry a rescheduling interface based
     on failed-region exclusion (<span class="mono">requeue_fn</span>,
-    <span class="mono">exclude_regions</span>), but the dispatcher entrypoint
+    <span class="mono">exclude_regions</span>). But the dispatcher entrypoint
     <span class="mono">main.py</span> never connects
-    <span class="mono">requeue_fn</span>. As a result, in the current code a job that
-    fails due to a Spot interruption ends as a failure without rescheduling, so making
-    the section 5.1 rescheduling design actually work requires restoring this wiring
-    along with the k8sMode fix.
+    <span class="mono">requeue_fn</span>.
+  </p>
+  <p>
+    As a result, in the current code a job that fails due to a Spot interruption ends
+    as a failure without rescheduling. Making the section 5.1 rescheduling design
+    actually work requires restoring this wiring along with the k8sMode fix.
   </p>
 
   <h3>8.2 Structural limits</h3>
@@ -1684,16 +1924,25 @@ spec.template.spec.expireAfter: 2h   <span class="cm"># node max lifetime 2 hour
 
   <h3>8.3 Conclusion</h3>
   <p>
-    GPU Spot Lotto stands out for mapping each problem precisely onto a Redis data
-    structure. Price sorting is a Sorted Set, the queue is a List with BRPOP,
-    concurrency control is an atomic counter, and the cross-region data problem is
+    In one sentence: GPU Spot Lotto is a multi-region GPU Spot system that minimizes
+    code by delegating price comparison to Redis and data synchronization to storage
+    services, but the rescheduling wiring and the k8sMode setting must be fixed
+    before it works as designed.
+  </p>
+  <p>
+    The system stands out for mapping each problem precisely onto a Redis data
+    structure. Price sorting is a Sorted Set, the queue is a List with BRPOP, and
+    concurrency control is an atomic counter. The cross-region data problem is
     delegated not to the application but to the S3 hub (default) and FSx auto-sync
-    (optional). As a result, the core dispatch logic stays within a few dozen lines
-    and can be verified with fakeredis alone. Teams considering multi-region Spot
-    operations can adopt the cheapest-region selection and the Hub-and-Spoke storage
-    pattern as they are. But since exclusion-list-based rescheduling exists only as an
-    interface, the first tasks before adopting it are the k8sMode fix from section 8.1
-    and restoring the <span class="mono">requeue_fn</span> wiring.
+    (optional).
+  </p>
+  <p>
+    As a result, the core dispatch logic stays within a few dozen lines and can be
+    verified with fakeredis alone. Teams considering multi-region Spot operations can
+    adopt the cheapest-region selection and the Hub-and-Spoke storage pattern as they
+    are. But since exclusion-list-based rescheduling exists only as an interface, the
+    first tasks before adopting it are the k8sMode fix from section 8.1 and restoring
+    the <span class="mono">requeue_fn</span> wiring.
   </p>
 </section>
 

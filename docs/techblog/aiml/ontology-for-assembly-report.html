@@ -586,10 +586,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>ontology-for-assembly는 국회 열린데이터광장 OpenAPI의 실 데이터(22대 의원 286명, 약 74,000개 그래프 엣지)를 <strong>31개 클래스</strong> 온톨로지로 Neptune에 적재하고, 23개 시나리오와 6개 페르소나를 30-60분에 시연하는 언론사 Agentic AI PoC입니다.</li>
-    <li>모든 그래프 노드는 Pydantic base 클래스에서 <span class="mono">source &isin; {real, synthetic, external}</span> 필드를 강제 받아, 실 데이터와 합성 데이터가 UI 출처 배지(<span class="mono">DataSourceBadge</span>)로 항상 구분됩니다.</li>
-    <li>차별점은 두 가지입니다. 같은 질문을 Chatbot(RAG), Agent(Tool Use), Agentic AI(Planner-Graph-Analyst-Editor 4 에이전트)로 나란히 비교하는 3단계 진화 비교와, Agent 모드만 민감 콘텐츠에서 광고 노출을 생략하고 근거를 <span class="mono">AdMatchDecision</span> 노드에 남기는 광고 매칭 거버넌스입니다.</li>
-    <li>정치라는 민감 도메인을 다루기 위해 ADR-0004가 6개 레이어의 중립성 가드레일(Bedrock Guardrails, 프롬프트 suffix, balance score, 필드 저장 금지, 사전 검증 질문 풀, 광고 거버넌스)을 정의하며, 이 패턴은 다른 민감 도메인 PoC에 그대로 재사용할 수 있습니다.</li>
+    <li>ontology-for-assembly는 국회 공공 데이터 위에서 언론사용 AI를 시연하는 PoC(개념 검증 데모)입니다. 국회 열린데이터광장 OpenAPI의 실 데이터(22대 의원 286명, 약 74,000개 그래프 엣지)를 <strong>31개 클래스</strong> 온톨로지로 Neptune에 적재하고, 23개 시나리오와 6개 페르소나를 30-60분에 시연합니다.</li>
+    <li>모든 데이터 조각에는 진짜인지 만든 것인지 표시하는 <span class="mono">source &isin; {real, synthetic, external}</span> 필드가 반드시 붙습니다. 그래서 실 데이터와 합성 데이터가 화면의 출처 배지(<span class="mono">DataSourceBadge</span>)로 항상 구분됩니다.</li>
+    <li>차별점 첫째는 같은 질문을 Chatbot(검색 결과로 답하는 방식), Agent(도구를 골라 쓰는 방식), Agentic AI(Planner-Graph-Analyst-Editor 4개 에이전트가 협업하는 방식)로 나란히 비교하는 3단계 진화 비교입니다. 둘째는 민감한 기사에서 Agent 모드만 광고 노출을 생략하고 그 근거를 <span class="mono">AdMatchDecision</span> 노드에 남기는 광고 매칭 거버넌스입니다.</li>
+    <li>정치라는 민감 주제를 다루기 위해 설계 결정 문서 ADR-0004가 6개 레이어의 중립성 가드레일(Bedrock Guardrails, 프롬프트 suffix, balance score, 필드 저장 금지, 사전 검증 질문 풀, 광고 거버넌스)을 정의합니다. 이 패턴은 다른 민감 도메인 PoC에 그대로 재사용할 수 있습니다.</li>
   </ul>
 </section>
 
@@ -597,12 +597,12 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <nav class="toc" aria-label="목차">
   <p class="toc-title">목차</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1">문제 정의: 공공 데이터 위의 뉴스룸 Agentic AI</a></li>
-    <li><span class="no">02</span><a href="#s2">동작 원리: 31클래스 온톨로지와 데이터 코호트</a></li>
-    <li><span class="no">03</span><a href="#s3">딥다이브 1: 3단계 진화 비교</a></li>
-    <li><span class="no">04</span><a href="#s4">딥다이브 2: AI 거버넌스, 광고 매칭과 중립성</a></li>
-    <li><span class="no">05</span><a href="#s5">23개 시나리오 개관</a></li>
-    <li><span class="no">06</span><a href="#s6">실제 운영 흐름</a></li>
+    <li><span class="no">01</span><a href="#s1">어떤 문제를 푸는가</a></li>
+    <li><span class="no">02</span><a href="#s2">어떻게 동작하는가: 온톨로지와 데이터 출처</a></li>
+    <li><span class="no">03</span><a href="#s3">딥다이브 1: 세 가지 AI 방식 비교</a></li>
+    <li><span class="no">04</span><a href="#s4">딥다이브 2: 광고 매칭과 중립성 가드레일</a></li>
+    <li><span class="no">05</span><a href="#s5">23개 시나리오 한눈에 보기</a></li>
+    <li><span class="no">06</span><a href="#s6">어떻게 배포하고 검증하는가</a></li>
     <li><span class="no">07</span><a href="#s7">한계와 결론</a></li>
     <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
   </ol>
@@ -612,42 +612,71 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
 <!-- ===================== 01 ===================== -->
 <section class="sec" id="s1">
-  <h2><span class="no">01</span>문제 정의: 공공 데이터 위의 뉴스룸 Agentic AI</h2>
+  <h2><span class="no">01</span>어떤 문제를 푸는가</h2>
+  <p>
+    이 절은 프로젝트가 왜 만들어졌는지를 다룹니다. 국회가 공개하는 데이터와 언론사의 실제 업무 사이에
+    어떤 간극이 있는지부터 살펴봅니다.
+  </p>
   <p>
     이 프로젝트가 푸는 문제는 "한국 언론사가 국회 공공 데이터를 실제 업무 도구로 쓸 수 있는가"입니다.
-    국회 열린데이터광장(open.assembly.go.kr)은 의안, 의원, 표결, 위원회, 정당 데이터를 OpenAPI로 공개하지만,
-    원천 데이터만으로는 편집국의 취재 판단, 독자 서비스, 정책 인텔리전스 같은 뉴스룸 업무와 연결되지 않습니다.
-    ontology-for-assembly는 이 간극을 <strong>지식그래프 + Agentic AI</strong> 조합으로 메우는 30-60분 PoC 데모입니다.
+    국회 열린데이터광장(open.assembly.go.kr)은 의안, 의원, 표결, 위원회, 정당 데이터를 OpenAPI(누구나 호출할 수 있게
+    공개된 API)로 제공합니다. 하지만 원천 데이터만으로는 편집국의 취재 판단, 독자 서비스, 정책 인텔리전스 같은
+    뉴스룸 업무와 연결되지 않습니다.
   </p>
+  <p>
+    ontology-for-assembly는 이 간극을 <strong>지식그래프 + Agentic AI</strong> 조합으로 메우는 30-60분 PoC(개념 검증) 데모입니다.
+    지식그래프는 데이터를 노드와 관계의 그물로 저장하는 방식입니다. Agentic AI는 LLM이 스스로 계획을 세우고
+    여러 단계를 이어서 수행하는 방식을 말합니다.
+  </p>
+
+  <h3>1.1 세 가지 목표와 여섯 페르소나</h3>
   <p>
     설계 스펙(docs/superpowers/specs/2026-05-13-ontology-assembly-design.md)이 명시한 목표는 세 가지입니다.
     편집국 생산성(내부), 독자 서비스 차별화(B2C), 정책 인텔리전스(B2B)를 하나의 데이터 기반 위에서 동시에 시연하는 것입니다.
-    그래서 페르소나가 내부 3개(편집국, 데이터/AI, 광고/세일즈)와 대고객 3개(일반 독자, 유료 구독자, 기업/B2B 정책 인텔리전스)로
-    나뉘어 있고, 같은 그래프를 페르소나마다 다른 KPI 가중치와 어조로 봅니다.
-    페르소나 정의의 단일 진실원은 <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>이며 6개 항목이 등록되어 있습니다.
   </p>
   <p>
+    그래서 페르소나(데모를 바라보는 가상의 사용자 역할)는 내부 3개와 대고객 3개로 나뉩니다.
+    내부는 편집국, 데이터/AI, 광고/세일즈입니다. 대고객은 일반 독자, 유료 구독자, 기업/B2B 정책 인텔리전스입니다.
+  </p>
+  <p>
+    여섯 페르소나는 같은 그래프를 서로 다른 KPI 가중치와 어조로 봅니다.
+    페르소나 정의의 단일 진실원(같은 정보를 한 곳에서만 관리하는 기준 위치)은
+    <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>이며 6개 항목이 등록되어 있습니다.
+  </p>
+
+  <h3>1.2 이 문서가 집중하는 부분</h3>
+  <p>
     저장소는 자매 프로젝트 <span class="mono">ontology-for-gcc</span>(plan1-foundation 브랜치)를 차용 베이스로 삼았습니다.
-    README와 CLAUDE.md 모두 디렉토리 구조, 6-stack CDK, 프로젝트 하니스를 그대로 가져오고 도메인만 국회/언론으로
-    교체했다고 명시합니다. 이 문서는 차용된 골격이 아니라 이 프로젝트만의 차별점, 즉 실제 국회 OpenAPI 데이터,
-    3단계 진화 비교, 광고 매칭 거버넌스, 출처 프로버넌스 배지를 중심으로 분석합니다.
+    README와 CLAUDE.md 모두 디렉토리 구조, 6-stack CDK, 프로젝트 하니스를 그대로 가져왔다고 명시합니다.
+    도메인만 국회/언론으로 교체했습니다.
+  </p>
+  <p>
+    그래서 이 문서는 차용된 골격이 아니라 이 프로젝트만의 차별점을 중심으로 분석합니다.
+    실제 국회 OpenAPI 데이터, 3단계 진화 비교, 광고 매칭 거버넌스, 출처 프로버넌스 배지 네 가지입니다.
   </p>
   <p class="lead-def">
-    <b>핵심:</b> 이 PoC의 주제는 모델 성능이 아니라, 민감한 공공 데이터를 다루는 Agentic AI에 출처 투명성과 거버넌스를
+    <b>핵심:</b> 이 PoC의 주제는 모델 성능이 아닙니다. 민감한 공공 데이터를 다루는 Agentic AI에 출처 투명성과 거버넌스를
     코드 레벨에서 강제하는 방법입니다.
   </p>
 </section>
 
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2">
-  <h2><span class="no">02</span>동작 원리: 31클래스 온톨로지와 데이터 코호트</h2>
+  <h2><span class="no">02</span>어떻게 동작하는가: 온톨로지와 데이터 출처</h2>
+  <p>
+    이 절은 데이터가 어떤 모양으로 저장되는지를 다룹니다. 어떤 종류의 데이터가 있고,
+    진짜 데이터와 만든 데이터를 어떻게 구분하는지 살펴봅니다.
+  </p>
 
   <h3>2.1 31개 클래스, 코드가 스키마의 단일 진실원</h3>
   <p>
-    온톨로지 클래스는 <span class="mono">data/schemas.py</span>에 Pydantic 모델로 정의되어 있습니다.
-    <span class="mono">GraphNode</span> base를 상속하는 클래스가 정확히 <strong>31개</strong>이며,
+    온톨로지 클래스(그래프에 저장되는 데이터 종류의 정의)는 <span class="mono">data/schemas.py</span>에
+    Pydantic(파이썬의 데이터 검증 라이브러리) 모델로 정의되어 있습니다.
+    클래스는 모두 몇 개일까요? <span class="mono">GraphNode</span> base를 상속하는 클래스가 정확히 <strong>31개</strong>입니다.
+  </p>
+  <p>
     Object Explorer가 쓰는 <span class="mono">api/services/objects_catalog.py:CLASS_GROUPS</span>의 그룹 합계도 31로 일치합니다.
-    도메인 그룹 구성은 아래와 같습니다.
+    아래 표에서는 31개 클래스가 어떤 도메인 그룹으로 나뉘는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -680,8 +709,8 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <h3>2.2 데이터 코호트: real / synthetic / external 출처 태깅</h3>
   <p>
     이 프로젝트의 두드러진 설계는 데이터 출처를 스키마 레벨에서 강제한다는 점입니다.
-    모든 노드의 base 클래스가 <span class="mono">source</span> 필드를 필수로 요구하고,
-    <span class="mono">extra="forbid"</span>로 미정의 속성(예: 정치 성향 추론 필드)의 저장 자체를 차단합니다.
+    모든 노드의 base 클래스가 <span class="mono">source</span> 필드를 필수로 요구합니다.
+    또한 <span class="mono">extra="forbid"</span> 설정이 미정의 속성(예: 정치 성향 추론 필드)의 저장 자체를 차단합니다.
   </p>
 
   <div class="codeblock">
@@ -694,23 +723,36 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    세 코호트는 어댑터 디렉토리로도 분리되어 있습니다. <span class="mono">data/real/</span>은 국회 OpenAPI 어댑터
-    (bill, member, vote, committee, session, party, agency)로 22대 의원 286명(<span class="mono">members_22.json</span>)을 포함한
-    실 데이터를 가져오고, <span class="mono">data/synthetic/</span>은 독자, 광고, 기사, 토픽을 합성 생성하며,
-    <span class="mono">data/external/</span>은 네이버 뉴스와 여론조사 ETL을 담당합니다.
-    페르소나와 시나리오 조합에 따라 어느 코호트를 조회할지는 <span class="mono">api/services/cohort.py</span>가 단일 지점에서 결정하고,
-    Cypher WHERE 절(<span class="mono">n.source IN [...]</span>)로 변환합니다.
+    세 코호트(같은 기준으로 묶은 데이터 집단)는 어댑터 디렉토리로도 분리되어 있습니다.
+    <span class="mono">data/real/</span>은 국회 OpenAPI 어댑터(bill, member, vote, committee, session, party, agency)로
+    실 데이터를 가져옵니다. 여기에 22대 의원 286명(<span class="mono">members_22.json</span>)이 포함됩니다.
+  </p>
+  <p>
+    <span class="mono">data/synthetic/</span>은 독자, 광고, 기사, 토픽을 합성 생성합니다.
+    <span class="mono">data/external/</span>은 네이버 뉴스와 여론조사의 ETL(외부 데이터를 추출하고 변환해 적재하는 파이프라인)을 담당합니다.
+  </p>
+  <p>
+    페르소나와 시나리오 조합에 따라 어느 코호트를 조회할지는 <span class="mono">api/services/cohort.py</span>가
+    단일 지점에서 결정합니다. 이 결정은 Cypher WHERE 절(<span class="mono">n.source IN [...]</span>)로 변환됩니다.
     프론트엔드에서는 <span class="mono">web/components/DataSourceBadge.tsx</span>가 모든 화면에 출처 배지를 그려,
     시연 중 어떤 결과가 실 데이터이고 어떤 결과가 합성인지 즉시 구분됩니다.
   </p>
 
   <h3>2.3 아키텍처</h3>
   <p>
-    인프라는 AWS CDK v2의 6개 스택(<span class="mono">infra-cdk/bin/assembly.ts</span> 기준 network, data, ai, compute, edge,
-    observability)으로 배포됩니다. FastAPI 백엔드(21개 라우터)와 Next.js 14 프론트엔드가 ECS Fargate ARM64에서 돌고,
-    CloudFront와 Lambda@Edge JWT가 앞단을 막습니다. 그래프는 Neptune openCypher, 검색은 OpenSearch Serverless의
-    Nori BM25 + Cohere KNN 하이브리드(RRF 융합 후 rerank-v3), LLM 계층은 Bedrock Sonnet 4.6과 AgentCore
-    Memory / Code Interpreter입니다(단, AgentCore Memory는 CDK placeholder, Code Interpreter는 mock 응답에만 존재하는 계획 항목으로, 실제 API 통합 코드는 아직 없습니다). B2B 페르소나는 별도로 API Gateway Usage Plan + API Key 경로를 탑니다.
+    인프라는 AWS CDK v2의 6개 스택으로 배포됩니다(<span class="mono">infra-cdk/bin/assembly.ts</span> 기준
+    network, data, ai, compute, edge, observability). FastAPI 백엔드(21개 라우터)와 Next.js 14 프론트엔드가
+    ECS Fargate ARM64에서 돌고, CloudFront와 Lambda@Edge JWT가 앞단을 막습니다.
+  </p>
+  <p>
+    그래프 저장소는 Neptune이며 openCypher(그래프 질의 언어)로 조회합니다.
+    검색은 OpenSearch Serverless에서 Nori BM25(한국어 형태소 기반 키워드 검색)와 Cohere KNN(임베딩 벡터 유사도 검색)을
+    함께 씁니다. 두 결과는 RRF(서로 다른 검색 순위를 하나로 합치는 융합 방법)로 합친 뒤 rerank-v3로 재정렬합니다.
+  </p>
+  <p>
+    LLM 계층은 Bedrock Sonnet 4.6과 AgentCore Memory / Code Interpreter입니다.
+    단, AgentCore Memory는 CDK placeholder이고 Code Interpreter는 mock 응답에만 존재하는 계획 항목으로,
+    실제 API 통합 코드는 아직 없습니다. B2B 페르소나는 별도로 API Gateway Usage Plan + API Key 경로를 탑니다.
   </p>
 
   <figure class="diagram">
@@ -737,11 +779,20 @@ flowchart LR
 
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3">
-  <h2><span class="no">03</span>딥다이브 1: 3단계 진화 비교 (Chatbot vs Agent vs Agentic AI)</h2>
+  <h2><span class="no">03</span>딥다이브 1: 세 가지 AI 방식 비교 (Chatbot vs Agent vs Agentic AI)</h2>
   <p>
-    시나리오 B는 이 데모의 첫 번째 메인 메시지입니다. 같은 질문을 세 가지 모드로 동시에 실행해
-    한 화면에서 나란히 비교합니다. 모드 분기는 <span class="mono">api/services/three_stage.py</span>가 담당하고,
+    이 절은 같은 질문에 세 가지 AI 방식이 어떻게 다르게 답하는지를 다룹니다.
+    이 비교가 데모의 첫 번째 메인 메시지입니다.
+  </p>
+  <p>
+    시나리오 B는 같은 질문을 세 가지 모드로 동시에 실행해 한 화면에서 나란히 비교합니다.
+    모드 분기는 <span class="mono">api/services/three_stage.py</span>가 담당합니다.
     세 번째 모드의 다중 에이전트 파이프라인은 <span class="mono">api/services/multi_agent.py:run_agentic_pipeline</span>이 실행합니다.
+  </p>
+  <p>
+    용어를 먼저 풀면, RAG는 검색으로 찾은 문서를 근거로 답을 생성하는 방식입니다.
+    Tool Use는 LLM이 미리 정의된 도구(함수)를 호출해 작업하는 방식입니다.
+    아래 표에서는 각 단계의 실행 흐름과, 데모가 일부러 드러내는 한계를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -774,11 +825,17 @@ flowchart LR
   </div>
 
   <p>
-    4개 에이전트의 역할 프롬프트는 <span class="mono">multi_agent.py:AGENT_PROMPTS</span>에 상수로 정의되어 있으며,
+    4개 에이전트의 역할 프롬프트는 <span class="mono">multi_agent.py:AGENT_PROMPTS</span>에 상수로 정의되어 있습니다.
     Analyst는 필요 시 "Graph 에이전트에 재질의 필요"라는 형식으로 그래프 단계에 되물을 수 있습니다.
-    모든 LLM 호출은 <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span> 단일 진입점을 거치고,
-    <span class="mono">DEMO_PUBLIC_MODE=true</span>일 때 <strong>결정적 demo mock</strong>으로 동작합니다(자격증명 유무가 아니라 이 환경 변수가 트리거입니다). 이 모드 덕분에 오프라인에서도 데모와 테스트가 재현됩니다.
-    스트리밍은 SSE로 통일되어 있고 이벤트 어휘(<span class="mono">phase|delta|log|result|error|done</span>)는
+  </p>
+  <p>
+    모든 LLM 호출은 <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span> 단일 진입점을 거칩니다.
+    <span class="mono">DEMO_PUBLIC_MODE=true</span>일 때는 <strong>결정적 demo mock</strong>(항상 같은 답을 돌려주는 가짜 응답)으로
+    동작합니다. 트리거는 자격증명 유무가 아니라 이 환경 변수이며, 이 모드 덕분에 오프라인에서도 데모와 테스트가 재현됩니다.
+  </p>
+  <p>
+    스트리밍은 SSE(서버가 응답을 조각 단위로 흘려보내는 방식)로 통일되어 있습니다.
+    이벤트 어휘(<span class="mono">phase|delta|log|result|error|done</span>)는
     <span class="mono">api/routers/chat.py</span> docstring이 단일 진실원입니다.
   </p>
 
@@ -786,20 +843,25 @@ flowchart LR
     <span class="callout-title">주의 - Stage 2의 Tool Use는 아직 시뮬레이션입니다</span>
     <p>
       <span class="mono">three_stage.py:stage2_agent</span>의 docstring은 "실 Bedrock Converse tool use API 통합은 Phase 2"라고
-      명시합니다. 현재 코드는 질문 의도를 규칙 기반으로 판별해 도구를 순차 호출하는 흐름을 재현하는 것이며,
-      LLM이 도구 선택을 스스로 하는 실 Converse 통합은 계획 단계입니다. 이 코드를 참조 구현으로 가져갈 때 혼동하기 쉬운 지점입니다.
+      명시합니다. 현재 코드는 질문 의도를 규칙 기반으로 판별해 도구를 순차 호출하는 흐름을 재현합니다.
+      LLM이 도구 선택을 스스로 하는 실 Converse 통합은 계획 단계이므로, 이 코드를 참조 구현으로 가져갈 때 혼동하기 쉽습니다.
     </p>
   </div>
 </section>
 
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
-  <h2><span class="no">04</span>딥다이브 2: AI 거버넌스, 광고 매칭 3-way와 중립성 가드레일</h2>
+  <h2><span class="no">04</span>딥다이브 2: 광고 매칭과 중립성 가드레일</h2>
+  <p>
+    이 절은 민감한 기사에서 AI가 광고와 답변을 어떻게 조심스럽게 다루는지를 봅니다.
+    광고 매칭 거버넌스가 데모의 두 번째 메인 메시지입니다.
+  </p>
 
   <h3>4.1 광고 매칭 매트릭스 (시나리오 L)</h3>
   <p>
-    두 번째 메인 메시지는 광고 매칭 거버넌스입니다. <span class="mono">api/services/ad_matcher.py</span>는 같은 기사와
-    같은 후보 광고 풀에 대해 세 가지 매칭 모드를 실행하고(<span class="mono">compare_modes()</span>), 결정 차이를 비교해 보여줍니다.
+    <span class="mono">api/services/ad_matcher.py</span>는 같은 기사와 같은 후보 광고 풀에 대해
+    세 가지 매칭 모드를 실행하고(<span class="mono">compare_modes()</span>), 결정 차이를 비교해 보여줍니다.
+    아래 표에서는 세 모드가 민감 콘텐츠를 어떻게 다르게 처리하는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -829,10 +891,13 @@ flowchart LR
   </div>
 
   <p>
-    agent 모드가 광고를 생략할 때 그 근거 문장(reasoning trace)은 <span class="mono">AdMatchDecision</span> 노드에 저장되어
+    agent 모드가 광고를 생략하면 그 근거 문장(reasoning trace)이 <span class="mono">AdMatchDecision</span> 노드에 저장되어
     운영 콘솔에서 추적됩니다. 즉 "왜 이 지면에 광고가 안 나갔는가"가 그래프에 기록으로 남습니다.
-    매칭 실행은 API 응답과 분리된 별도 Ad Matcher Lambda로 동작하며, 모드는 <span class="mono">AD_MATCH_MODE</span> 환경 변수와
-    UI 토글로 전환합니다. 데모 샘플 기사는 Agent가 거절해야 하는 3종(scandal, tragedy, minor_victim)과 안전 매칭 3종으로 총 6개가 준비되어 있습니다.
+  </p>
+  <p>
+    매칭 실행은 API 응답과 분리된 별도 Ad Matcher Lambda로 동작합니다.
+    모드는 <span class="mono">AD_MATCH_MODE</span> 환경 변수와 UI 토글로 전환합니다.
+    데모 샘플 기사는 몇 개일까요? Agent가 거절해야 하는 3종(scandal, tragedy, minor_victim)과 안전 매칭 3종으로 총 6개가 준비되어 있습니다.
   </p>
 
   <div class="callout note">
@@ -847,7 +912,7 @@ flowchart LR
   <h3>4.2 정치 중립성 가드레일 6개 레이어 (ADR-0004)</h3>
   <p>
     정치 데이터를 다루는 만큼 중립성은 데모 가능성의 전제 조건으로 취급됩니다.
-    ADR-0004(docs/decisions/0004)는 다층 방어 6개 레이어를 정의합니다.
+    ADR(설계 결정을 남기는 기록 문서)-0004(docs/decisions/0004)는 다층 방어 6개 레이어를 정의합니다.
   </p>
   <ol class="plain">
     <li>Layer 1 - Bedrock Guardrails 리소스. 정당명 + 비방 조합, 정치인 모욕을 차단하고 시나리오 B, C, I, K의 입력과 출력 양방향에 적용됩니다.</li>
@@ -865,11 +930,18 @@ flowchart LR
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
-  <h2><span class="no">05</span>23개 시나리오 개관</h2>
+  <h2><span class="no">05</span>23개 시나리오 한눈에 보기</h2>
   <p>
-    시나리오 목록의 단일 진실원은 <span class="mono">web/components/Sidebar.tsx:SCENARIOS</span> 배열이며 정확히 23개(A-W)가
-    등록되어 있습니다. 설계 스펙은 base 14개(A-N)였고, O-S는 사용자 요청 확장, T-W는 실 그래프 엣지 위의 고급 인사이트로
-    구현 과정에서 늘었습니다. 23개를 개별 서술하는 대신 구현 패턴으로 묶으면 아래 8가지로 압축됩니다.
+    이 절은 데모에 들어 있는 시나리오 전체를 한눈에 정리합니다.
+    23개를 하나씩 나열하는 대신 구현 패턴 8가지로 묶어서 봅니다.
+  </p>
+  <p>
+    시나리오 목록의 단일 진실원은 <span class="mono">web/components/Sidebar.tsx:SCENARIOS</span> 배열이며
+    정확히 23개(A-W)가 등록되어 있습니다. 설계 스펙은 base 14개(A-N)였습니다.
+    O-S는 사용자 요청 확장으로, T-W는 실 그래프 엣지 위의 고급 인사이트로 구현 과정에서 늘었습니다.
+  </p>
+  <p>
+    아래 표에서는 23개 시나리오가 어떤 8가지 패턴으로 묶이는지, 각 패턴을 어느 백엔드 파일이 받치는지를 봅니다.
   </p>
 
   <div class="tbl-wrap">
@@ -932,20 +1004,31 @@ flowchart LR
   </div>
 
   <p>
-    23개 시나리오가 21개 라우터와 1:1이 아니라는 점도 코드 이해에 중요합니다. P, Q, R, S 4개는 전용 라우터 없이
-    의원 디렉토리 데이터와 범용 <span class="mono">insight_generic.py</span>로 백킹됩니다. 시나리오 페이지 외에
+    23개 시나리오가 21개 라우터와 1:1이 아니라는 점도 코드 이해에 중요합니다.
+    P, Q, R, S 4개는 전용 라우터 없이 의원 디렉토리 데이터와 범용 <span class="mono">insight_generic.py</span>로 백킹됩니다.
+  </p>
+  <p>
+    시나리오 페이지 외에 다섯 가지 화면이 함께 배포됩니다.
     31클래스 Object Explorer, 온톨로지 관계 그래프(mindmap), 의원 디렉토리(286명, 9개 지표), 운영 콘솔(5 패널),
-    코드 지식 그래프(codegraph) 페이지가 함께 배포됩니다.
+    코드 지식 그래프(codegraph) 페이지입니다.
   </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6">
-  <h2><span class="no">06</span>실제 운영 흐름</h2>
+  <h2><span class="no">06</span>어떻게 배포하고 검증하는가</h2>
   <p>
-    배포는 <span class="mono">ap-northeast-2</span> 리전에서 <span class="mono">npx cdk deploy --all</span>로 6개 스택을 올리는
-    것으로 시작합니다. VPC는 새로 만들지 않고 자매 프로젝트들과 공유하는 VPC를 import하며(ADR-0006), Neptune은 private
-    subnet에 있어 직접 접근이 불가능합니다. 그래서 데이터 적재는 API 컨테이너 이미지를 재사용하는 one-shot ECS 태스크로 실행합니다.
+    이 절은 이 PoC를 실제로 띄우고 품질을 확인하는 절차를 다룹니다.
+    배포, 데이터 적재, 자동 평가 순서로 살펴봅니다.
+  </p>
+  <p>
+    배포는 <span class="mono">ap-northeast-2</span> 리전에서 <span class="mono">npx cdk deploy --all</span>로
+    6개 스택을 올리는 것으로 시작합니다. VPC는 새로 만들지 않고 자매 프로젝트들과 공유하는 VPC를 import합니다(ADR-0006).
+    Neptune은 private subnet에 있어 직접 접근이 불가능합니다.
+  </p>
+  <p>
+    그래서 데이터 적재는 one-shot ECS 태스크(한 번 실행되고 종료되는 컨테이너 작업)로 실행합니다.
+    이 태스크는 API 컨테이너 이미지를 그대로 재사용합니다.
   </p>
 
   <div class="codeblock">
@@ -957,9 +1040,14 @@ flowchart LR
   </div>
 
   <p>
-    품질 게이트는 두 겹입니다. CI는 push/PR마다 4개 job(<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>)을
-    돌리고, 배포된 CloudFront를 대상으로 <span class="mono">make wow-eval</span>이 <strong>84개 케이스</strong>(핵심 14개 시나리오
-    A-N &times; 6 페르소나)를 평가합니다. README 배지 기준 현재 상태는 84/84 통과, 평균 balance score 0.98이며,
+    품질 게이트는 두 겹입니다. CI는 push/PR마다 4개 job(<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>)을 돌립니다.
+    배포된 CloudFront를 대상으로는 <span class="mono">make wow-eval</span>이 자동 평가를 실행합니다.
+  </p>
+  <p>
+    평가 케이스는 몇 개일까요? 핵심 14개 시나리오 A-N에 6개 페르소나를 곱한 <strong>84개 케이스</strong>입니다.
+    README 배지 기준 현재 상태는 84/84 통과, 평균 balance score 0.98입니다.
+  </p>
+  <p>
     통과율이 85% 미만이거나 중립성 메트릭이 임계값에 미달하면 스크립트가 실패 코드로 종료됩니다.
     운영 콘솔(<span class="mono">/ops</span>)은 ingest, guardrail, memory, eval, trace 5개 패널로 같은 메트릭을 시연 중에 보여줍니다.
   </p>
@@ -976,12 +1064,16 @@ flowchart LR
 <!-- ===================== 07 ===================== -->
 <section class="sec" id="s7">
   <h2><span class="no">07</span>한계와 결론</h2>
+  <p>
+    이 절은 이 PoC를 참조할 때 주의할 점과 최종 평가를 정리합니다.
+    무엇이 검증되었고 무엇이 아직 아닌지를 구분합니다.
+  </p>
 
   <h3>7.1 한계</h3>
   <ul class="plain">
-    <li>PoC 데모입니다. 인증은 edge 계층(Lambda@Edge, API Gateway)에만 있고 API 계층은 upstream을 신뢰하며, <span class="mono">DEMO_PUBLIC_MODE</span> 같은 데모 전용 우회가 존재합니다.</li>
+    <li>PoC 데모입니다. 인증은 edge 계층(Lambda@Edge, API Gateway)에만 있고 API 계층은 upstream을 신뢰합니다. <span class="mono">DEMO_PUBLIC_MODE</span> 같은 데모 전용 우회도 존재합니다.</li>
     <li>독자, 광고, 기사 데이터는 전부 합성입니다. 광고 매칭 거버넌스의 사업적 유효성은 실 인벤토리 없이 검증되지 않았습니다.</li>
-    <li><span class="mono">DEMO_PUBLIC_MODE=true</span>에서는 결정적 mock으로 동작하고 Stage 2 Tool Use도 시뮬레이션이므로, 화면에 보이는 모든 것이 실 LLM 호출은 아닙니다. 실 데이터 경로(T-W의 Neptune openCypher)와 mock 경로가 혼재합니다.</li>
+    <li><span class="mono">DEMO_PUBLIC_MODE=true</span>에서는 결정적 mock으로 동작하고 Stage 2 Tool Use도 시뮬레이션입니다. 그래서 화면에 보이는 모든 것이 실 LLM 호출은 아니며, 실 데이터 경로(T-W의 Neptune openCypher)와 mock 경로가 혼재합니다.</li>
     <li>문서와 코드의 정합은 계속 따라잡는 중입니다. CHANGELOG에 시나리오 수(14 &rarr; 23), 클래스 수(25+ &rarr; 31), 라우터 수(17 &rarr; 21) 정정 기록이 남아 있으며, 이 문서의 수치는 모두 코드 기준입니다.</li>
     <li>중립성 가드레일은 한국어 정규식과 사전 검증 질문 풀에 크게 의존합니다. 자유 입력이 늘어나는 production 시나리오에서는 별도 검증이 필요합니다.</li>
   </ul>
@@ -989,10 +1081,18 @@ flowchart LR
   <h3>7.2 결론</h3>
   <p>
     ontology-for-assembly의 가치는 개별 시나리오의 화려함이 아니라 반복 가능한 골격에 있습니다.
-    실 공공 데이터와 합성 데이터를 스키마 레벨 출처 태깅으로 섞고, 같은 질문에 대한 세 가지 AI 패러다임의 차이를
-    비교 가능하게 만들고, 민감 도메인의 거버넌스를 프롬프트가 아닌 스키마와 메트릭과 인프라에 나눠 강제하는 구조는
-    국회 데이터가 아닌 다른 도메인에도 그대로 이식됩니다. 실제로 이 저장소 자체가 GS칼텍스 고객분석 도메인 PoC(ontology-for-gcc)의
-    골격을 차용해 도메인만 교체한 결과물이라는 점이 그 이식성의 증거입니다.
+    실 공공 데이터와 합성 데이터를 스키마 레벨 출처 태깅으로 섞습니다.
+    같은 질문에 대한 세 가지 AI 패러다임의 차이를 비교 가능하게 만듭니다.
+  </p>
+  <p>
+    그리고 민감 도메인의 거버넌스를 프롬프트가 아닌 스키마와 메트릭과 인프라에 나눠 강제합니다.
+    이 구조는 국회 데이터가 아닌 다른 도메인에도 그대로 이식됩니다.
+    실제로 이 저장소 자체가 GS칼텍스 고객분석 도메인 PoC(ontology-for-gcc)의 골격을 차용해 도메인만 교체한 결과물이라는 점이
+    그 이식성의 증거입니다.
+  </p>
+  <p>
+    한 문장으로 요약하면, 이 저장소는 민감한 공공 데이터 위에서 출처 투명성과 거버넌스를 코드로 강제하는
+    Agentic AI PoC 골격입니다.
   </p>
   <p class="lead-def">
     <b>권고:</b> 이 저장소를 참조할 때는 시나리오 코드가 아니라 세 개의 단일 진실원, 즉 <span class="mono">data/schemas.py</span>(스키마),
@@ -1112,10 +1212,10 @@ flowchart LR
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>ontology-for-assembly is a newsroom Agentic AI PoC that loads real data from the National Assembly Open Data Portal OpenAPI (286 members of the 22nd Assembly, roughly 74,000 graph edges) into Neptune under a <strong>31-class</strong> ontology, and demos 23 scenarios across 6 personas in a 30-60 minute session.</li>
-    <li>Every graph node inherits a required <span class="mono">source &isin; {real, synthetic, external}</span> field from the Pydantic base class, so real and synthetic data are always distinguished in the UI by a provenance badge (<span class="mono">DataSourceBadge</span>).</li>
-    <li>Two things set it apart: a three-stage evolution comparison that runs the same question through Chatbot (RAG), Agent (Tool Use), and Agentic AI (a 4-agent Planner-Graph-Analyst-Editor pipeline) side by side, and ad-matching governance where only the Agent mode withholds ads on sensitive content and records its reasoning in an <span class="mono">AdMatchDecision</span> node.</li>
-    <li>To handle politics as a sensitive domain, ADR-0004 defines six layers of neutrality guardrails (Bedrock Guardrails, a prompt suffix, a balance score, banned fields at schema level, a pre-vetted question pool, and ad governance) - a pattern that transfers directly to PoCs in other sensitive domains.</li>
+    <li>ontology-for-assembly is a PoC (proof-of-concept demo) that shows newsroom AI running on Korean National Assembly public data. It loads real data from the Open Data Portal OpenAPI (286 members of the 22nd Assembly, roughly 74,000 graph edges) into Neptune under a <strong>31-class</strong> ontology, and demos 23 scenarios across 6 personas in a 30-60 minute session.</li>
+    <li>Every piece of data carries a required <span class="mono">source &isin; {real, synthetic, external}</span> field that says whether it is real or generated. So real and synthetic data are always distinguished in the UI by a provenance badge (<span class="mono">DataSourceBadge</span>).</li>
+    <li>Two things set it apart. First, a three-stage comparison that runs the same question through Chatbot (answering from search results), Agent (picking and calling tools), and Agentic AI (a 4-agent Planner-Graph-Analyst-Editor pipeline) side by side; second, ad-matching governance where only the Agent mode withholds ads on sensitive content and records its reasoning in an <span class="mono">AdMatchDecision</span> node.</li>
+    <li>To handle politics as a sensitive topic, the design record ADR-0004 defines six layers of neutrality guardrails (Bedrock Guardrails, a prompt suffix, a balance score, banned fields at schema level, a pre-vetted question pool, and ad governance). This pattern transfers directly to PoCs in other sensitive domains.</li>
   </ul>
 </section>
 
@@ -1123,12 +1223,12 @@ flowchart LR
 <nav class="toc" aria-label="Table of contents">
   <p class="toc-title">Contents</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1-en">Problem definition: newsroom Agentic AI on public data</a></li>
-    <li><span class="no">02</span><a href="#s2-en">How it works: a 31-class ontology and data cohorts</a></li>
-    <li><span class="no">03</span><a href="#s3-en">Deep dive 1: the three-stage evolution comparison</a></li>
-    <li><span class="no">04</span><a href="#s4-en">Deep dive 2: AI governance, ad matching, and neutrality</a></li>
-    <li><span class="no">05</span><a href="#s5-en">Overview of the 23 scenarios</a></li>
-    <li><span class="no">06</span><a href="#s6-en">How it actually runs</a></li>
+    <li><span class="no">01</span><a href="#s1-en">What problem it solves</a></li>
+    <li><span class="no">02</span><a href="#s2-en">How it works: the ontology and data provenance</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Deep dive 1: comparing three AI approaches</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Deep dive 2: ad matching and neutrality guardrails</a></li>
+    <li><span class="no">05</span><a href="#s5-en">The 23 scenarios at a glance</a></li>
+    <li><span class="no">06</span><a href="#s6-en">How it is deployed and verified</a></li>
     <li><span class="no">07</span><a href="#s7-en">Limitations and conclusion</a></li>
     <li><span class="no">--</span><a href="#refs-en">References</a></li>
   </ol>
@@ -1138,29 +1238,50 @@ flowchart LR
 
 <!-- ===================== 01 (EN) ===================== -->
 <section class="sec" id="s1-en">
-  <h2><span class="no">01</span>Problem definition: newsroom Agentic AI on public data</h2>
+  <h2><span class="no">01</span>What problem it solves</h2>
+  <p>
+    This section covers why the project exists. We start with the gap between the data the National Assembly publishes
+    and the daily work of a news organization.
+  </p>
   <p>
     The problem this project tackles is: "can a Korean news organization actually use National Assembly public data
     as a working tool?" The National Assembly Open Data Portal (open.assembly.go.kr) publishes bills, members, votes,
-    committees, and party data through an OpenAPI, but raw data alone does not connect to newsroom work such as
-    editorial judgment, reader-facing services, or policy intelligence. ontology-for-assembly bridges this gap with a
-    <strong>knowledge graph + Agentic AI</strong> combination, packaged as a 30-60 minute PoC demo.
+    committees, and party data through an OpenAPI (an API anyone can call). But raw data alone does not connect to
+    newsroom work such as editorial judgment, reader-facing services, or policy intelligence.
   </p>
+  <p>
+    ontology-for-assembly bridges this gap with a <strong>knowledge graph + Agentic AI</strong> combination, packaged
+    as a 30-60 minute PoC (proof of concept) demo. A knowledge graph stores data as a web of nodes and relations.
+    Agentic AI means an LLM that plans on its own and carries out several steps in sequence.
+  </p>
+
+  <h3>1.1 Three goals and six personas</h3>
   <p>
     The design spec (docs/superpowers/specs/2026-05-13-ontology-assembly-design.md) states three goals:
     demonstrating newsroom productivity (internal), reader-service differentiation (B2C), and policy intelligence (B2B)
-    on a single data foundation at the same time. That is why the personas are split into three internal ones
-    (editorial, data/AI, ads/sales) and three customer-facing ones (general reader, paid subscriber, corporate/B2B
-    policy intelligence), each viewing the same graph with different KPI weights and tone.
-    The single source of truth for persona definitions is <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>,
-    which registers six entries.
+    on a single data foundation at the same time.
   </p>
+  <p>
+    That is why the personas (imaginary user roles that view the demo) split into three internal and three
+    customer-facing ones. The internal ones are editorial, data/AI, and ads/sales. The customer-facing ones are the
+    general reader, the paid subscriber, and corporate/B2B policy intelligence.
+  </p>
+  <p>
+    The six personas view the same graph with different KPI weights and tone.
+    The single source of truth (the one place where a definition is maintained) for personas is
+    <span class="mono">api/services/persona.py:PERSONA_REGISTRY</span>, which registers six entries.
+  </p>
+
+  <h3>1.2 What this document focuses on</h3>
   <p>
     The repository borrows its skeleton from the sister project <span class="mono">ontology-for-gcc</span>
     (plan1-foundation branch). Both README and CLAUDE.md state that the directory layout, the 6-stack CDK setup, and
-    the project harness were carried over as-is, with only the domain swapped to the National Assembly / news media.
-    This document therefore focuses not on the borrowed skeleton but on what is unique to this project: real National
-    Assembly OpenAPI data, the three-stage evolution comparison, ad-matching governance, and provenance badges.
+    the project harness were carried over as-is. Only the domain was swapped to the National Assembly / news media.
+  </p>
+  <p>
+    This document therefore focuses not on the borrowed skeleton but on what is unique to this project.
+    Four things: real National Assembly OpenAPI data, the three-stage evolution comparison, ad-matching governance,
+    and provenance badges.
   </p>
   <p class="lead-def">
     <b>Key point:</b> the subject of this PoC is not model performance, but how to enforce provenance transparency and
@@ -1170,14 +1291,21 @@ flowchart LR
 
 <!-- ===================== 02 (EN) ===================== -->
 <section class="sec" id="s2-en">
-  <h2><span class="no">02</span>How it works: a 31-class ontology and data cohorts</h2>
+  <h2><span class="no">02</span>How it works: the ontology and data provenance</h2>
+  <p>
+    This section covers the shape the data is stored in. We look at what kinds of data exist and how real data is kept
+    apart from generated data.
+  </p>
 
   <h3>2.1 31 classes, with code as the single source of truth for the schema</h3>
   <p>
-    The ontology classes are defined as Pydantic models in <span class="mono">data/schemas.py</span>.
-    Exactly <strong>31</strong> classes inherit from the <span class="mono">GraphNode</span> base, and the group totals in
-    <span class="mono">api/services/objects_catalog.py:CLASS_GROUPS</span>, used by the Object Explorer, also add up to 31.
-    The domain groups are as follows.
+    The ontology classes (the definitions of what kinds of data the graph stores) are defined as Pydantic models
+    (Pydantic is Python's data-validation library) in <span class="mono">data/schemas.py</span>.
+    How many classes are there? Exactly <strong>31</strong> classes inherit from the <span class="mono">GraphNode</span> base.
+  </p>
+  <p>
+    The group totals in <span class="mono">api/services/objects_catalog.py:CLASS_GROUPS</span>, used by the Object
+    Explorer, also add up to 31. The table below shows how the 31 classes split into domain groups.
   </p>
 
   <div class="tbl-wrap">
@@ -1212,8 +1340,8 @@ flowchart LR
   <h3>2.2 Data cohorts: real / synthetic / external source tagging</h3>
   <p>
     The standout design choice is that data provenance is enforced at the schema level.
-    The base class of every node requires a <span class="mono">source</span> field, and
-    <span class="mono">extra="forbid"</span> blocks the storage of any undefined attribute
+    The base class of every node requires a <span class="mono">source</span> field.
+    In addition, <span class="mono">extra="forbid"</span> blocks the storage of any undefined attribute
     (for example, an inferred political-leaning field) outright.
   </p>
 
@@ -1227,12 +1355,19 @@ flowchart LR
   </div>
 
   <p>
-    The three cohorts are also separated by adapter directory. <span class="mono">data/real/</span> holds the National
-    Assembly OpenAPI adapters (bill, member, vote, committee, session, party, agency) and pulls real data including the
-    286 members of the 22nd Assembly (<span class="mono">members_22.json</span>); <span class="mono">data/synthetic/</span>
-    generates synthetic readers, ads, articles, and topics; and <span class="mono">data/external/</span> handles the
-    Naver News and opinion-poll ETL. Which cohort a given persona-scenario combination queries is decided at a single
-    point by <span class="mono">api/services/cohort.py</span>, which translates the decision into a Cypher WHERE clause
+    The three cohorts (groups of data bundled by a shared criterion) are also separated by adapter directory.
+    <span class="mono">data/real/</span> holds the National Assembly OpenAPI adapters
+    (bill, member, vote, committee, session, party, agency) and pulls real data.
+    That includes the 286 members of the 22nd Assembly (<span class="mono">members_22.json</span>).
+  </p>
+  <p>
+    <span class="mono">data/synthetic/</span> generates synthetic readers, ads, articles, and topics.
+    <span class="mono">data/external/</span> handles the Naver News and opinion-poll ETL
+    (the pipeline that extracts, transforms, and loads external data).
+  </p>
+  <p>
+    Which cohort a given persona-scenario combination queries is decided at a single point by
+    <span class="mono">api/services/cohort.py</span>. The decision is translated into a Cypher WHERE clause
     (<span class="mono">n.source IN [...]</span>). On the frontend, <span class="mono">web/components/DataSourceBadge.tsx</span>
     renders a provenance badge on every screen, so during a demo it is immediately clear which results are real and
     which are synthetic.
@@ -1242,10 +1377,18 @@ flowchart LR
   <p>
     The infrastructure deploys as six AWS CDK v2 stacks (network, data, ai, compute, edge, and observability, per
     <span class="mono">infra-cdk/bin/assembly.ts</span>). A FastAPI backend (21 routers) and a Next.js 14 frontend run
-    on ECS Fargate ARM64, fronted by CloudFront with Lambda@Edge JWT. The graph is Neptune openCypher; search is an
-    OpenSearch Serverless hybrid of Nori BM25 + Cohere KNN (RRF fusion followed by rerank-v3); the LLM layer is
-    Bedrock Sonnet 4.6 plus AgentCore Memory / Code Interpreter (note: AgentCore Memory is a CDK placeholder and
-    Code Interpreter exists only in mock responses - both are planned items with no real API integration code yet).
+    on ECS Fargate ARM64, fronted by CloudFront with Lambda@Edge JWT.
+  </p>
+  <p>
+    The graph store is Neptune, queried with openCypher (a graph query language).
+    Search runs on OpenSearch Serverless and combines Nori BM25 (Korean-morphology keyword search) with Cohere KNN
+    (embedding-vector similarity search). The two result lists are merged with RRF (a method that fuses different
+    search rankings into one) and then reordered with rerank-v3.
+  </p>
+  <p>
+    The LLM layer is Bedrock Sonnet 4.6 plus AgentCore Memory / Code Interpreter.
+    Note that AgentCore Memory is a CDK placeholder and Code Interpreter exists only in mock responses;
+    both are planned items with no real API integration code yet.
     The B2B persona takes a separate API Gateway Usage Plan + API Key path.
   </p>
 
@@ -1273,12 +1416,21 @@ flowchart LR
 
 <!-- ===================== 03 (EN) ===================== -->
 <section class="sec" id="s3-en">
-  <h2><span class="no">03</span>Deep dive 1: the three-stage evolution comparison (Chatbot vs Agent vs Agentic AI)</h2>
+  <h2><span class="no">03</span>Deep dive 1: comparing three AI approaches (Chatbot vs Agent vs Agentic AI)</h2>
   <p>
-    Scenario B is the demo's first headline message. The same question runs through three modes simultaneously and the
-    results are compared side by side on one screen. Mode dispatch lives in
-    <span class="mono">api/services/three_stage.py</span>, and the third mode's multi-agent pipeline is executed by
+    This section covers how three AI approaches answer the same question differently.
+    This comparison is the demo's first headline message.
+  </p>
+  <p>
+    Scenario B runs the same question through three modes simultaneously and compares the results side by side on one
+    screen. Mode dispatch lives in <span class="mono">api/services/three_stage.py</span>.
+    The third mode's multi-agent pipeline is executed by
     <span class="mono">api/services/multi_agent.py:run_agentic_pipeline</span>.
+  </p>
+  <p>
+    Two terms first. RAG means generating an answer grounded in documents found by search.
+    Tool Use means the LLM calling predefined tools (functions) to do work.
+    The table below shows each stage's execution flow and the limitation the demo deliberately exposes.
   </p>
 
   <div class="tbl-wrap">
@@ -1311,14 +1463,20 @@ flowchart LR
   </div>
 
   <p>
-    The role prompts for the four agents are defined as constants in <span class="mono">multi_agent.py:AGENT_PROMPTS</span>,
-    and the Analyst can query the graph stage again using the "re-query the Graph agent" convention when needed.
-    Every LLM call goes through the single entry point <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span>,
-    which runs as a <strong>deterministic demo mock</strong> when <span class="mono">DEMO_PUBLIC_MODE=true</span>
-    (the trigger is this environment variable, not the presence of credentials). This mode is what makes demos and
-    tests reproducible offline. Streaming is unified on SSE, and the event vocabulary
-    (<span class="mono">phase|delta|log|result|error|done</span>) has its single source of truth in the
-    <span class="mono">api/routers/chat.py</span> docstring.
+    The role prompts for the four agents are defined as constants in <span class="mono">multi_agent.py:AGENT_PROMPTS</span>.
+    When needed, the Analyst can query the graph stage again using the "re-query the Graph agent" convention.
+  </p>
+  <p>
+    Every LLM call goes through the single entry point
+    <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span>.
+    When <span class="mono">DEMO_PUBLIC_MODE=true</span>, it runs as a <strong>deterministic demo mock</strong>
+    (a fake response that always returns the same answer). The trigger is this environment variable, not the presence
+    of credentials, and this mode is what makes demos and tests reproducible offline.
+  </p>
+  <p>
+    Streaming is unified on SSE (a way for the server to stream a response in pieces).
+    The event vocabulary (<span class="mono">phase|delta|log|result|error|done</span>) has its single source of truth
+    in the <span class="mono">api/routers/chat.py</span> docstring.
   </p>
 
   <div class="callout warn">
@@ -1326,21 +1484,25 @@ flowchart LR
     <p>
       The docstring of <span class="mono">three_stage.py:stage2_agent</span> states that "real Bedrock Converse tool use
       API integration is Phase 2". The current code classifies question intent with rules and replays a sequential
-      tool-calling flow; real Converse integration where the LLM chooses tools by itself is still a planned item.
-      This is an easy point to misread if you take this code as a reference implementation.
+      tool-calling flow. Real Converse integration where the LLM chooses tools by itself is still a planned item,
+      so this is an easy point to misread if you take this code as a reference implementation.
     </p>
   </div>
 </section>
 
 <!-- ===================== 04 (EN) ===================== -->
 <section class="sec" id="s4-en">
-  <h2><span class="no">04</span>Deep dive 2: AI governance, the 3-way ad matching, and neutrality guardrails</h2>
+  <h2><span class="no">04</span>Deep dive 2: ad matching and neutrality guardrails</h2>
+  <p>
+    This section looks at how the AI handles ads and answers carefully on sensitive stories.
+    Ad-matching governance is the demo's second headline message.
+  </p>
 
   <h3>4.1 The ad-matching matrix (scenario L)</h3>
   <p>
-    The second headline message is ad-matching governance. <span class="mono">api/services/ad_matcher.py</span> runs
-    three matching modes against the same article and the same candidate ad pool
-    (<span class="mono">compare_modes()</span>) and shows how the decisions differ.
+    <span class="mono">api/services/ad_matcher.py</span> runs three matching modes against the same article and the
+    same candidate ad pool (<span class="mono">compare_modes()</span>) and shows how the decisions differ.
+    The table below shows how differently the three modes handle sensitive content.
   </p>
 
   <div class="tbl-wrap">
@@ -1372,9 +1534,13 @@ flowchart LR
   <p>
     When the agent mode withholds an ad, its reasoning trace is stored in an <span class="mono">AdMatchDecision</span>
     node and can be tracked in the ops console. In other words, "why did no ad run on this placement" is left as a
-    record in the graph. Matching runs in a dedicated Ad Matcher Lambda, decoupled from the API response path, and the
-    mode is switched via the <span class="mono">AD_MATCH_MODE</span> environment variable and a UI toggle. Six sample
-    articles ship with the demo: three the Agent must refuse (scandal, tragedy, minor_victim) and three safe matches.
+    record in the graph.
+  </p>
+  <p>
+    Matching runs in a dedicated Ad Matcher Lambda, decoupled from the API response path.
+    The mode is switched via the <span class="mono">AD_MATCH_MODE</span> environment variable and a UI toggle.
+    How many sample articles ship with the demo? Six: three the Agent must refuse (scandal, tragedy, minor_victim)
+    and three safe matches.
   </p>
 
   <div class="callout note">
@@ -1389,7 +1555,8 @@ flowchart LR
   <h3>4.2 The six political-neutrality guardrail layers (ADR-0004)</h3>
   <p>
     Because the data is political, neutrality is treated as a precondition for the demo being possible at all.
-    ADR-0004 (docs/decisions/0004) defines six layers of defense in depth.
+    ADR-0004 (an ADR is a written record of a design decision, here docs/decisions/0004) defines six layers of
+    defense in depth.
   </p>
   <ol class="plain">
     <li>Layer 1 - a Bedrock Guardrails resource. Blocks party-name + slander combinations and insults against politicians, applied in both input and output directions for scenarios B, C, I, and K.</li>
@@ -1408,12 +1575,18 @@ flowchart LR
 
 <!-- ===================== 05 (EN) ===================== -->
 <section class="sec" id="s5-en">
-  <h2><span class="no">05</span>Overview of the 23 scenarios</h2>
+  <h2><span class="no">05</span>The 23 scenarios at a glance</h2>
+  <p>
+    This section summarizes every scenario in the demo at a glance.
+    Instead of listing all 23 one by one, we group them into eight implementation patterns.
+  </p>
   <p>
     The single source of truth for the scenario list is the <span class="mono">web/components/Sidebar.tsx:SCENARIOS</span>
-    array, which registers exactly 23 entries (A-W). The design spec started with a base of 14 (A-N); O-S were added on
-    user request, and T-W grew during implementation as advanced insights over the real graph edges. Rather than
-    describing all 23 individually, they compress into the eight implementation patterns below.
+    array, which registers exactly 23 entries (A-W). The design spec started with a base of 14 (A-N).
+    O-S were added on user request, and T-W grew during implementation as advanced insights over the real graph edges.
+  </p>
+  <p>
+    The table below shows which eight patterns the 23 scenarios group into, and which backend file backs each pattern.
   </p>
 
   <div class="tbl-wrap">
@@ -1476,22 +1649,32 @@ flowchart LR
   </div>
 
   <p>
-    It also matters for reading the code that the 23 scenarios are not 1:1 with the 21 routers. The four scenarios
-    P, Q, R, and S have no dedicated router and are backed by the member-directory data plus the generic
-    <span class="mono">insight_generic.py</span>. Beyond the scenario pages, the deployment also ships the 31-class
-    Object Explorer, an ontology relation graph (mindmap), a member directory (286 members, 9 indicators), an ops
-    console (5 panels), and a code knowledge graph (codegraph) page.
+    It also matters for reading the code that the 23 scenarios are not 1:1 with the 21 routers.
+    The four scenarios P, Q, R, and S have no dedicated router and are backed by the member-directory data plus the
+    generic <span class="mono">insight_generic.py</span>.
+  </p>
+  <p>
+    Beyond the scenario pages, the deployment ships five more screens: the 31-class Object Explorer, an ontology
+    relation graph (mindmap), a member directory (286 members, 9 indicators), an ops console (5 panels), and a code
+    knowledge graph (codegraph) page.
   </p>
 </section>
 
 <!-- ===================== 06 (EN) ===================== -->
 <section class="sec" id="s6-en">
-  <h2><span class="no">06</span>How it actually runs</h2>
+  <h2><span class="no">06</span>How it is deployed and verified</h2>
+  <p>
+    This section covers how the PoC is actually brought up and how its quality is checked.
+    We go through deployment, data loading, and automated evaluation in order.
+  </p>
   <p>
     Deployment starts by bringing up the six stacks with <span class="mono">npx cdk deploy --all</span> in the
-    <span class="mono">ap-northeast-2</span> region. No new VPC is created - the VPC shared with the sister projects is
-    imported (ADR-0006) - and Neptune sits in a private subnet with no direct access. Data loading therefore runs as a
-    one-shot ECS task that reuses the API container image.
+    <span class="mono">ap-northeast-2</span> region. No new VPC is created; the VPC shared with the sister projects is
+    imported (ADR-0006). Neptune sits in a private subnet with no direct access.
+  </p>
+  <p>
+    Data loading therefore runs as a one-shot ECS task (a container job that runs once and exits).
+    The task reuses the API container image as-is.
   </p>
 
   <div class="codeblock">
@@ -1504,12 +1687,17 @@ flowchart LR
 
   <p>
     Quality gates come in two layers. CI runs four jobs on every push/PR
-    (<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>), and <span class="mono">make wow-eval</span>
-    evaluates <strong>84 cases</strong> (the 14 core scenarios A-N &times; 6 personas) against the deployed CloudFront.
-    Per the README badge, the current state is 84/84 passing with an average balance score of 0.98; the script exits
-    with a failure code if the pass rate falls below 85% or the neutrality metric misses its threshold. The ops console
-    (<span class="mono">/ops</span>) shows the same metrics live during a demo across five panels: ingest, guardrail,
-    memory, eval, and trace.
+    (<span class="mono">python-ast, tsc-check, cdk-synth, pytest</span>).
+    Against the deployed CloudFront, <span class="mono">make wow-eval</span> runs the automated evaluation.
+  </p>
+  <p>
+    How many cases does it evaluate? <strong>84 cases</strong>: the 14 core scenarios A-N &times; 6 personas.
+    Per the README badge, the current state is 84/84 passing with an average balance score of 0.98.
+  </p>
+  <p>
+    The script exits with a failure code if the pass rate falls below 85% or the neutrality metric misses its threshold.
+    The ops console (<span class="mono">/ops</span>) shows the same metrics live during a demo across five panels:
+    ingest, guardrail, memory, eval, and trace.
   </p>
 
   <div class="callout warn">
@@ -1525,12 +1713,16 @@ flowchart LR
 <!-- ===================== 07 (EN) ===================== -->
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Limitations and conclusion</h2>
+  <p>
+    This section summarizes what to keep in mind when referencing this PoC, and the final assessment.
+    It separates what has been verified from what has not.
+  </p>
 
   <h3>7.1 Limitations</h3>
   <ul class="plain">
-    <li>It is a PoC demo. Authentication exists only at the edge layer (Lambda@Edge, API Gateway); the API layer trusts its upstream, and demo-only bypasses such as <span class="mono">DEMO_PUBLIC_MODE</span> exist.</li>
+    <li>It is a PoC demo. Authentication exists only at the edge layer (Lambda@Edge, API Gateway) and the API layer trusts its upstream. Demo-only bypasses such as <span class="mono">DEMO_PUBLIC_MODE</span> also exist.</li>
     <li>Reader, ad, and article data are entirely synthetic. The business validity of the ad-matching governance has not been verified against real inventory.</li>
-    <li>With <span class="mono">DEMO_PUBLIC_MODE=true</span> the system runs on deterministic mocks and Stage 2 Tool Use is simulated, so not everything on screen is a real LLM call. Real-data paths (Neptune openCypher for T-W) and mock paths coexist.</li>
+    <li>With <span class="mono">DEMO_PUBLIC_MODE=true</span> the system runs on deterministic mocks and Stage 2 Tool Use is simulated. So not everything on screen is a real LLM call, and real-data paths (Neptune openCypher for T-W) coexist with mock paths.</li>
     <li>Documentation-to-code consistency is still catching up. The CHANGELOG records corrections to the scenario count (14 &rarr; 23), class count (25+ &rarr; 31), and router count (17 &rarr; 21); every figure in this document follows the code.</li>
     <li>The neutrality guardrails rely heavily on Korean-language regexes and the pre-vetted question pool. A production scenario with more free-form input would need separate validation.</li>
   </ul>
@@ -1538,11 +1730,18 @@ flowchart LR
   <h3>7.2 Conclusion</h3>
   <p>
     The value of ontology-for-assembly lies not in the flash of individual scenarios but in a repeatable skeleton.
-    Mixing real public data and synthetic data under schema-level provenance tagging, making the differences between
-    three AI paradigms comparable on the same question, and enforcing sensitive-domain governance through schema,
-    metrics, and infrastructure rather than prompts - that structure ports directly to domains other than National
-    Assembly data. The repository itself is evidence of that portability: it borrowed the skeleton of the GS Caltex
+    It mixes real public data and synthetic data under schema-level provenance tagging.
+    It makes the differences between three AI paradigms comparable on the same question.
+  </p>
+  <p>
+    And it enforces sensitive-domain governance through schema, metrics, and infrastructure rather than prompts.
+    That structure ports directly to domains other than National Assembly data.
+    The repository itself is evidence of that portability: it borrowed the skeleton of the GS Caltex
     customer-analytics PoC (ontology-for-gcc) and swapped only the domain.
+  </p>
+  <p>
+    To sum it up in one sentence, this repository is an Agentic AI PoC skeleton that enforces provenance transparency
+    and governance in code on top of sensitive public data.
   </p>
   <p class="lead-def">
     <b>Recommendation:</b> when referencing this repository, start not with the scenario code but with the three single

@@ -586,10 +586,10 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>project-init은 Claude Code 하네스(hooks, skills, agents, commands, CLAUDE.md)를 <strong>9개 커맨드</strong>로 생성하고 유지하는 플러그인입니다. 현재 버전은 2.2.0(2026-07-12)입니다.</li>
-    <li>핵심 메커니즘은 CLAUDE.md 품질 점수(0-100점, 6개 기준)와 <strong>4-layer 자동 동기화</strong>(Plan 모드 규칙, PostToolUse 훅, /sync-docs, commit-msg 훅)입니다. 문서가 코드를 따라가지 못하는 drift 문제를 겨냥합니다.</li>
-    <li>보안은 <strong>17개 패턴</strong>의 PreToolUse 시크릿 스캔과 위험 명령 deny 목록이 담당하고, /health-check가 설정 상태를 0-200점으로 검증합니다. 저장소 자체 테스트는 169개이며 전부 통과합니다.</li>
-    <li>결론 - 코드 구현 이후 /init-project &rarr; /sync-docs 순서로 적용할 때 자동 감지 정확도가 가장 높습니다. v2.1 이전에 초기화한 프로젝트는 settings.json을 수동 수정해야 합니다.</li>
+    <li>project-init은 Claude Code가 프로젝트를 잘 다루도록 돕는 설정 묶음, 즉 하네스(hooks, skills, agents, commands, CLAUDE.md)를 <strong>9개 커맨드</strong>로 만들어 주고 관리해 주는 플러그인입니다. 현재 버전은 2.2.0(2026-07-12)입니다.</li>
+    <li>핵심 장치는 두 가지입니다. 문서 품질을 0-100점(6개 기준)으로 재는 점수와, 코드가 바뀔 때 문서가 낡지 않게 잡아 주는 <strong>4-layer 자동 동기화</strong>(Plan 모드 규칙, PostToolUse 훅, /sync-docs, commit-msg 훅)입니다.</li>
+    <li>보안은 API 키 같은 시크릿을 커밋 전에 걸러내는 <strong>17개 패턴</strong>의 스캔과 위험 명령 deny 목록이 담당합니다. /health-check가 설정 상태를 0-200점으로 검증하며, 저장소 자체 테스트 169개는 전부 통과합니다.</li>
+    <li>결론 - 코드를 먼저 구현한 뒤 /init-project &rarr; /sync-docs 순서로 적용할 때 자동 감지 정확도가 가장 높습니다. v2.1 이전에 초기화한 프로젝트는 settings.json을 직접 고쳐야 합니다.</li>
   </ul>
 </section>
 
@@ -614,24 +614,43 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="sec" id="s1">
   <h2><span class="no">01</span>문제 정의 - 하네스 수동 구성의 비용</h2>
   <p>
-    Claude Code의 동작 품질은 하네스가 결정합니다. 하네스는 hooks, skills, agents, commands,
-    CLAUDE.md 파일의 조합이며, 이 중 CLAUDE.md는 프로젝트 컨텍스트를 담아 사실상 시스템 프롬프트
-    역할을 합니다. 이 조합을 갖춘 프로젝트와 그렇지 않은 프로젝트는 같은 요청에 대한 결과 품질이
+    이 절은 Claude Code용 프로젝트 설정을 사람이 손으로 만들 때 어떤 문제가 생기는지 살펴봅니다.
+    이 플러그인이 왜 필요한지에 대한 배경입니다.
+  </p>
+  <p>
+    Claude Code의 동작 품질은 하네스가 결정합니다. 하네스는 hooks(정해진 시점에 자동 실행되는
+    스크립트), skills, agents, commands, CLAUDE.md 파일의 조합입니다. 이 중 CLAUDE.md는 프로젝트
+    컨텍스트를 담는 파일로, 사실상 시스템 프롬프트 역할을 합니다.
+  </p>
+  <p>
+    이 조합을 갖춘 프로젝트와 그렇지 않은 프로젝트는 다릅니다. 같은 요청을 해도 결과 품질이
     달라집니다.
   </p>
+
+  <h3>첫 번째 비용 - 조용히 실패하는 문법</h3>
   <p>
     문제는 이 다섯 종류의 구성 요소를 전부 손으로 만들어야 한다는 점입니다. 각각 파일 위치와 문법이
-    다르고, 특히 <span class="mono">settings.json</span>의 훅 등록은 틀려도 조용히 실패합니다.
-    project-init 저장소 자체가 이를 실증합니다. v2.1 이전 버전은 존재하지 않는 훅 이벤트
-    <span class="mono">PreCommit</span>과 잘못된 deny 패턴 문법을 배포했고, 이 두 버그는 생성된
-    프로젝트의 세션 시작 시 "Invalid key in record" 에러로 나타났습니다(CHANGELOG 2.1.0의 Fixed
-    항목). <strong>플러그인 제작자조차 하네스 문법에서 실수한다</strong>는 것이 수동 구성의 첫 번째 비용입니다.
+    다릅니다. 특히 <span class="mono">settings.json</span>의 훅 등록은 틀려도 조용히 실패합니다.
   </p>
   <p>
-    두 번째 비용은 문서 drift입니다. 코드는 계속 바뀌는데 CLAUDE.md는 초기 작성 시점에 멈춰 있으면,
-    Claude는 낡은 컨텍스트를 근거로 판단합니다. README는 이 생성과 동기화 과정을 "수동적이고 실수가
-    잦다"고 규정하고, 플러그인의 존재 이유를 여기에 둡니다. project-init은 생성(스캐폴딩)과
-    유지(자동 동기화, 점수화)를 모두 커맨드로 자동화하는 접근을 택했습니다.
+    얼마나 틀리기 쉬울까요? project-init 저장소 자체가 이를 실증합니다. v2.1 이전 버전은 존재하지
+    않는 훅 이벤트 <span class="mono">PreCommit</span>과 잘못된 deny 패턴 문법을 배포했습니다.
+  </p>
+  <p>
+    이 두 버그는 생성된 프로젝트의 세션 시작 시 "Invalid key in record" 에러로 나타났습니다
+    (CHANGELOG 2.1.0의 Fixed 항목). <strong>플러그인 제작자조차 하네스 문법에서 실수한다</strong>는
+    것이 수동 구성의 첫 번째 비용입니다.
+  </p>
+
+  <h3>두 번째 비용 - 문서 drift</h3>
+  <p>
+    두 번째 비용은 문서 drift입니다. drift는 코드는 계속 바뀌는데 문서는 처음 작성한 시점에 멈춰
+    서로 어긋나는 현상을 말합니다. CLAUDE.md가 낡으면 Claude는 낡은 컨텍스트를 근거로 판단합니다.
+  </p>
+  <p>
+    README는 이 생성과 동기화 과정을 "수동적이고 실수가 잦다"고 규정하고, 플러그인의 존재 이유를
+    여기에 둡니다. 그래서 project-init은 생성(스캐폴딩, 즉 뼈대 파일의 자동 생성)과 유지(자동
+    동기화, 점수화)를 모두 커맨드로 자동화하는 접근을 택했습니다.
   </p>
 
   <div class="callout note">
@@ -649,19 +668,32 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="sec" id="s2">
   <h2><span class="no">02</span>동작 원리 - 플러그인 구조와 9개 커맨드</h2>
   <p>
-    저장소는 마켓플레이스 구조입니다. 루트의 <span class="mono">.claude-plugin/marketplace.json</span>이
-    마켓플레이스 매니페스트이고, 실제 플러그인은 <span class="mono">plugins/project-init/</span> 아래에
-    있습니다. 플러그인 패키지는 세 부분으로 구성됩니다: 커맨드 9개(<span class="mono">commands/</span>),
-    에이전트 1개(doc-sync-checker, model: opus로 실행), 스킬 1개(project-scaffolder, 참조 파일
-    13개 포함). 커맨드, 에이전트, 스킬이 전부 Markdown 파일로 정의되며, 커맨드 정의 파일 9개의 합계는
-    1,807줄입니다.
+    이 절은 플러그인이 어떤 파일들로 이루어져 있고 각 커맨드가 무엇을 해 주는지 살펴봅니다.
+    커맨드 목록과 프로젝트 자동 감지 방식이 핵심입니다.
+  </p>
+  <p>
+    저장소는 마켓플레이스 구조입니다. 마켓플레이스는 플러그인을 배포하고 설치하게 해 주는 저장소
+    형식을 말합니다. 루트의 <span class="mono">.claude-plugin/marketplace.json</span>이 마켓플레이스
+    매니페스트이고, 실제 플러그인은 <span class="mono">plugins/project-init/</span> 아래에 있습니다.
+  </p>
+  <p>
+    플러그인 패키지는 무엇으로 구성될까요? 세 부분입니다. 커맨드
+    9개(<span class="mono">commands/</span>), 에이전트 1개(doc-sync-checker, model: opus로 실행),
+    스킬 1개(project-scaffolder, 참조 파일 13개 포함)입니다.
+  </p>
+  <p>
+    커맨드, 에이전트, 스킬은 전부 Markdown 파일로 정의됩니다. 분량은 얼마나 될까요? 커맨드 정의
+    파일 9개의 합계는 1,807줄입니다.
   </p>
   <p>
     생성물의 원본은 project-scaffolder 스킬의 <span class="mono">references/</span> 디렉토리에 있는
     참조 파일 13개입니다(저장소 architecture.md는 12개로 적고 있으나 실제 파일 수 기준).
-    훅 스크립트, settings.json, 스킬, 에이전트, 테스트, README, CHANGELOG 템플릿이
-    여기에 모여 있고, <span class="mono">/init-project</span>가 이를 읽어 대상 프로젝트에 맞게
-    구체화합니다. 즉 플러그인이 생성하는 하네스의 품질은 이 템플릿 파일들의 품질과 같습니다.
+    훅 스크립트, settings.json, 스킬, 에이전트, 테스트, README, CHANGELOG 템플릿이 여기에 모여
+    있습니다. <span class="mono">/init-project</span>가 이를 읽어 대상 프로젝트에 맞게 구체화합니다.
+  </p>
+  <p>
+    즉 플러그인이 생성하는 하네스의 품질은 이 템플릿 파일들의 품질과 같습니다.
+    이 표에서 볼 것은 9개 커맨드가 각각 생성, 동기화, 검증 중 어떤 역할을 맡는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -689,9 +721,12 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     감지합니다. <span class="mono">package.json</span>이면 Node.js,
     <span class="mono">pyproject.toml</span>이면 Python, <span class="mono">go.mod</span>면 Go,
     <span class="mono">Cargo.toml</span>이면 Rust, <span class="mono">pom.xml</span> /
-    <span class="mono">build.gradle</span>이면 Java/Kotlin으로 판단하고, 각 유형의 소스 디렉토리
-    관례와 빌드/테스트 명령을 CLAUDE.md에 미리 채웁니다. 아무 매니페스트도 없으면 새 프로젝트로 보고
-    기본 모듈(src/api, src/persistence)을 생성합니다.
+    <span class="mono">build.gradle</span>이면 Java/Kotlin으로 판단합니다.
+  </p>
+  <p>
+    감지 결과는 CLAUDE.md에 반영됩니다. 각 유형의 소스 디렉토리 관례와 빌드/테스트 명령을 미리
+    채웁니다. 아무 매니페스트도 없으면 새 프로젝트로 보고 기본 모듈(src/api, src/persistence)을
+    생성합니다.
   </p>
 
   <div class="callout note">
@@ -707,16 +742,22 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="sec" id="s3">
   <h2><span class="no">03</span>딥다이브 - 품질 점수와 4-layer 자동 동기화</h2>
   <p>
-    이 플러그인을 다른 스캐폴딩 도구와 구분 짓는 두 메커니즘입니다. 하나는 문서 상태를 수치로
-    만드는 품질 점수이고, 다른 하나는 문서가 코드를 따라가게 만드는 네 겹의 동기화 장치입니다.
+    이 절은 이 플러그인을 다른 스캐폴딩 도구와 구분 짓는 두 장치를 뜯어봅니다. 문서 상태를 점수로
+    만드는 품질 점수와, 문서가 코드를 따라가게 만드는 네 겹의 동기화 장치입니다.
   </p>
 
   <h3>3.1 CLAUDE.md 품질 점수 0-100</h3>
   <p>
-    <span class="mono">/sync-docs</span>와 doc-sync-checker 에이전트는 각 CLAUDE.md를 6개 기준,
-    100점 만점으로 평가합니다. 배점이 큰 두 기준이 명령어(20점)와 아키텍처 명확성(20점)인 것이
-    설계 의도를 보여줍니다. Claude가 실제로 소비하는 정보, 즉 <strong>복사해서 바로 실행할 수 있는
-    명령과 이 파일만으로 이해되는 구조 설명</strong>에 가장 큰 가중치를 둡니다.
+    <span class="mono">/sync-docs</span>와 doc-sync-checker 에이전트는 각 CLAUDE.md를 채점합니다.
+    기준은 몇 개일까요? 6개 기준, 100점 만점입니다.
+  </p>
+  <p>
+    배점이 큰 두 기준은 명령어(20점)와 아키텍처 명확성(20점)입니다. 이 배점이 설계 의도를
+    보여줍니다. Claude가 실제로 소비하는 정보, 즉 <strong>복사해서 바로 실행할 수 있는 명령과
+    이 파일만으로 이해되는 구조 설명</strong>에 가장 큰 가중치를 둡니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 6개 기준의 배점 분포와 각 기준이 무엇을 확인하는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -738,15 +779,21 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
   <p>
     등급은 A(90-100), B(70-89), C(50-69), D(30-49), F(0-29)입니다. 점수는 절대값보다 변화량으로
-    쓰입니다. <span class="mono">/sync-docs</span>는 실행마다 Before/After 표를 출력하므로,
-    동기화가 문서를 실제로 개선했는지가 매번 수치로 남습니다. README의 문제 해결 섹션이 명시하듯
-    이 점수는 문서 완성도를 재는 것이지 코드 품질과는 무관합니다.
+    쓰입니다.
+  </p>
+  <p>
+    <span class="mono">/sync-docs</span>는 실행마다 Before/After 표를 출력합니다. 그래서 동기화가
+    문서를 실제로 개선했는지가 매번 수치로 남습니다. README의 문제 해결 섹션이 명시하듯 이 점수는
+    문서 완성도를 재는 것이지 코드 품질과는 무관합니다.
   </p>
 
   <h3>3.2 4-layer 자동 동기화</h3>
   <p>
     문서 drift를 막는 장치는 한 겹이 아니라 네 겹입니다. 트리거 시점이 서로 다른 네 메커니즘이
-    같은 목표(문서 최신화)를 겨냥하므로, 한 겹이 무시되거나 실패해도 다음 겹이 잡습니다.
+    같은 목표(문서 최신화)를 겨냥합니다. 한 겹이 무시되거나 실패해도 다음 겹이 잡습니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 네 계층이 각각 언제 실행되고 어디에 설치되는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -765,12 +812,20 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   </div>
 
   <p>
-    첫 계층은 CLAUDE.md에 심어진 규칙 텍스트로, Plan 모드에서 결정된 아키텍처 변경을 구현 시작 전에
-    문서에 반영하도록 Claude 자신에게 지시합니다. 둘째 계층은 파일 편집 직후 실행되는
-    <span class="mono">check-doc-sync.sh</span> 훅으로, 편집된 경로의 상위 디렉토리를 거슬러 올라가며
-    대응하는 CLAUDE.md가 있는지 확인합니다(저장소 테스트가 matcher <span class="mono">Write|Edit</span>를
-    검증합니다). 셋째 계층이 사용자가 호출하는 전면 동기화이고, 넷째 계층인 Git commit-msg 훅은 커밋
-    메시지의 AI Co-Authored-By 라인을 자동 제거하는 정리 역할까지 겸합니다.
+    첫 계층은 CLAUDE.md에 심어진 규칙 텍스트입니다. Plan 모드(구현 전에 계획부터 세우는 Claude
+    Code의 작업 모드)에서 결정된 아키텍처 변경을 구현 시작 전에 문서에 반영하도록 Claude 자신에게
+    지시합니다.
+  </p>
+  <p>
+    둘째 계층은 PostToolUse 훅, 즉 파일 편집 직후에 자동 실행되는
+    <span class="mono">check-doc-sync.sh</span>입니다. 편집된 경로의 상위 디렉토리를 거슬러 올라가며
+    대응하는 CLAUDE.md가 있는지 확인합니다. 저장소 테스트가 matcher(훅을 어떤 도구 호출에 적용할지
+    정하는 조건) <span class="mono">Write|Edit</span>를 검증합니다.
+  </p>
+  <p>
+    셋째 계층이 사용자가 직접 호출하는 전면 동기화 <span class="mono">/sync-docs</span>입니다.
+    넷째 계층인 Git commit-msg 훅은 커밋 메시지의 AI Co-Authored-By 라인을 자동 제거하는 정리
+    역할까지 겸합니다.
   </p>
 
   <figure class="diagram">
@@ -802,16 +857,26 @@ flowchart LR
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
   <h2><span class="no">04</span>딥다이브 - 시크릿 스캔과 health-check</h2>
+  <p>
+    이 절은 생성되는 프로젝트의 보안 장치와 상태 점검 커맨드를 살펴봅니다. 시크릿(API 키나
+    비밀번호처럼 노출되면 안 되는 값)의 유출을 막는 스캔과, 설정 전체를 채점하는 health-check입니다.
+  </p>
 
   <h3>4.1 PreToolUse 시크릿 스캔 - 17개 패턴</h3>
   <p>
-    생성되는 <span class="mono">secret-scan.sh</span> 훅은 PreToolUse 이벤트(matcher: Bash)에서
-    커밋 전 스테이징된 파일을 검사하고, 시크릿이 발견되면 exit 1로 차단하도록 설계되어 있습니다.
-    다만 생성되는 settings.json이 이 훅을 <span class="mono">|| true</span>로 등록해 exit 코드가
-    삼켜지므로, 실제 동작은 차단이 아니라 경고 출력에 그칩니다(ADR-004의 게이트 훅 정책과
-    등록부가 불일치하는 지점으로, 6절 한계에서 함께 다룹니다). 패턴 배열에는
-    <strong>17개 패턴</strong>이 정의되어 있습니다. AWS Access Key(<span class="mono">AKIA...</span>),
-    OpenAI, Anthropic, GitHub(ghp/gho/fine-grained PAT), Slack(xoxb/xoxp), Stripe(sk_live/rk_live),
+    생성되는 <span class="mono">secret-scan.sh</span> 훅은 PreToolUse 이벤트(도구 실행 직전에 도는
+    훅, matcher: Bash)에서 커밋 전 스테이징된 파일을 검사합니다. 시크릿이 발견되면 exit 1(실패를
+    뜻하는 종료 코드)로 차단하도록 설계되어 있습니다.
+  </p>
+  <p>
+    다만 실제로는 차단되지 않습니다. 생성되는 settings.json이 이 훅을
+    <span class="mono">|| true</span>로 등록해 exit 코드가 삼켜지므로, 동작은 경고 출력에
+    그칩니다(ADR-004의 게이트 훅 정책과 등록부가 불일치하는 지점으로, 6절 한계에서 함께 다룹니다).
+  </p>
+  <p>
+    잡아내는 패턴은 몇 개일까요? 패턴 배열에는 <strong>17개 패턴</strong>이 정의되어 있습니다.
+    AWS Access Key(<span class="mono">AKIA...</span>), OpenAI, Anthropic,
+    GitHub(ghp/gho/fine-grained PAT), Slack(xoxb/xoxp), Stripe(sk_live/rk_live),
     Google(AIza, ya29), Azure 연결 문자열, 그리고 password/secret/api-key 대입문 형태입니다.
   </p>
 
@@ -830,13 +895,20 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
   </div>
 
   <p>
-    AWS Secret Key 패턴이 주목할 지점입니다. 40자 base64 문자열을 무조건 잡는 대신, lookbehind로
-    <span class="mono">aws_secret_access_key =</span> 문맥 뒤에 오는 경우만 잡습니다. v2.1
-    CHANGELOG에 따르면 이는 광범위한 base64 패턴이 만들던 거짓 양성(SHA256 해시, URL 경로 등)을
-    줄이기 위한 교체였고, 저장소 테스트에는 이 참양성/거짓양성(TP/FP) 케이스가 픽스처로 포함되어
-    있습니다. 같은 맥락에서 생성되는 settings.json의 deny 목록은 <span class="mono">rm -rf</span>,
-    <span class="mono">git push --force</span>, <span class="mono">git reset --hard</span>,
-    <span class="mono">eval</span>, <span class="mono">curl|bash</span> 류의 위험 명령을 차단합니다.
+    AWS Secret Key 패턴이 주목할 지점입니다. 40자 base64 문자열을 무조건 잡는 대신,
+    lookbehind(정규식에서 특정 문맥 뒤에 오는 경우만 잡는 기법)로
+    <span class="mono">aws_secret_access_key =</span> 문맥 뒤에 오는 경우만 잡습니다.
+  </p>
+  <p>
+    왜 이렇게 좁혔을까요? v2.1 CHANGELOG에 따르면 광범위한 base64 패턴이 만들던 거짓 양성(시크릿이
+    아닌데 시크릿으로 잘못 잡는 것으로, SHA256 해시나 URL 경로 등)을 줄이기 위한 교체였습니다.
+    저장소 테스트에는 이 참양성/거짓양성(TP/FP) 케이스가 픽스처로 포함되어 있습니다.
+  </p>
+  <p>
+    같은 맥락의 장치가 deny 목록(실행을 금지할 명령의 목록)입니다. 생성되는 settings.json은
+    <span class="mono">rm -rf</span>, <span class="mono">git push --force</span>,
+    <span class="mono">git reset --hard</span>, <span class="mono">eval</span>,
+    <span class="mono">curl|bash</span> 류의 위험 명령을 차단합니다.
   </p>
 
   <div class="callout warn">
@@ -851,11 +923,17 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
 
   <h3>4.2 health-check - 0-200점 건강 점수</h3>
   <p>
-    <span class="mono">/health-check</span>는 하네스가 온전한지 7개 검사 단계로 확인합니다. 핵심
-    파일(CLAUDE.md 존재 +20점 등), 훅 설정(PostToolUse +10, PreToolUse +10, SessionStart +5,
-    commit-msg +10), 스킬 4종(각 +5), 문서 커버리지, 보안, CLAUDE.md 품질(500줄 미만, 섹션 구성 등
-    6항목 각 +5), 테스트 구조 순입니다. 훅이 등록만 되고 실행 권한이 없는 경우까지
+    <span class="mono">/health-check</span>는 하네스가 온전한지 확인하는 커맨드입니다. 검사는 몇
+    단계일까요? 7개 검사 단계입니다.
+  </p>
+  <p>
+    순서는 핵심 파일(CLAUDE.md 존재 +20점 등), 훅 설정(PostToolUse +10, PreToolUse +10,
+    SessionStart +5, commit-msg +10), 스킬 4종(각 +5), 문서 커버리지, 보안, CLAUDE.md 품질(500줄
+    미만, 섹션 구성 등 6항목 각 +5), 테스트 구조입니다. 훅이 등록만 되고 실행 권한이 없는 경우까지
     <span class="mono">find ... ! -perm -u+x</span>로 잡아냅니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 총점이 어느 구간일 때 어떤 등급과 상태로 판정되는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -875,15 +953,22 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
   </div>
 
   <p>
-    품질 점수(0-100)가 문서 하나하나의 내용을 재는 미시 지표라면, 건강 점수(0-200)는 하네스 전체의
-    존재와 정합성을 재는 거시 지표입니다. 두 점수는 연결되어 있습니다. health-check 리포트가
-    CLAUDE.md 품질을 XX/100 형식으로 함께 표기합니다.
+    두 점수의 역할은 다릅니다. 품질 점수(0-100)가 문서 하나하나의 내용을 재는 미시 지표라면,
+    건강 점수(0-200)는 하네스 전체의 존재와 정합성을 재는 거시 지표입니다.
+  </p>
+  <p>
+    두 점수는 연결되어 있습니다. health-check 리포트가 CLAUDE.md 품질을 XX/100 형식으로 함께
+    표기합니다.
   </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
   <h2><span class="no">05</span>실제 사용 흐름</h2>
+  <p>
+    이 절은 설치부터 일상 운영까지의 실제 사용 순서를 다룹니다. 어느 시점에 어떤 커맨드를 실행해야
+    효과가 큰지가 핵심입니다.
+  </p>
   <p>
     설치는 마켓플레이스 등록과 플러그인 설치 두 단계입니다. 설치 후에는 Claude Code 세션을
     재시작해야 커맨드가 나타납니다.
@@ -898,15 +983,21 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 
   <p>
     README가 권장하는 실행 순서는 반직관적입니다. <span class="mono">/init-project</span>를 코드
-    구현 전이 아니라 <strong>구현 이후에</strong> 실행하라고 안내합니다. 이유는 자동 감지의 정확도입니다.
-    코드가 없으면 CLAUDE.md는 사용자 입력 기반 추측, architecture.md는 빈 템플릿, 훅의 감시 경로는
-    불명확해집니다. 코드가 있으면 실제 디렉토리, 실제 컴포넌트, 정확한 테스트 명령이 채워집니다.
+    구현 전이 아니라 <strong>구현 이후에</strong> 실행하라고 안내합니다. 이유는 자동 감지의
+    정확도입니다.
+  </p>
+  <p>
+    코드가 없으면 CLAUDE.md는 사용자 입력에 기반한 추측이 됩니다. architecture.md는 빈 템플릿이
+    되고, 훅의 감시 경로도 불명확해집니다. 반대로 코드가 있으면 실제 디렉토리, 실제 컴포넌트,
+    정확한 테스트 명령이 채워집니다.
+  </p>
+  <p>
     권장 전체 흐름은 brainstorm &rarr; plan &rarr; 구현 &rarr; /init-project &rarr; /sync-docs입니다.
   </p>
   <p>
     운영 단계의 반복 루틴은 <span class="mono">/sync-docs</span>입니다. 실행하면 doc-sync-checker
-    서브에이전트의 갭 분석부터 README/CHANGELOG 동기화까지 진행하고, 마지막에 Before/After
-    리포트를 출력합니다.
+    서브에이전트(본체와 분리된 컨텍스트에서 도는 보조 에이전트)의 갭 분석부터 README/CHANGELOG
+    동기화까지 진행합니다. 마지막에 Before/After 리포트를 출력합니다.
   </p>
 
   <div class="codeblock">
@@ -928,10 +1019,12 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
   </div>
 
   <p>
-    생성물의 신뢰성은 저장소 자체 테스트로 뒷받침됩니다. <span class="mono">bash tests/run-all.sh</span>를
-    직접 실행한 결과 <strong>169개 테스트가 전부 통과</strong>했습니다(훅 스크립트 검증, 시크릿 패턴 TP/FP,
-    플러그인 구조, 버전 일관성). 생성되는 프로젝트에도 같은 방식의 테스트 프레임워크(README 기준
-    114개 이상)가 함께 설치됩니다.
+    생성물은 믿을 만할까요? 저장소 자체 테스트가 뒷받침합니다.
+    <span class="mono">bash tests/run-all.sh</span>를 직접 실행한 결과 <strong>169개 테스트가 전부
+    통과</strong>했습니다(훅 스크립트 검증, 시크릿 패턴 TP/FP, 플러그인 구조, 버전 일관성).
+  </p>
+  <p>
+    생성되는 프로젝트에도 같은 방식의 테스트 프레임워크(README 기준 114개 이상)가 함께 설치됩니다.
   </p>
 </section>
 
@@ -939,35 +1032,55 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="sec" id="s6">
   <h2><span class="no">06</span>한계</h2>
   <p>
-    저장소를 읽으며 확인한 한계는 크게 네 갈래입니다. 문서 간 수치 불일치, 점수 산정의 비결정성,
-    시크릿 스캔 게이트의 등록부 불일치, 그리고 마이그레이션 공백입니다.
+    이 절은 저장소를 읽으며 확인한 약점을 정리합니다. 도입 전에 미리 알아 두면 좋은 항목들입니다.
   </p>
+  <p>
+    한계는 크게 네 갈래입니다. 문서 간 수치 불일치, 점수 산정의 비결정성, 시크릿 스캔 게이트의
+    등록부 불일치, 그리고 마이그레이션 공백입니다.
+  </p>
+
+  <h3>6.1 문서 간 수치 불일치</h3>
   <p>
     첫째, 문서 간 수치가 어긋나는 지점이 있습니다. health-check의 명목 만점은 200점이지만, 커맨드
-    정의 파일의 가점 항목을 전부 더하면 195점이고, README의 카테고리별 배점 합계는 160점입니다.
-    또 README의 커맨드 상세는 /sync-docs를 "9-phase"로 소개하지만 실제 커맨드 파일은 Phase 0부터
-    Phase 10까지 정의되어 있습니다(CHANGELOG 2.1.0은 11개 phase로 확장했다고 기록). 동작에는 영향이
-    없지만, 점수를 근거로 팀 정책을 세울 때는 커맨드 정의 파일을 기준으로 삼아야 합니다.
+    정의 파일의 가점 항목을 전부 더하면 195점입니다. README의 카테고리별 배점 합계는 160점입니다.
   </p>
+  <p>
+    또 README의 커맨드 상세는 /sync-docs를 "9-phase"로 소개하지만, 실제 커맨드 파일은 Phase 0부터
+    Phase 10까지 정의되어 있습니다(CHANGELOG 2.1.0은 11개 phase로 확장했다고 기록). 동작에는 영향이
+    없습니다. 다만 점수를 근거로 팀 정책을 세울 때는 커맨드 정의 파일을 기준으로 삼아야 합니다.
+  </p>
+
+  <h3>6.2 점수 산정의 비결정성</h3>
   <p>
     둘째, 품질 점수와 건강 점수의 산정 주체가 스크립트가 아니라 Claude 자신입니다. 커맨드 파일은
-    평가 기준과 배점을 지시하는 Markdown 프롬프트이므로, 같은 문서라도 실행마다 점수가 조금씩 다를
-    수 있다고 유추할 수 있습니다. 이는 저장소가 명시한 내용이 아니라 커맨드 구조에서 나오는
-    추론입니다. Before/After 변화량 중심으로 읽으면 이 변동성의 영향이 줄어듭니다.
+    평가 기준과 배점을 지시하는 Markdown 프롬프트입니다. 따라서 같은 문서라도 실행마다 점수가
+    조금씩 다를 수 있다고 유추할 수 있습니다.
   </p>
+  <p>
+    이는 저장소가 명시한 내용이 아니라 커맨드 구조에서 나오는 추론입니다. Before/After 변화량
+    중심으로 읽으면 이 변동성의 영향이 줄어듭니다.
+  </p>
+
+  <h3>6.3 닫히지 않는 시크릿 스캔 게이트</h3>
   <p>
     셋째, 시크릿 스캔의 게이트가 실제로는 닫히지 않습니다. <span class="mono">secret-scan.sh</span>
-    자체는 시크릿 발견 시 exit 1을 반환하지만, 저장소와 생성 템플릿의 settings.json이 훅을
+    자체는 시크릿 발견 시 exit 1을 반환합니다. 하지만 저장소와 생성 템플릿의 settings.json이 훅을
     <span class="mono">bash .claude/hooks/secret-scan.sh 2&gt;/dev/null || true</span>로 등록해
-    exit 코드가 항상 0으로 바뀝니다. 게이트 훅은 엄격해야 한다는 ADR-004의 결정과 등록부가
-    불일치하는 지점이며, 현재 동작은 차단이 아니라 경고입니다. 차단이 필요하면
-    <span class="mono">|| true</span>를 제거해야 합니다.
+    exit 코드가 항상 0으로 바뀝니다.
   </p>
   <p>
-    넷째, 운영상 공백 두 가지입니다. doc-sync-checker는 model: opus로 실행되어 소스 디렉토리가
-    50개 이상인 프로젝트에서는 타임아웃이 날 수 있고(README 문제 해결 섹션), 플러그인 업데이트 시
-    <span class="mono">settings.json</span>은 자동으로 덮어쓰지 않으므로 v2.1 이전에 초기화한
-    프로젝트는 수동 마이그레이션이 필요합니다.
+    게이트 훅은 엄격해야 한다는 ADR-004의 결정과 등록부가 불일치하는 지점입니다. 현재 동작은 차단이
+    아니라 경고입니다. 차단이 필요하면 <span class="mono">|| true</span>를 제거해야 합니다.
+  </p>
+
+  <h3>6.4 운영상 공백</h3>
+  <p>
+    넷째, 운영상 공백이 두 가지 있습니다. doc-sync-checker는 model: opus로 실행되어, 소스 디렉토리가
+    50개 이상인 프로젝트에서는 타임아웃이 날 수 있습니다(README 문제 해결 섹션).
+  </p>
+  <p>
+    또 플러그인을 업데이트해도 <span class="mono">settings.json</span>은 자동으로 덮어쓰지 않습니다.
+    그래서 v2.1 이전에 초기화한 프로젝트는 수동 마이그레이션이 필요합니다.
   </p>
 
   <div class="callout warn">
@@ -986,21 +1099,26 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="sec" id="s7">
   <h2><span class="no">07</span>결론</h2>
   <p>
+    이 절은 분석 결과를 정리하고 도입할 때의 권고를 제시합니다.
+  </p>
+  <p>
     project-init의 기여는 하네스 엔지니어링을 개인의 노하우에서 커맨드로 실행 가능한 절차로 바꾼
     데 있습니다. 생성(17단계 스캐폴딩)만 자동화한 것이 아니라 유지(4-layer 동기화)와 측정(0-100
-    품질 점수, 0-200 건강 점수)까지 한 플러그인 안에 묶었고, 시크릿 스캔과 deny 목록으로 생성물의
-    보안 기본값을 강제합니다.
+    품질 점수, 0-200 건강 점수)까지 한 플러그인 안에 묶었습니다. 시크릿 스캔과 deny 목록으로
+    생성물의 보안 기본값도 강제합니다.
   </p>
   <p>
     도입 권고는 세 가지입니다. 첫째, <span class="mono">/init-project</span>는 코드가 어느 정도
     자리 잡은 뒤 "프로젝트 성숙화" 단계로 실행합니다. 둘째, <span class="mono">/sync-docs</span>의
-    점수는 절대값 비교보다 Before/After 변화량으로 읽습니다. 셋째, 기존 프로젝트에 도입할 때는
-    <span class="mono">/health-check</span>를 먼저 실행해 현재 하네스 상태를 파악하고, v2.1 이전
-    구조가 남아 있다면 settings.json부터 수정합니다.
+    점수는 절대값 비교보다 Before/After 변화량으로 읽습니다.
+  </p>
+  <p>
+    셋째, 기존 프로젝트에 도입할 때는 <span class="mono">/health-check</span>를 먼저 실행해 현재
+    하네스 상태를 파악합니다. v2.1 이전 구조가 남아 있다면 settings.json부터 수정합니다.
   </p>
   <p class="lead-def">
-    <b>한 줄 평가:</b> CLAUDE.md를 잘 쓰는 방법을 아는 것과 그 상태를 유지하는 것은 다른 문제이고,
-    이 플러그인은 후자를 자동화 대상으로 삼은 도구입니다.
+    <b>한 문장으로 요약하면:</b> CLAUDE.md를 잘 쓰는 방법을 아는 것과 그 상태를 유지하는 것은 다른
+    문제이고, 이 플러그인은 후자를 자동화 대상으로 삼은 도구입니다.
   </p>
 </section>
 
@@ -1095,10 +1213,10 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>project-init is a plugin that generates and maintains the Claude Code harness (hooks, skills, agents, commands, CLAUDE.md) through <strong>9 commands</strong>. The current version is 2.2.0 (2026-07-12).</li>
-    <li>Its core mechanisms are a CLAUDE.md quality score (0-100, 6 criteria) and <strong>4-layer auto-sync</strong> (Plan-mode rule, PostToolUse hook, /sync-docs, commit-msg hook), targeting the drift problem where documentation fails to keep up with code.</li>
-    <li>Security is handled by a PreToolUse secret scan with <strong>17 patterns</strong> and a deny list of dangerous commands, while /health-check validates the configuration state on a 0-200 scale. The repository's own test suite has 169 tests, all passing.</li>
-    <li>Bottom line - detection accuracy is highest when you run /init-project &rarr; /sync-docs after the code is implemented. Projects initialized before v2.1 require manual settings.json fixes.</li>
+    <li>project-init is a plugin that builds and maintains the harness - the bundle of settings (hooks, skills, agents, commands, CLAUDE.md) that helps Claude Code handle a project well - through <strong>9 commands</strong>. The current version is 2.2.0 (2026-07-12).</li>
+    <li>It has two core mechanisms. A quality score that grades documentation from 0 to 100 (6 criteria), and <strong>4-layer auto-sync</strong> (Plan-mode rule, PostToolUse hook, /sync-docs, commit-msg hook) that keeps docs from going stale as code changes.</li>
+    <li>Security is handled by a scan with <strong>17 patterns</strong> that catches secrets such as API keys before commit, plus a deny list of dangerous commands. /health-check validates the configuration state on a 0-200 scale, and the repository's own 169 tests all pass.</li>
+    <li>Bottom line - detection accuracy is highest when you implement the code first, then run /init-project &rarr; /sync-docs. Projects initialized before v2.1 require manual settings.json fixes.</li>
   </ul>
 </section>
 
@@ -1123,26 +1241,48 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Problem - The Cost of Manual Harness Setup</h2>
   <p>
-    The quality of Claude Code's behavior is determined by the harness. The harness is the combination
-    of hooks, skills, agents, commands, and CLAUDE.md files; among these, CLAUDE.md carries the project
-    context and effectively acts as a system prompt. A project equipped with this combination and one
-    without it produce different-quality results for the same request.
+    This section looks at what goes wrong when the project configuration for Claude Code is built by
+    hand. It is the background for why this plugin exists.
   </p>
   <p>
+    The quality of Claude Code's behavior is determined by the harness. The harness is the combination
+    of hooks (scripts that run automatically at defined moments), skills, agents, commands, and
+    CLAUDE.md files. Among these, CLAUDE.md carries the project context and effectively acts as a
+    system prompt.
+  </p>
+  <p>
+    A project equipped with this combination and one without it are different. They produce
+    different-quality results for the same request.
+  </p>
+
+  <h3>Cost one - syntax that fails silently</h3>
+  <p>
     The problem is that all five kinds of components must be built by hand. Each has a different file
-    location and syntax, and hook registration in <span class="mono">settings.json</span> in particular
-    fails silently when it is wrong. The project-init repository itself is proof. Versions before v2.1
+    location and syntax. Hook registration in <span class="mono">settings.json</span> in particular
+    fails silently when it is wrong.
+  </p>
+  <p>
+    How easy is it to get wrong? The project-init repository itself is proof. Versions before v2.1
     shipped a nonexistent hook event, <span class="mono">PreCommit</span>, and an invalid deny-pattern
-    syntax; both bugs surfaced as "Invalid key in record" errors at session start in generated projects
+    syntax.
+  </p>
+  <p>
+    Both bugs surfaced as "Invalid key in record" errors at session start in generated projects
     (the Fixed entries of CHANGELOG 2.1.0). <strong>Even the plugin's own author made harness-syntax
     mistakes</strong> - that is the first cost of manual setup.
   </p>
+
+  <h3>Cost two - documentation drift</h3>
   <p>
-    The second cost is documentation drift. Code keeps changing while CLAUDE.md stays frozen at the time
-    it was first written, and Claude then reasons from stale context. The README characterizes this
-    creation-and-sync process as "manual and error-prone" and places the plugin's raison d'etre right
-    there. project-init takes the approach of automating both creation (scaffolding) and maintenance
-    (auto-sync, scoring) as commands.
+    The second cost is documentation drift. Drift means the code keeps changing while the docs stay
+    frozen at the time they were first written, so the two fall out of step. When CLAUDE.md goes
+    stale, Claude reasons from stale context.
+  </p>
+  <p>
+    The README characterizes this creation-and-sync process as "manual and error-prone" and places the
+    plugin's raison d'etre right there. So project-init takes the approach of automating both creation
+    (scaffolding, that is, generating the skeleton files) and maintenance (auto-sync, scoring) as
+    commands.
   </p>
 
   <div class="callout note">
@@ -1160,20 +1300,35 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>How It Works - Plugin Structure and 9 Commands</h2>
   <p>
-    The repository is structured as a marketplace. The root
+    This section looks at which files make up the plugin and what each command does for you. The
+    command list and the automatic project detection are the core.
+  </p>
+  <p>
+    The repository is structured as a marketplace. A marketplace is a repository format for
+    distributing and installing plugins. The root
     <span class="mono">.claude-plugin/marketplace.json</span> is the marketplace manifest, and the
-    actual plugin lives under <span class="mono">plugins/project-init/</span>. The plugin package has
-    three parts: 9 commands (<span class="mono">commands/</span>), 1 agent (doc-sync-checker, running
-    with model: opus), and 1 skill (project-scaffolder, with 13 reference files). Commands, agent, and
-    skill are all defined as Markdown files, and the 9 command definition files total 1,807 lines.
+    actual plugin lives under <span class="mono">plugins/project-init/</span>.
+  </p>
+  <p>
+    What is the plugin package made of? Three parts. 9 commands
+    (<span class="mono">commands/</span>), 1 agent (doc-sync-checker, running with model: opus), and
+    1 skill (project-scaffolder, with 13 reference files).
+  </p>
+  <p>
+    Commands, agent, and skill are all defined as Markdown files. How large are they? The 9 command
+    definition files total 1,807 lines.
   </p>
   <p>
     The source of everything the plugin generates is the 13 reference files in the project-scaffolder
     skill's <span class="mono">references/</span> directory (the repository's architecture.md says 12,
     but 13 is the actual file count). Hook scripts, settings.json, skill, agent, test, README, and
-    CHANGELOG templates are all gathered here, and <span class="mono">/init-project</span> reads them
-    and specializes them for the target project. In other words, the quality of the harness the plugin
-    generates equals the quality of these template files.
+    CHANGELOG templates are all gathered here. <span class="mono">/init-project</span> reads them and
+    specializes them for the target project.
+  </p>
+  <p>
+    In other words, the quality of the harness the plugin generates equals the quality of these
+    template files. In the table below, look at which of the three roles - creation, sync, or
+    validation - each of the 9 commands plays.
   </p>
 
   <div class="tbl-wrap">
@@ -1198,12 +1353,15 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 
   <p>
     <span class="mono">/init-project</span> reads the build manifest before running to detect the
-    project type: <span class="mono">package.json</span> means Node.js,
+    project type. <span class="mono">package.json</span> means Node.js,
     <span class="mono">pyproject.toml</span> means Python, <span class="mono">go.mod</span> means Go,
     <span class="mono">Cargo.toml</span> means Rust, and <span class="mono">pom.xml</span> /
-    <span class="mono">build.gradle</span> mean Java/Kotlin. It pre-fills CLAUDE.md with each type's
-    source-directory conventions and build/test commands. With no manifest at all, it treats the
-    project as new and creates default modules (src/api, src/persistence).
+    <span class="mono">build.gradle</span> mean Java/Kotlin.
+  </p>
+  <p>
+    The detection result feeds CLAUDE.md. It pre-fills each type's source-directory conventions and
+    build/test commands. With no manifest at all, it treats the project as new and creates default
+    modules (src/api, src/persistence).
   </p>
 
   <div class="callout note">
@@ -1220,18 +1378,25 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Deep Dive - Quality Score and 4-Layer Auto-Sync</h2>
   <p>
-    Two mechanisms set this plugin apart from other scaffolding tools. One is the quality score, which
-    turns documentation state into a number; the other is the four-layered sync machinery that makes
-    documentation follow the code.
+    This section takes apart the two mechanisms that set this plugin apart from other scaffolding
+    tools. One is the quality score, which turns documentation state into a number; the other is the
+    four-layered sync machinery that makes documentation follow the code.
   </p>
 
   <h3>3.1 CLAUDE.md quality score, 0-100</h3>
   <p>
-    <span class="mono">/sync-docs</span> and the doc-sync-checker agent grade each CLAUDE.md on 6
-    criteria out of 100 points. That the two heaviest criteria are commands (20 points) and
-    architecture clarity (20 points) reveals the design intent: the greatest weight goes to the
-    information Claude actually consumes - <strong>commands that can be copied and run as-is, and a
-    structural explanation that is understandable from this file alone</strong>.
+    <span class="mono">/sync-docs</span> and the doc-sync-checker agent grade each CLAUDE.md. How many
+    criteria? 6 criteria, out of 100 points.
+  </p>
+  <p>
+    The two heaviest criteria are commands (20 points) and architecture clarity (20 points). That
+    weighting reveals the design intent. The greatest weight goes to the information Claude actually
+    consumes - <strong>commands that can be copied and run as-is, and a structural explanation that is
+    understandable from this file alone</strong>.
+  </p>
+  <p>
+    In the table below, look at how the points are distributed across the 6 criteria and what each one
+    checks.
   </p>
 
   <div class="tbl-wrap">
@@ -1253,17 +1418,23 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
 
   <p>
     Grades are A (90-100), B (70-89), C (50-69), D (30-49), and F (0-29). The score is used more as a
-    delta than as an absolute value: <span class="mono">/sync-docs</span> prints a Before/After table
-    on every run, so whether a sync actually improved the documentation is recorded numerically each
-    time. As the README's troubleshooting section makes explicit, this score measures documentation
-    completeness and says nothing about code quality.
+    delta than as an absolute value.
+  </p>
+  <p>
+    <span class="mono">/sync-docs</span> prints a Before/After table on every run. So whether a sync
+    actually improved the documentation is recorded numerically each time. As the README's
+    troubleshooting section makes explicit, this score measures documentation completeness and says
+    nothing about code quality.
   </p>
 
   <h3>3.2 4-layer auto-sync</h3>
   <p>
     The guard against documentation drift is not one layer but four. Four mechanisms with different
-    trigger points aim at the same goal (keeping docs current), so if one layer is ignored or fails,
-    the next one catches it.
+    trigger points aim at the same goal (keeping docs current). If one layer is ignored or fails, the
+    next one catches it.
+  </p>
+  <p>
+    In the table below, look at when each of the four layers fires and where it is installed.
   </p>
 
   <div class="tbl-wrap">
@@ -1282,13 +1453,21 @@ claude plugin list    <span class="cm"># 설치 확인</span></code></pre>
   </div>
 
   <p>
-    The first layer is rule text embedded in CLAUDE.md that instructs Claude itself to reflect
-    architecture changes decided in Plan mode into the docs before implementation begins. The second is
-    the <span class="mono">check-doc-sync.sh</span> hook that runs right after a file edit and walks up
-    the edited path's parent directories checking for a corresponding CLAUDE.md (the repository's tests
-    verify the <span class="mono">Write|Edit</span> matcher). The third layer is the full sync the user
-    invokes, and the fourth, the Git commit-msg hook, doubles as cleanup by automatically stripping AI
-    Co-Authored-By lines from commit messages.
+    The first layer is rule text embedded in CLAUDE.md. It instructs Claude itself to reflect
+    architecture changes decided in Plan mode (the Claude Code working mode that plans before
+    implementing) into the docs before implementation begins.
+  </p>
+  <p>
+    The second layer is the PostToolUse hook, that is, <span class="mono">check-doc-sync.sh</span>
+    running automatically right after a file edit. It walks up the edited path's parent directories
+    checking for a corresponding CLAUDE.md. The repository's tests verify the
+    <span class="mono">Write|Edit</span> matcher (the condition that decides which tool calls a hook
+    applies to).
+  </p>
+  <p>
+    The third layer is the full sync the user invokes, <span class="mono">/sync-docs</span>. The
+    fourth, the Git commit-msg hook, doubles as cleanup by automatically stripping AI Co-Authored-By
+    lines from commit messages.
   </p>
 
   <figure class="diagram">
@@ -1321,17 +1500,28 @@ flowchart LR
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Deep Dive - Secret Scan and health-check</h2>
+  <p>
+    This section looks at the security machinery of generated projects and the command that checks
+    their setup. A scan that stops secrets (values that must never leak, such as API keys or
+    passwords) from escaping, and health-check, which grades the whole configuration.
+  </p>
 
   <h3>4.1 PreToolUse secret scan - 17 patterns</h3>
   <p>
-    The generated <span class="mono">secret-scan.sh</span> hook is designed to inspect staged files
-    before commit on the PreToolUse event (matcher: Bash) and to block with exit 1 when a secret is
-    found. However, the generated settings.json registers the hook with <span class="mono">|| true</span>,
-    which swallows the exit code, so in practice it warns rather than blocks (a mismatch between
-    ADR-004's gate-hook policy and the registration - covered together in the limitations of section 6).
-    The pattern array defines <strong>17 patterns</strong>: AWS Access Key
-    (<span class="mono">AKIA...</span>), OpenAI, Anthropic, GitHub (ghp/gho/fine-grained PAT), Slack
-    (xoxb/xoxp), Stripe (sk_live/rk_live), Google (AIza, ya29), Azure connection strings, and
+    The generated <span class="mono">secret-scan.sh</span> hook inspects staged files before commit on
+    the PreToolUse event (a hook that runs right before a tool executes; matcher: Bash). It is designed
+    to block with exit 1 (the exit code that means failure) when a secret is found.
+  </p>
+  <p>
+    In practice, however, it does not block. The generated settings.json registers the hook with
+    <span class="mono">|| true</span>, which swallows the exit code, so the behavior is a warning only
+    (a mismatch between ADR-004's gate-hook policy and the registration - covered together in the
+    limitations of section 6).
+  </p>
+  <p>
+    How many patterns does it catch? The pattern array defines <strong>17 patterns</strong>: AWS Access
+    Key (<span class="mono">AKIA...</span>), OpenAI, Anthropic, GitHub (ghp/gho/fine-grained PAT),
+    Slack (xoxb/xoxp), Stripe (sk_live/rk_live), Google (AIza, ya29), Azure connection strings, and
     password/secret/api-key assignment forms.
   </p>
 
@@ -1351,14 +1541,21 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
 
   <p>
     The AWS Secret Key pattern is worth noting. Instead of unconditionally matching any 40-character
-    base64 string, it uses a lookbehind to match only occurrences following an
-    <span class="mono">aws_secret_access_key =</span> context. According to the v2.1 CHANGELOG, this
-    replaced the broad base64 pattern to cut the false positives it produced (SHA256 hashes, URL paths,
-    and the like), and the repository's tests include these true-positive/false-positive (TP/FP) cases
-    as fixtures. In the same vein, the generated settings.json's deny list blocks dangerous commands
-    such as <span class="mono">rm -rf</span>, <span class="mono">git push --force</span>,
-    <span class="mono">git reset --hard</span>, <span class="mono">eval</span>, and
-    <span class="mono">curl|bash</span>.
+    base64 string, it uses a lookbehind (a regex technique that matches only when a specific context
+    precedes) to match only occurrences following an
+    <span class="mono">aws_secret_access_key =</span> context.
+  </p>
+  <p>
+    Why narrow it down? According to the v2.1 CHANGELOG, this replaced the broad base64 pattern to cut
+    the false positives it produced (a false positive is a non-secret flagged as a secret - SHA256
+    hashes, URL paths, and the like). The repository's tests include these
+    true-positive/false-positive (TP/FP) cases as fixtures.
+  </p>
+  <p>
+    A device in the same vein is the deny list, a list of commands whose execution is forbidden. The
+    generated settings.json blocks dangerous commands such as <span class="mono">rm -rf</span>,
+    <span class="mono">git push --force</span>, <span class="mono">git reset --hard</span>,
+    <span class="mono">eval</span>, and <span class="mono">curl|bash</span>.
   </p>
 
   <div class="callout warn">
@@ -1374,12 +1571,18 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
 
   <h3>4.2 health-check - 0-200 health score</h3>
   <p>
-    <span class="mono">/health-check</span> verifies that the harness is intact through 7 check stages:
-    core files (CLAUDE.md present +20, etc.), hook configuration (PostToolUse +10, PreToolUse +10,
-    SessionStart +5, commit-msg +10), the 4 skills (+5 each), documentation coverage, security,
-    CLAUDE.md quality (under 500 lines, section structure, etc. - 6 items at +5 each), and test
-    structure. It even catches hooks that are registered but not executable, using
+    <span class="mono">/health-check</span> is the command that verifies the harness is intact. How
+    many stages? 7 check stages.
+  </p>
+  <p>
+    The order is core files (CLAUDE.md present +20, etc.), hook configuration (PostToolUse +10,
+    PreToolUse +10, SessionStart +5, commit-msg +10), the 4 skills (+5 each), documentation coverage,
+    security, CLAUDE.md quality (under 500 lines, section structure, etc. - 6 items at +5 each), and
+    test structure. It even catches hooks that are registered but not executable, using
     <span class="mono">find ... ! -perm -u+x</span>.
+  </p>
+  <p>
+    In the table below, look at which grade and status each total-score range maps to.
   </p>
 
   <div class="tbl-wrap">
@@ -1399,16 +1602,22 @@ SKIP_PATTERNS=('.env.example' 'secret-scan.sh' '*.md' 'package-lock.json' 'yarn.
   </div>
 
   <p>
-    If the quality score (0-100) is a micro metric that measures the content of each individual
-    document, the health score (0-200) is a macro metric that measures the presence and consistency of
-    the harness as a whole. The two scores are linked: the health-check report also displays CLAUDE.md
-    quality in XX/100 form.
+    The two scores play different roles. If the quality score (0-100) is a micro metric that measures
+    the content of each individual document, the health score (0-200) is a macro metric that measures
+    the presence and consistency of the harness as a whole.
+  </p>
+  <p>
+    The two scores are linked. The health-check report also displays CLAUDE.md quality in XX/100 form.
   </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Usage in Practice</h2>
+  <p>
+    This section covers the actual sequence of use, from installation to daily operations. The key is
+    knowing at which point each command pays off most.
+  </p>
   <p>
     Installation is two steps: register the marketplace, then install the plugin. After installation,
     the Claude Code session must be restarted for the commands to appear.
@@ -1424,16 +1633,22 @@ claude plugin list    <span class="cm"># verify installation</span></code></pre>
   <p>
     The execution order the README recommends is counterintuitive: run
     <span class="mono">/init-project</span> not before implementing the code but <strong>after the
-    implementation</strong>. The reason is detection accuracy. With no code, CLAUDE.md becomes guesswork
-    based on user input, architecture.md an empty template, and the hooks' watch paths unclear. With
-    code present, real directories, real components, and exact test commands get filled in. The
-    recommended overall flow is brainstorm &rarr; plan &rarr; implement &rarr; /init-project &rarr;
+    implementation</strong>. The reason is detection accuracy.
+  </p>
+  <p>
+    With no code, CLAUDE.md becomes guesswork based on user input. architecture.md stays an empty
+    template, and the hooks' watch paths remain unclear. With code present, real directories, real
+    components, and exact test commands get filled in.
+  </p>
+  <p>
+    The recommended overall flow is brainstorm &rarr; plan &rarr; implement &rarr; /init-project &rarr;
     /sync-docs.
   </p>
   <p>
     The recurring routine in the operations phase is <span class="mono">/sync-docs</span>. Running it
-    proceeds from the doc-sync-checker subagent's gap analysis through README/CHANGELOG sync, and
-    prints a Before/After report at the end.
+    proceeds from the gap analysis of the doc-sync-checker subagent (a helper agent that runs in a
+    context separate from the main session) through README/CHANGELOG sync. It prints a Before/After
+    report at the end.
   </p>
 
   <div class="codeblock">
@@ -1455,10 +1670,12 @@ claude plugin list    <span class="cm"># verify installation</span></code></pre>
   </div>
 
   <p>
-    The reliability of what gets generated is backed by the repository's own test suite. Running
+    Can you trust what gets generated? The repository's own test suite backs it up. Running
     <span class="mono">bash tests/run-all.sh</span> directly, <strong>all 169 tests passed</strong>
-    (hook script verification, secret-pattern TP/FP, plugin structure, version consistency). Generated
-    projects also receive a test framework of the same style (114+ tests per the README).
+    (hook script verification, secret-pattern TP/FP, plugin structure, version consistency).
+  </p>
+  <p>
+    Generated projects also receive a test framework of the same style (114+ tests per the README).
   </p>
 </section>
 
@@ -1466,39 +1683,60 @@ claude plugin list    <span class="cm"># verify installation</span></code></pre>
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Limitations</h2>
   <p>
-    The limitations confirmed while reading the repository fall into four groups: numeric
-    inconsistencies between documents, non-determinism in scoring, a registration mismatch in the
-    secret-scan gate, and a migration gap.
+    This section collects the weak points confirmed while reading the repository. They are worth
+    knowing before adopting the plugin.
   </p>
+  <p>
+    The limitations fall into four groups: numeric inconsistencies between documents, non-determinism
+    in scoring, a registration mismatch in the secret-scan gate, and a migration gap.
+  </p>
+
+  <h3>6.1 Numeric inconsistencies between documents</h3>
   <p>
     First, some numbers disagree across documents. The nominal maximum of health-check is 200 points,
-    but summing every scoring item in the command definition file yields 195, and the per-category
-    totals in the README add up to 160. Likewise, the README's command details introduce /sync-docs as
-    "9-phase", while the actual command file defines Phase 0 through Phase 10 (CHANGELOG 2.1.0 records
-    the expansion to 11 phases). None of this affects behavior, but when setting team policy based on
-    the scores, take the command definition files as the source of truth.
+    but summing every scoring item in the command definition file yields 195. The per-category totals
+    in the README add up to 160.
   </p>
+  <p>
+    Likewise, the README's command details introduce /sync-docs as "9-phase", while the actual command
+    file defines Phase 0 through Phase 10 (CHANGELOG 2.1.0 records the expansion to 11 phases). None
+    of this affects behavior. But when setting team policy based on the scores, take the command
+    definition files as the source of truth.
+  </p>
+
+  <h3>6.2 Non-determinism in scoring</h3>
   <p>
     Second, the entity computing the quality and health scores is not a script but Claude itself. The
-    command files are Markdown prompts that prescribe criteria and point values, so one can infer that
-    the same document may score slightly differently across runs. This is an inference from the command
-    structure, not something the repository states. Reading the scores primarily as Before/After deltas
-    reduces the impact of this variance.
+    command files are Markdown prompts that prescribe criteria and point values. So one can infer that
+    the same document may score slightly differently across runs.
   </p>
+  <p>
+    This is an inference from the command structure, not something the repository states. Reading the
+    scores primarily as Before/After deltas reduces the impact of this variance.
+  </p>
+
+  <h3>6.3 A secret-scan gate that never closes</h3>
   <p>
     Third, the secret-scan gate does not actually close. <span class="mono">secret-scan.sh</span>
-    itself returns exit 1 when a secret is found, but both the repository's and the generated
+    itself returns exit 1 when a secret is found. But both the repository's and the generated
     template's settings.json register the hook as
     <span class="mono">bash .claude/hooks/secret-scan.sh 2&gt;/dev/null || true</span>, which turns the
-    exit code into an unconditional 0. This is a mismatch between the ADR-004 decision that gate hooks
-    must be strict and the actual registration; the current behavior is a warning, not a block. If you
-    need blocking, remove the <span class="mono">|| true</span>.
+    exit code into an unconditional 0.
   </p>
   <p>
-    Fourth, two operational gaps. doc-sync-checker runs with model: opus and may time out on projects
-    with 50+ source directories (README troubleshooting section), and since plugin updates do not
-    overwrite <span class="mono">settings.json</span> automatically, projects initialized before v2.1
-    need manual migration.
+    This is a mismatch between the ADR-004 decision that gate hooks must be strict and the actual
+    registration. The current behavior is a warning, not a block. If you need blocking, remove the
+    <span class="mono">|| true</span>.
+  </p>
+
+  <h3>6.4 Operational gaps</h3>
+  <p>
+    Fourth, there are two operational gaps. doc-sync-checker runs with model: opus and may time out on
+    projects with 50+ source directories (README troubleshooting section).
+  </p>
+  <p>
+    Also, plugin updates do not overwrite <span class="mono">settings.json</span> automatically. So
+    projects initialized before v2.1 need manual migration.
   </p>
 
   <div class="callout warn">
@@ -1518,23 +1756,30 @@ claude plugin list    <span class="cm"># verify installation</span></code></pre>
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Conclusion</h2>
   <p>
+    This section wraps up the analysis and offers adoption recommendations.
+  </p>
+  <p>
     project-init's contribution is turning harness engineering from individual know-how into a
     procedure executable as commands. It automates not just creation (17-step scaffolding) but also
     maintenance (4-layer sync) and measurement (0-100 quality score, 0-200 health score) in a single
-    plugin, and enforces secure defaults for what it generates through the secret scan and the deny
-    list.
+    plugin. It also enforces secure defaults for what it generates through the secret scan and the
+    deny list.
   </p>
   <p>
     Three adoption recommendations. First, run <span class="mono">/init-project</span> as a "project
     maturation" step once the code has settled to some degree. Second, read the
     <span class="mono">/sync-docs</span> scores as Before/After deltas rather than comparing absolute
-    values. Third, when adopting it in an existing project, run <span class="mono">/health-check</span>
-    first to understand the current harness state, and if pre-v2.1 structure remains, fix settings.json
-    before anything else.
+    values.
+  </p>
+  <p>
+    Third, when adopting it in an existing project, run <span class="mono">/health-check</span> first
+    to understand the current harness state. If pre-v2.1 structure remains, fix settings.json before
+    anything else.
   </p>
   <p class="lead-def">
-    <b>One-line verdict:</b> knowing how to write a good CLAUDE.md and keeping it in that state are two
-    different problems, and this plugin is a tool that made the latter its automation target.
+    <b>To sum it up in one sentence:</b> knowing how to write a good CLAUDE.md and keeping it in that
+    state are two different problems, and this plugin is a tool that made the latter its automation
+    target.
   </p>
 </section>
 

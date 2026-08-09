@@ -528,8 +528,8 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   <p class="eyebrow">EC2 Networking / Technical Advisory</p>
   <h1>conntrack 유휴 타임아웃 기본값 변경 영향 분석</h1>
   <p class="subtitle">
-    Nitro V6(8세대) 인스턴스에서 Security Group 연결 추적의 TCP established 유휴 타임아웃 기본값이
-    변경된 것에 대한 영향 분석 및 대응 가이드입니다.
+    Nitro V6(8세대) 인스턴스에서 Security Group 연결 추적의 TCP established 유휴 타임아웃 기본값이 바뀌었습니다.
+    무엇이 바뀌었고 무엇을 해야 하는지 정리한 영향 분석 및 대응 가이드입니다.
   </p>
 
   <div class="stat" role="img" aria-label="기본값 변경: 432,000초(5일)에서 350초로">
@@ -556,10 +556,10 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>Nitro V6(2025년 6월 출시, m8i / r8i 등 8세대)부터 Security Group 연결 추적의 TCP established 유휴 타임아웃 기본값이 432,000초(5일)에서 <strong>350초</strong>로 단축되었습니다. P6e-GB200은 예외적으로 5일을 유지합니다.</li>
-    <li>350초 이상 유휴 상태가 된 커넥션은 <strong>FIN / RST 없이</strong> 추적 테이블에서 제거됩니다. 클라이언트 소켓은 살아있다고 믿는 상태에서 다음 패킷이 조용히 버려지는 silent drop이 발생합니다.</li>
-    <li>Karpenter, 속성 기반 인스턴스 타입 선택을 쓰는 Auto Scaling Group은 최신 세대를 자동 선택합니다. <strong>아무 변경을 하지 않아도</strong> 노드 교체나 스케일링 시점에 영향이 시작될 수 있습니다.</li>
-    <li>근본 대응은 <strong>TCP keepalive</strong>입니다. 프로브를 240초 이전에 시작하고, sysctl과 함께 소켓별 <span class="mono">SO_KEEPALIVE</span> 활성화까지 확인하면 Nitro 세대와 무관하게 안전합니다.</li>
+    <li>2025년 6월에 나온 8세대 EC2 인스턴스(Nitro V6, m8i / r8i 등)부터 유휴 TCP 커넥션을 기억해 주는 시간의 기본값이 432,000초(5일)에서 <strong>350초</strong>로 줄었습니다. P6e-GB200만 예외로 5일을 유지합니다.</li>
+    <li>350초 넘게 조용한 커넥션은 아무 종료 신호(FIN / RST) 없이 추적 목록에서 제거됩니다. 애플리케이션은 커넥션이 살아있다고 믿다가 <strong>다음 요청에서 에러도 없이 멈춥니다.</strong></li>
+    <li>노드를 자동으로 골라 주는 도구(Karpenter, 속성 기반 Auto Scaling)는 최신 세대를 알아서 선택합니다. <strong>아무것도 바꾸지 않아도</strong> 노드 교체나 스케일링 시점부터 영향이 시작될 수 있습니다.</li>
+    <li>근본 대응은 커넥션이 살아있음을 주기적으로 알리는 <strong>TCP keepalive</strong>입니다. 확인 신호(프로브)를 240초 이전에 시작하고 소켓 옵션 <span class="mono">SO_KEEPALIVE</span>까지 켜면 어떤 세대에서도 안전합니다.</li>
   </ul>
 </section>
 
@@ -585,10 +585,21 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="sec" id="s1">
   <h2><span class="no">01</span>사실 관계</h2>
   <p>
-    변경된 항목은 ENI 단위 연결 추적 설정인
-    <span class="mono">ConnectionTrackingConfiguration.tcpEstablishedTimeout</span>의 기본값입니다.
-    설정 범위 자체는 변하지 않았고, Nitro V6에서 <strong>기본값만</strong> 350초로 낮아졌습니다.
+    이 절에서는 무엇이 얼마나 바뀌었는지를 값으로 확정합니다.
+    해석과 대응은 뒤 절에서 다루고, 여기서는 사실만 정리합니다.
   </p>
+  <p>
+    conntrack(연결 추적)은 인스턴스를 드나드는 커넥션의 상태를 AWS 네트워크 계층이 기억해 두는 기능입니다.
+    ENI(인스턴스에 붙는 가상 네트워크 인터페이스) 단위로 동작합니다.
+  </p>
+  <p>
+    이번에 변경된 항목은 그 설정 중 하나인
+    <span class="mono">ConnectionTrackingConfiguration.tcpEstablishedTimeout</span>의 기본값입니다.
+    설정 가능 범위 자체는 그대로입니다.
+    Nitro V6에서 <strong>기본값만</strong> 350초로 낮아졌습니다.
+  </p>
+
+  <p>이 표에서 볼 것은 기본값 두 행으로, Nitro V6만 350초이고 나머지 항목은 기존과 같습니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -612,10 +623,16 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   </ul>
 
   <p>
-    어떤 인스턴스가 영향권인지는 EC2 공식 문서의 Nitro 세대별 목록으로 확인할 수 있습니다.
-    350초 기본값이 적용되는 것은 아래 표의 <strong>Nitro v6 행</strong>이고, v5 이하는 기존
-    432,000초(5일)를 유지합니다. 최신 목록은 참고 자료의 Nitro 인스턴스 문서에서 확인하세요.
+    그러면 어떤 인스턴스가 영향권일까요?
+    EC2 공식 문서의 Nitro 세대별 목록으로 확인할 수 있습니다.
+    350초 기본값이 적용되는 것은 아래 표의 <strong>Nitro v6 행</strong>뿐입니다.
   </p>
+  <p>
+    v5 이하는 기존 432,000초(5일)를 유지합니다.
+    최신 목록은 참고 자료의 Nitro 인스턴스 문서에서 확인하세요.
+  </p>
+
+  <p>이 표에서 볼 것은 첫 행(Nitro v6)의 인스턴스 패밀리 목록이며, 여기에 해당하면 350초 기본값이 적용됩니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -651,10 +668,9 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   <div class="callout note">
     <span class="callout-title">용어 주의 - 커널 conntrack이 아닙니다</span>
     <p>
-      여기서 말하는 conntrack은 Nitro 레벨의 Security Group 연결 추적으로, Security Groups,
-      VPC Flow Logs, 네트워크 미터링을 뒷받침하는 계층입니다. Linux 커널
-      <span class="mono">nf_conntrack_tcp_timeout_established</span>의 기본값도 우연히 432,000초라 혼동하기 쉽지만,
-      이번 변경은 커널이 아니라 <strong>ENI / 하이퍼바이저 계층</strong>입니다.
+      여기서 말하는 conntrack은 Nitro 레벨의 Security Group 연결 추적입니다.
+      Security Groups, VPC Flow Logs, 네트워크 미터링을 뒷받침하는 계층입니다.
+      Linux 커널 <span class="mono">nf_conntrack_tcp_timeout_established</span>의 기본값도 우연히 432,000초라 혼동하기 쉽지만, 이번 변경은 커널이 아니라 <strong>ENI / 하이퍼바이저 계층</strong>입니다.
     </p>
     <p>따라서 <strong>인스턴스 내부에서 sysctl을 바꿔도 이 타임아웃은 바뀌지 않습니다.</strong></p>
   </div>
@@ -663,10 +679,18 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2">
   <h2><span class="no">02</span>변경 배경</h2>
+  <p>
+    이 절에서는 AWS가 왜 기본값을 줄였는지 살펴봅니다.
+    이유를 알면 5일로 되돌리는 대응이 왜 위험한지도 자연스럽게 이해됩니다.
+  </p>
 
   <h3>2.1 conntrack allowance 고갈 방지</h3>
   <p>
-    conntrack 할당량(allowance)은 사용 가능한 Nitro 리소스에 따라 유한합니다. 기존 5일 기본값에서는
+    conntrack 할당량(allowance)은 한 인스턴스가 동시에 추적할 수 있는 커넥션 수의 상한입니다.
+    이 상한은 사용 가능한 Nitro 리소스에 따라 유한합니다.
+  </p>
+  <p>
+    기존 5일 기본값에서는 무엇이 문제였을까요?
     FIN이나 RST를 받지 못한 유휴 / 고아(orphaned) 커넥션이 최대 5일간 추적 테이블에 남습니다.
     이것이 누적되어 할당량을 소진하면, 기존 엔트리가 닫히거나 타임아웃되기 전까지
     <strong>인스턴스가 신규 커넥션을 아예 수립할 수 없습니다.</strong>
@@ -679,21 +703,22 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   </ul>
   <p>
     UDP 등 non-TCP 플로우는 타임아웃이 30~180초로 짧아 대규모 누적 가능성이 낮습니다.
-    누적 리스크는 사실상 TCP established 상태에 집중되어 있었고, 이번 변경이 그 지점을 겨냥합니다.
+    누적 리스크는 사실상 TCP established 상태에 집중되어 있었습니다.
+    이번 변경이 정확히 그 지점을 겨냥합니다.
   </p>
 
   <h3>2.2 AWS 다른 네트워킹 서비스와의 정렬</h3>
   <p>
-    NLB, NAT Gateway, Gateway Load Balancer는 이미 350초 유휴 타임아웃을 사용합니다. EC2만 5일이면
-    한쪽은 커넥션이 살아있다고 믿고 다른 쪽은 이미 버린 <strong>half-open</strong> 상태가 발생합니다.
-    350초 기본값은 계층 간 이 불일치를 줄입니다.
+    NLB, NAT Gateway, Gateway Load Balancer는 이미 350초 유휴 타임아웃을 사용합니다.
+    EC2만 5일이면 한쪽은 커넥션이 살아있다고 믿고 다른 쪽은 이미 버린 상태가 됩니다.
+    이런 상태를 <strong>half-open</strong>(한쪽만 연결을 유지하는 상태)이라고 부르며, 350초 기본값은 계층 간 이 불일치를 줄입니다.
   </p>
 
   <div class="callout note">
     <span class="callout-title">참고 - 설정 가능 옵션은 2023년 11월부터 존재</span>
     <p>
-      ENI 단위로 60초~432,000초(5일) 범위의 TCP established 유휴 타임아웃을 설정하는 기능은
-      2023년 11월에 이미 도입되어 <strong>모든 Nitro 세대</strong>에서 사용 가능합니다.
+      ENI 단위로 60초~432,000초(5일) 범위의 TCP established 유휴 타임아웃을 설정하는 기능은 2023년 11월에 이미 도입되었습니다.
+      <strong>모든 Nitro 세대</strong>에서 사용 가능합니다.
       이번에 새로 생긴 것은 기능이 아니라 V6의 기본값입니다.
     </p>
   </div>
@@ -702,11 +727,19 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3">
   <h2><span class="no">03</span>영향 분석</h2>
+  <p>
+    이 절에서는 이 변경이 실제로 어떤 장애로 나타나는지 살펴봅니다.
+    어떤 워크로드가 노출되는지, 왜 눈치채기 어려운지도 함께 정리합니다.
+  </p>
 
   <h3>3.1 장애 양상이 까다로운 이유 - silent drop</h3>
   <p>
-    타임아웃으로 conntrack 엔트리가 삭제될 때 <strong>양쪽 어디에도 FIN이나 RST가 전달되지 않습니다.</strong>
-    클라이언트 소켓은 ESTABLISHED 상태로 남아 있고, 다음 요청을 보내는 순간 패킷이 조용히 버려집니다.
+    silent drop(무통보 폐기)은 연결이 끊겼다는 신호 없이 패킷만 조용히 버려지는 현상입니다.
+    타임아웃으로 conntrack 엔트리가 삭제될 때 <strong>양쪽 어디에도 FIN이나 RST가 전달되지 않기 때문에</strong> 발생합니다.
+  </p>
+  <p>
+    클라이언트 소켓은 ESTABLISHED 상태로 남아 있습니다.
+    다음 요청을 보내는 순간 패킷이 조용히 버려집니다.
     그 결과는 다음과 같습니다.
   </p>
   <ul class="plain">
@@ -725,13 +758,16 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   </ul>
 
   <h3>3.3 최대 리스크 - 마이그레이션이 "의도치 않게" 일어남</h3>
+  <p>
+    이 변경의 가장 위험한 부분은 적용 시점을 스스로 정하지 못할 수 있다는 점입니다.
+    노드를 자동으로 골라 주는 도구를 쓰고 있다면 특히 그렇습니다.
+  </p>
   <div class="callout warn">
     <span class="callout-title">주의 - AWS가 블로그에서 명시적으로 경고하는 부분</span>
     <p>
-      Karpenter, 그리고 속성 기반 인스턴스 타입 선택(attribute-based instance type
-      selection)을 사용하는 EC2 Auto Scaling Group은 최신 인스턴스 세대를 자동으로 선택합니다.
-      즉, 아무 변경도 하지 않았는데 워크로드가 Nitro V6에 올라가고, <strong>첫 징후가 노드 리프레시나
-      스케일링 이벤트 후의 원인 불명 커넥션 실패</strong>로 나타납니다.
+      Karpenter(노드를 자동으로 프로비저닝하는 Kubernetes 도구), 그리고 속성 기반 인스턴스 타입 선택(attribute-based instance type selection, 조건에 맞는 타입을 자동으로 고르는 방식)을 사용하는 EC2 Auto Scaling Group은 최신 인스턴스 세대를 자동으로 선택합니다.
+      즉 아무 변경도 하지 않았는데 워크로드가 Nitro V6에 올라갑니다.
+      <strong>첫 징후는 노드 리프레시나 스케일링 이벤트 후의 원인 불명 커넥션 실패</strong>로 나타납니다.
     </p>
   </div>
   <p>EKS 환경에서는 특히 다음을 유의해야 합니다.</p>
@@ -742,10 +778,17 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 
   <h3>3.4 계층 간 타임아웃 불일치</h3>
   <p>
-    NLB 유휴 타임아웃을 1,800초로 늘려놨는데 ENI가 350초라면, LB는 커넥션을 유지하는 동안
-    EC2가 먼저 추적을 버립니다. 클라이언트 입장에서는 잘 되던 커넥션이 갑자기 죽습니다.
-    <strong>ENI 타임아웃만 조정하는 대응은 이런 함정을 만듭니다.</strong> 스택 전체의 정렬은
-    4.4절에서 다룹니다.
+    타임아웃은 커넥션이 지나는 계층마다 따로 존재합니다.
+    한 계층만 조정하면 오히려 새로운 함정이 생깁니다.
+  </p>
+  <p>
+    예를 들어 NLB 유휴 타임아웃을 1,800초로 늘려놨는데 ENI가 350초라면 어떻게 될까요?
+    LB가 커넥션을 유지하는 동안 EC2가 먼저 추적을 버립니다.
+    클라이언트 입장에서는 잘 되던 커넥션이 갑자기 죽습니다.
+  </p>
+  <p>
+    <strong>ENI 타임아웃만 조정하는 대응은 이런 함정을 만듭니다.</strong>
+    스택 전체의 정렬은 4.4절에서 다룹니다.
   </p>
 </section>
 
@@ -753,21 +796,30 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
 <section class="sec" id="s4">
   <h2><span class="no">04</span>대응 방안</h2>
   <p>
-    우선순위 순으로 정리합니다. 1순위(keepalive)를 적용하면 나머지는 보완 수단이 되고,
+    이 절에서는 무엇을 어떤 순서로 적용할지 정리합니다.
+    우선순위가 핵심이므로 1순위부터 차례로 읽으면 됩니다.
+  </p>
+  <p>
+    1순위(keepalive)를 적용하면 나머지는 보완 수단이 됩니다.
     적용하지 않으면 나머지 수단만으로는 세대 혼재 환경에서 안전을 보장하기 어렵습니다.
   </p>
 
   <h3>4.1 1순위: TCP keepalive (권장)</h3>
   <p>
-    keepalive는 유휴 커넥션에 주기적으로 프로브 패킷을 보내 커넥션이 어느 인프라 계층에서도
-    "유휴" 상태에 도달하지 않게 합니다. 타임아웃 값 자체를 무의미하게 만들기 때문에
-    EC2, 로드밸런서, NAT Gateway를 포함한 <strong>모든 계층</strong>에서 안전하고,
+    TCP keepalive는 유휴 커넥션에 주기적으로 작은 확인 패킷(프로브)을 보내는 OS 기능입니다.
+    커넥션이 어느 인프라 계층에서도 "유휴" 상태에 도달하지 않게 만듭니다.
+  </p>
+  <p>
+    타임아웃 값 자체를 무의미하게 만들기 때문에 EC2, 로드밸런서, NAT Gateway를 포함한 <strong>모든 계층</strong>에서 안전합니다.
     Nitro 세대 혼재 환경에서도 유효합니다.
   </p>
   <p>
-    ENI 타임아웃이 350초라면 프로브를 <strong>240초 이전에 시작</strong>하도록 설정해 여유를 확보합니다.
-    참고로 Linux 커널의 keepalive 기본 시작 시간은 7,200초(2시간)로, 클라우드 인프라 타임아웃을 막기에는
-    너무 깁니다. 값 조정이 필수입니다.
+    프로브는 언제 시작해야 할까요?
+    ENI 타임아웃이 350초라면 <strong>240초 이전에 시작</strong>하도록 설정해 여유를 확보합니다.
+  </p>
+  <p>
+    참고로 Linux 커널의 keepalive 기본 시작 시간은 7,200초(2시간)입니다.
+    클라우드 인프라 타임아웃을 막기에는 너무 길어 값 조정이 필수입니다.
   </p>
 
   <div class="codeblock">
@@ -780,15 +832,17 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   <div class="callout warn">
     <span class="callout-title">가장 흔히 놓치는 함정 - SO_KEEPALIVE</span>
     <p>
-      위 sysctl은 간격만 조정할 뿐이고, 소켓별로 <span class="mono">SO_KEEPALIVE</span>가
-      켜져 있지 않으면 프로브가 아예 나가지 않습니다. <span class="mono">SO_KEEPALIVE</span>는
-      대부분의 OS에서 소켓 기본값이 <strong>off</strong>입니다.
+      위 sysctl(커널 파라미터 설정)은 프로브 간격만 조정합니다.
+      소켓별로 <span class="mono">SO_KEEPALIVE</span>가 켜져 있지 않으면 프로브가 아예 나가지 않습니다.
+      <span class="mono">SO_KEEPALIVE</span>는 대부분의 OS에서 소켓 기본값이 <strong>off</strong>입니다.
     </p>
     <p>
       sysctl만 넣고 "keepalive 적용 완료"로 판단하면 증상이 그대로 재발합니다.
       애플리케이션 / 드라이버 레벨에서 함께 켜야 합니다.
     </p>
   </div>
+
+  <p>이 표에서 볼 것은 자신이 쓰는 대상의 행이며, keepalive를 소켓 레벨에서 켜는 파라미터를 정리한 것입니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -830,7 +884,10 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   </p>
 
   <h3>4.2 2순위: ENI 타임아웃 명시적 설정</h3>
-  <p>keepalive를 적용할 수 없는 커넥션에서 350초보다 긴 유휴가 필요하면 <strong>기본값에 의존하지 말고 명시</strong>합니다.</p>
+  <p>
+    keepalive를 적용할 수 없는 커넥션도 있습니다.
+    그런 커넥션에서 350초보다 긴 유휴가 필요하면 <strong>기본값에 의존하지 말고 명시</strong>합니다.
+  </p>
 
   <div class="codeblock">
     <div class="code-caption">AWS CLI - ModifyNetworkInterfaceAttribute</div>
@@ -858,7 +915,10 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   </p>
 
   <h3>4.4 타임아웃 정렬 전략</h3>
-  <p>AWS 권고는 <strong>애플리케이션이 가장 먼저 닫는</strong> 구조입니다.</p>
+  <p>
+    여러 계층의 타임아웃 값은 방향이 맞아야 안전합니다.
+    AWS 권고는 <strong>애플리케이션이 가장 먼저 닫는</strong> 구조입니다.
+  </p>
 
   <figure class="flow">
     <img class="fig-img"
@@ -875,27 +935,33 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 
   <p>
     아키텍처의 모든 타임아웃 값(애플리케이션, 로드밸런서, NAT Gateway 동작, EC2 ENI)을 문서화하세요.
-    가장 신뢰할 수 있는 방법은 <strong>체인에서 가장 짧은 타임아웃보다 더 짧은 keepalive를 구현</strong>해서
-    정렬 문제 자체를 회피하는 것입니다.
+    가장 신뢰할 수 있는 방법은 <strong>체인에서 가장 짧은 타임아웃보다 더 짧은 keepalive를 구현</strong>하는 것입니다.
+    그러면 정렬 문제 자체를 회피할 수 있습니다.
   </p>
 
   <h4>역방향 케이스 - 오히려 낮춰야 하는 경우</h4>
   <p>
-    공개 API, DB 서버처럼 <strong>클라이언트 동작을 통제할 수 없는 서비스</strong>라면 ENI 타임아웃을
-    오히려 낮게(350초 기본값 또는 그 이하) 두는 것이 맞습니다. 유휴 클라이언트 커넥션이
-    누적되어 allowance를 소진하는 쪽이 더 위험하기 때문입니다.
+    공개 API, DB 서버처럼 <strong>클라이언트 동작을 통제할 수 없는 서비스</strong>라면 방향이 반대입니다.
+    ENI 타임아웃을 오히려 낮게(350초 기본값 또는 그 이하) 두는 것이 맞습니다.
+    유휴 클라이언트 커넥션이 누적되어 allowance를 소진하는 쪽이 더 위험하기 때문입니다.
   </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
   <h2><span class="no">05</span>탐지 및 모니터링</h2>
-  <p>ENA 드라이버가 노출하는 conntrack 메트릭으로 상태를 직접 확인할 수 있습니다.</p>
+  <p>
+    이 절에서는 지금 우리 환경이 이 문제를 겪고 있는지 확인하는 방법을 다룹니다.
+    별도 도구 없이 인스턴스 안에서 바로 확인할 수 있습니다.
+  </p>
+  <p>ENA(EC2의 네트워크 드라이버)가 노출하는 conntrack 메트릭으로 상태를 직접 확인할 수 있습니다.</p>
 
   <div class="codeblock">
     <div class="code-caption">인스턴스 내부에서 실행</div>
     <pre><code>ethtool -S eth0 | grep conntrack</code></pre>
   </div>
+
+  <p>이 표에서 볼 것은 두 메트릭의 해석 열이며, 값의 급격한 변화가 곧 신호입니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -928,6 +994,12 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6">
   <h2><span class="no">06</span>상황별 조치 요약</h2>
+  <p>
+    이 절은 운영 상황별로 필요한 조치를 표 하나로 정리합니다.
+    자신의 상황에 해당하는 행만 읽으면 됩니다.
+  </p>
+
+  <p>이 표에서 볼 것은 왼쪽의 상황 열이며, 해당하는 행의 오른쪽 조치를 그대로 따르면 됩니다.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -962,7 +1034,12 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <section class="sec" id="s7">
   <h2><span class="no">07</span>검증 시 주의사항</h2>
   <p>
-    지속 부하 테스트만으로는 재현되지 않습니다. <strong>현실적인 유휴 구간을 포함한</strong> 테스트가 필요하며,
+    이 절에서는 테스트가 이 문제를 왜 놓치는지 설명합니다.
+    통과한 테스트가 안전을 보장하지 않는 이유이기도 합니다.
+  </p>
+  <p>
+    지속 부하 테스트만으로는 재현되지 않습니다.
+    <strong>현실적인 유휴 구간을 포함한</strong> 테스트가 필요합니다.
     다음은 수 시간 운영 후에만 드러나는 문제들입니다.
   </p>
   <ul class="plain">
@@ -972,8 +1049,8 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
     <li>계층 간 타임아웃 상호작용은 지속적인 부하 하에서만 표면화됩니다.</li>
   </ul>
   <p>
-    새 인스턴스 세대는 항상 대표성 있는 워크로드로 사전 테스트하고, 카나리 또는 블루 / 그린으로
-    점진 배포해 문제 시 빠르게 롤백할 수 있게 하세요.
+    새 인스턴스 세대는 항상 대표성 있는 워크로드로 사전 테스트하세요.
+    카나리 또는 블루 / 그린으로 점진 배포해 문제 시 빠르게 롤백할 수 있게 하세요.
   </p>
 </section>
 
@@ -981,7 +1058,11 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <section class="sec" id="s8">
   <h2><span class="no">08</span>결론</h2>
   <p>
-    350초 기본값 변경은 conntrack 고갈이라는 더 큰 장애를 막기 위한 합리적 조정이며,
+    이 절에서는 계층별 최종 권고를 정리합니다.
+    한 문장으로 요약하면, keepalive를 제대로 켠 애플리케이션은 Nitro 세대가 무엇이든 이번 변경의 영향을 받지 않습니다.
+  </p>
+  <p>
+    350초 기본값 변경은 conntrack 고갈이라는 더 큰 장애를 막기 위한 합리적 조정입니다.
     <strong>keepalive를 제대로(<span class="mono">SO_KEEPALIVE</span> 포함) 적용하면 Nitro 세대와 무관하게 해결됩니다.</strong>
     ENI 타임아웃을 5일로 되돌리는 대응은 원래의 allowance 고갈 문제를 다시 불러오므로 권장하지 않습니다.
   </p>
@@ -1002,6 +1083,7 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
+  <p>본문에서 인용한 수치와 판단의 근거가 되는 문서들입니다.</p>
 
   <h3>핵심 출처</h3>
   <ul>
@@ -1099,8 +1181,8 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   <p class="eyebrow">EC2 Networking / Technical Advisory</p>
   <h1>Impact Analysis: conntrack Idle Timeout Default Change</h1>
   <p class="subtitle">
-    An impact analysis and response guide for the change to the default TCP established idle timeout
-    of Security Group connection tracking on Nitro V6 (8th-generation) instances.
+    The default TCP established idle timeout of Security Group connection tracking changed on Nitro V6 (8th-generation) instances.
+    This is an impact analysis and response guide covering what changed and what to do about it.
   </p>
 
   <div class="stat" role="img" aria-label="Default change: from 432,000 seconds (5 days) to 350 seconds">
@@ -1127,10 +1209,10 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>Starting with Nitro V6 (launched June 2025; 8th generation such as m8i / r8i), the default TCP established idle timeout for Security Group connection tracking has been reduced from 432,000 seconds (5 days) to <strong>350 seconds</strong>. P6e-GB200 is an exception and keeps 5 days.</li>
-    <li>A connection idle for 350 seconds or longer is removed from the tracking table <strong>without a FIN / RST</strong>. The client socket still believes it is alive, and the next packet is silently discarded - a silent drop.</li>
-    <li>Karpenter, and Auto Scaling Groups using attribute-based instance type selection, automatically pick the latest generation. <strong>Even if you change nothing</strong>, the impact can begin at node replacement or scaling time.</li>
-    <li>The fundamental fix is <strong>TCP keepalive</strong>. Start probes before 240 seconds, and verify per-socket <span class="mono">SO_KEEPALIVE</span> is enabled along with the sysctl settings - then you are safe regardless of Nitro generation.</li>
+    <li>Starting with the 8th-generation EC2 instances launched in June 2025 (Nitro V6, such as m8i / r8i), the default time AWS remembers an idle TCP connection dropped from 432,000 seconds (5 days) to <strong>350 seconds</strong>. P6e-GB200 is the one exception and keeps 5 days.</li>
+    <li>A connection quiet for 350 seconds or longer is removed with no termination signal (FIN / RST). The application still believes it is alive, and <strong>its next request stalls without any error.</strong></li>
+    <li>Tools that pick nodes automatically (Karpenter, attribute-based Auto Scaling) select the latest generation on their own. <strong>Even if you change nothing</strong>, the impact can begin at node replacement or scaling time.</li>
+    <li>The fundamental fix is <strong>TCP keepalive</strong>, which periodically tells every layer the connection is alive. Start the check packets (probes) before 240 seconds and also enable the socket option <span class="mono">SO_KEEPALIVE</span>, and you are safe on any generation.</li>
   </ul>
 </section>
 
@@ -1156,11 +1238,21 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Facts</h2>
   <p>
-    What changed is the default value of
-    <span class="mono">ConnectionTrackingConfiguration.tcpEstablishedTimeout</span>,
-    the per-ENI connection tracking setting. The configurable range itself did not change;
-    on Nitro V6 <strong>only the default</strong> was lowered to 350 seconds.
+    This section pins down what changed and by how much, in concrete values.
+    Interpretation and responses come in later sections; here we stick to the facts.
   </p>
+  <p>
+    conntrack (connection tracking) is how the AWS network layer remembers the state of connections
+    going in and out of an instance. It operates per ENI, the virtual network interface attached to an instance.
+  </p>
+  <p>
+    What changed is the default value of one of those settings,
+    <span class="mono">ConnectionTrackingConfiguration.tcpEstablishedTimeout</span>.
+    The configurable range itself did not change.
+    On Nitro V6, <strong>only the default</strong> was lowered to 350 seconds.
+  </p>
+
+  <p>In this table, focus on the two default rows: only Nitro V6 is 350 seconds, and every other item is unchanged.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1184,11 +1276,16 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   </ul>
 
   <p>
-    You can check which instances are in scope using the per-generation Nitro list in the official
-    EC2 documentation. The 350-second default applies to the <strong>Nitro v6 row</strong> in the
-    table below; v5 and earlier keep the existing 432,000 seconds (5 days). See the Nitro instances
-    document in References for the latest list.
+    So is your instance in scope?
+    You can check using the per-generation Nitro list in the official EC2 documentation.
+    The 350-second default applies only to the <strong>Nitro v6 row</strong> in the table below.
   </p>
+  <p>
+    v5 and earlier keep the existing 432,000 seconds (5 days).
+    See the Nitro instances document in References for the latest list.
+  </p>
+
+  <p>In this table, look at the instance-family list in the first row (Nitro v6); if your family is there, the 350-second default applies.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1224,10 +1321,9 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   <div class="callout note">
     <span class="callout-title">Terminology - this is not kernel conntrack</span>
     <p>
-      The conntrack discussed here is Nitro-level Security Group connection tracking - the layer
-      that underpins Security Groups, VPC Flow Logs, and network metering. The Linux kernel's
-      <span class="mono">nf_conntrack_tcp_timeout_established</span> also happens to default to 432,000 seconds,
-      which makes it easy to confuse, but this change is at the <strong>ENI / hypervisor layer</strong>, not the kernel.
+      The conntrack discussed here is Nitro-level Security Group connection tracking.
+      It is the layer that underpins Security Groups, VPC Flow Logs, and network metering.
+      The Linux kernel's <span class="mono">nf_conntrack_tcp_timeout_established</span> also happens to default to 432,000 seconds, which makes it easy to confuse, but this change is at the <strong>ENI / hypervisor layer</strong>, not the kernel.
     </p>
     <p>Therefore, <strong>changing sysctl inside the instance does not change this timeout.</strong></p>
   </div>
@@ -1236,14 +1332,20 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <!-- ===================== 02 (EN) ===================== -->
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>Background of the Change</h2>
+  <p>
+    This section looks at why AWS lowered the default.
+    Knowing the reason also makes it clear why reverting to 5 days is risky.
+  </p>
 
   <h3>2.1 Preventing conntrack allowance exhaustion</h3>
   <p>
-    The conntrack allowance is finite, determined by available Nitro resources. With the previous
-    5-day default, idle or orphaned connections that never received a FIN or RST could remain in
-    the tracking table for up to 5 days. If these accumulate and exhaust the allowance,
-    <strong>the instance cannot establish any new connections</strong> until existing entries
-    close or time out.
+    The conntrack allowance is the ceiling on how many connections one instance can track at the same time.
+    It is finite, determined by available Nitro resources.
+  </p>
+  <p>
+    What was the problem with the previous 5-day default?
+    Idle or orphaned connections that never received a FIN or RST could remain in the tracking table for up to 5 days.
+    If these accumulate and exhaust the allowance, <strong>the instance cannot establish any new connections</strong> until existing entries close or time out.
   </p>
   <p>The symptoms at that point look like this.</p>
   <ul class="plain">
@@ -1253,25 +1355,23 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   </ul>
   <p>
     Non-TCP flows such as UDP have short timeouts (30-180 seconds), so large-scale accumulation
-    is unlikely. The accumulation risk was effectively concentrated in the TCP established state,
-    and this change targets exactly that point.
+    is unlikely. The accumulation risk was effectively concentrated in the TCP established state.
+    This change targets exactly that point.
   </p>
 
   <h3>2.2 Alignment with other AWS networking services</h3>
   <p>
-    NLB, NAT Gateway, and Gateway Load Balancer already use a 350-second idle timeout. If EC2
-    alone keeps 5 days, one side believes the connection is alive while the other has already
-    discarded it - a <strong>half-open</strong> state. The 350-second default reduces this
-    mismatch across layers.
+    NLB, NAT Gateway, and Gateway Load Balancer already use a 350-second idle timeout.
+    If EC2 alone keeps 5 days, one side believes the connection is alive while the other has already discarded it.
+    That state is called <strong>half-open</strong> (only one side still holds the connection), and the 350-second default reduces this mismatch across layers.
   </p>
 
   <div class="callout note">
     <span class="callout-title">Note - the configurable option has existed since November 2023</span>
     <p>
-      The ability to set a per-ENI TCP established idle timeout in the 60-second to 432,000-second
-      (5-day) range was introduced back in November 2023 and is available on
-      <strong>all Nitro generations</strong>. What is new this time is not the capability
-      but the V6 default.
+      The ability to set a per-ENI TCP established idle timeout in the 60-second to 432,000-second (5-day) range was introduced back in November 2023.
+      It is available on <strong>all Nitro generations</strong>.
+      What is new this time is not the capability but the V6 default.
     </p>
   </div>
 </section>
@@ -1279,12 +1379,20 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <!-- ===================== 03 (EN) ===================== -->
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Impact Analysis</h2>
+  <p>
+    This section looks at how the change shows up as real failures.
+    It also covers which workloads are exposed and why the problem is easy to miss.
+  </p>
 
   <h3>3.1 Why the failure mode is tricky - silent drop</h3>
   <p>
-    When a conntrack entry is deleted by the timeout, <strong>no FIN or RST is delivered to either side.</strong>
-    The client socket remains in ESTABLISHED, and the moment it sends the next request, the packet
-    is silently discarded. The consequences are as follows.
+    A silent drop means packets are discarded with no signal that the connection is gone.
+    It happens because <strong>no FIN or RST is delivered to either side</strong> when a conntrack entry is deleted by the timeout.
+  </p>
+  <p>
+    The client socket remains in ESTABLISHED.
+    The moment it sends the next request, the packet is silently discarded.
+    The consequences are as follows.
   </p>
   <ul class="plain">
     <li>The application does not receive an immediate error and <strong>hangs until its own timeout</strong>. Request latency jumps to tens of seconds, not single seconds.</li>
@@ -1302,13 +1410,16 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
   </ul>
 
   <h3>3.3 The biggest risk - migration happens "unintentionally"</h3>
+  <p>
+    The most dangerous part of this change is that you may not get to choose when it applies to you.
+    That is especially true if you use tools that pick nodes automatically.
+  </p>
   <div class="callout warn">
     <span class="callout-title">Warning - what AWS explicitly calls out in the blog</span>
     <p>
-      Karpenter, and EC2 Auto Scaling Groups using attribute-based instance type selection,
-      automatically pick the latest instance generation. In other words, without any change on
-      your side, workloads land on Nitro V6, and <strong>the first sign is unexplained connection
-      failures after a node refresh or scaling event</strong>.
+      Karpenter (a Kubernetes tool that provisions nodes automatically), and EC2 Auto Scaling Groups using attribute-based instance type selection (picking any type that matches given attributes), automatically choose the latest instance generation.
+      In other words, workloads land on Nitro V6 without any change on your side.
+      <strong>The first sign is unexplained connection failures after a node refresh or scaling event</strong>.
     </p>
   </div>
   <p>In EKS environments, pay particular attention to the following.</p>
@@ -1319,9 +1430,15 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 
   <h3>3.4 Timeout mismatch across layers</h3>
   <p>
-    If you raised the NLB idle timeout to 1,800 seconds but the ENI sits at 350 seconds, EC2 drops
-    the tracking first while the LB keeps the connection alive. From the client's perspective, a
-    connection that used to work suddenly dies.
+    Timeouts exist separately at every layer a connection passes through.
+    Adjusting just one layer can create a brand-new trap.
+  </p>
+  <p>
+    For example, what happens if you raised the NLB idle timeout to 1,800 seconds but the ENI sits at 350 seconds?
+    EC2 drops the tracking first while the LB keeps the connection alive.
+    From the client's perspective, a connection that used to work suddenly dies.
+  </p>
+  <p>
     <strong>Responding by adjusting only the ENI timeout creates exactly this trap.</strong>
     Aligning the whole stack is covered in section 4.4.
   </p>
@@ -1331,21 +1448,30 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># 3회 실패 시 커넥�
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Mitigations</h2>
   <p>
-    Listed in priority order. If you apply priority 1 (keepalive), the rest become supplementary;
-    without it, the remaining measures alone cannot guarantee safety in a mixed-generation environment.
+    This section lays out what to apply and in what order.
+    Priority is the key, so read from priority 1 down.
+  </p>
+  <p>
+    If you apply priority 1 (keepalive), the rest become supplementary.
+    Without it, the remaining measures alone cannot guarantee safety in a mixed-generation environment.
   </p>
 
   <h3>4.1 Priority 1: TCP keepalive (recommended)</h3>
   <p>
-    Keepalive sends periodic probe packets over idle connections so that the connection never
-    reaches an "idle" state at any infrastructure layer. Because it makes the timeout value itself
-    irrelevant, it is safe at <strong>every layer</strong> - EC2, load balancers, NAT Gateway -
-    and remains valid in mixed Nitro-generation environments.
+    TCP keepalive is an OS feature that sends small periodic check packets (probes) over idle connections.
+    It ensures the connection never reaches an "idle" state at any infrastructure layer.
   </p>
   <p>
-    If the ENI timeout is 350 seconds, configure probes to <strong>start before 240 seconds</strong>
-    to leave headroom. Note that the Linux kernel's default keepalive start time is 7,200 seconds
-    (2 hours) - far too long to beat cloud infrastructure timeouts. Tuning the values is mandatory.
+    Because it makes the timeout value itself irrelevant, it is safe at <strong>every layer</strong>, including EC2, load balancers, and NAT Gateway.
+    It remains valid in mixed Nitro-generation environments.
+  </p>
+  <p>
+    When should probes start?
+    If the ENI timeout is 350 seconds, configure probes to <strong>start before 240 seconds</strong> to leave headroom.
+  </p>
+  <p>
+    Note that the Linux kernel's default keepalive start time is 7,200 seconds (2 hours).
+    That is far too long to beat cloud infrastructure timeouts, so tuning the values is mandatory.
   </p>
 
   <div class="codeblock">
@@ -1358,15 +1484,17 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
   <div class="callout warn">
     <span class="callout-title">The most commonly missed trap - SO_KEEPALIVE</span>
     <p>
-      The sysctl above only tunes the intervals; if <span class="mono">SO_KEEPALIVE</span> is not
-      enabled per socket, no probes are sent at all. <span class="mono">SO_KEEPALIVE</span> defaults
-      to <strong>off</strong> on most operating systems.
+      The sysctl above (kernel parameter settings) only tunes the probe intervals.
+      If <span class="mono">SO_KEEPALIVE</span> is not enabled per socket, no probes are sent at all.
+      <span class="mono">SO_KEEPALIVE</span> defaults to <strong>off</strong> on most operating systems.
     </p>
     <p>
       If you add only the sysctl and declare "keepalive done", the symptoms will recur unchanged.
       It must also be enabled at the application / driver level.
     </p>
   </div>
+
+  <p>In this table, find the row for what you run; it lists the parameters that enable keepalive at the socket level.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1409,7 +1537,10 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
   </p>
 
   <h3>4.2 Priority 2: Set the ENI timeout explicitly</h3>
-  <p>For connections where keepalive cannot be applied and idle periods longer than 350 seconds are needed, <strong>do not rely on the default - set it explicitly</strong>.</p>
+  <p>
+    Some connections cannot use keepalive.
+    For those, if idle periods longer than 350 seconds are needed, <strong>do not rely on the default - set it explicitly</strong>.
+  </p>
 
   <div class="codeblock">
     <div class="code-caption">AWS CLI - ModifyNetworkInterfaceAttribute</div>
@@ -1437,7 +1568,10 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
   </p>
 
   <h3>4.4 Timeout alignment strategy</h3>
-  <p>AWS's recommendation is a structure where <strong>the application closes first</strong>.</p>
+  <p>
+    Timeout values across layers are only safe when they point in the same direction.
+    AWS's recommendation is a structure where <strong>the application closes first</strong>.
+  </p>
 
   <figure class="flow">
     <img class="fig-img"
@@ -1453,16 +1587,15 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
   </figure>
 
   <p>
-    Document every timeout value in your architecture (application, load balancer, NAT Gateway
-    behavior, EC2 ENI). The most reliable approach is to
-    <strong>implement a keepalive shorter than the shortest timeout in the chain</strong>,
-    sidestepping the alignment problem entirely.
+    Document every timeout value in your architecture (application, load balancer, NAT Gateway behavior, EC2 ENI).
+    The most reliable approach is to <strong>implement a keepalive shorter than the shortest timeout in the chain</strong>.
+    That sidesteps the alignment problem entirely.
   </p>
 
   <h4>The reverse case - when you should lower it instead</h4>
   <p>
-    For services where <strong>you cannot control client behavior</strong> - public APIs, DB servers -
-    keeping the ENI timeout low (the 350-second default or below) is actually the right call.
+    For services where <strong>you cannot control client behavior</strong>, such as public APIs and DB servers, the direction reverses.
+    Keeping the ENI timeout low (the 350-second default or below) is actually the right call.
     Idle client connections accumulating and exhausting the allowance is the greater danger.
   </p>
 </section>
@@ -1470,12 +1603,18 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
 <!-- ===================== 05 (EN) ===================== -->
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Detection and Monitoring</h2>
-  <p>You can check the state directly via the conntrack metrics exposed by the ENA driver.</p>
+  <p>
+    This section covers how to check whether your environment is hitting this problem right now.
+    You can check directly inside the instance without extra tooling.
+  </p>
+  <p>The conntrack metrics exposed by ENA (EC2's network driver) let you inspect the state directly.</p>
 
   <div class="codeblock">
     <div class="code-caption">Run inside the instance</div>
     <pre><code>ethtool -S eth0 | grep conntrack</code></pre>
   </div>
+
+  <p>In this table, focus on the interpretation column: a sharp change in either value is the signal.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1508,6 +1647,12 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
 <!-- ===================== 06 (EN) ===================== -->
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Action Summary by Scenario</h2>
+  <p>
+    This section condenses the required actions per operational scenario into one table.
+    Read only the row that matches your situation.
+  </p>
+
+  <p>In this table, find your scenario in the left column and follow the action on the right.</p>
 
   <div class="tbl-wrap">
     <table>
@@ -1542,9 +1687,13 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Validation Caveats</h2>
   <p>
-    Sustained load tests alone will not reproduce this. Tests must include
-    <strong>realistic idle periods</strong>, and the following are problems that only surface
-    after hours of operation.
+    This section explains why tests miss this problem.
+    It is also why a passing test does not guarantee safety.
+  </p>
+  <p>
+    Sustained load tests alone will not reproduce this.
+    Tests must include <strong>realistic idle periods</strong>.
+    The following are problems that only surface after hours of operation.
   </p>
   <ul class="plain">
     <li>Connection pool behavior drifts over time.</li>
@@ -1553,8 +1702,8 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
     <li>Cross-layer timeout interactions only surface under sustained load.</li>
   </ul>
   <p>
-    Always pre-test new instance generations with representative workloads, and roll out gradually
-    via canary or blue/green so you can roll back quickly when problems appear.
+    Always pre-test new instance generations with representative workloads.
+    Roll out gradually via canary or blue/green so you can roll back quickly when problems appear.
   </p>
 </section>
 
@@ -1562,11 +1711,13 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
 <section class="sec" id="s8-en">
   <h2><span class="no">08</span>Conclusion</h2>
   <p>
-    The 350-second default change is a reasonable adjustment to prevent the larger failure of
-    conntrack exhaustion, and
-    <strong>applying keepalive properly (including <span class="mono">SO_KEEPALIVE</span>) resolves it regardless of Nitro generation.</strong>
-    Reverting the ENI timeout to 5 days is not recommended - it brings back the original
-    allowance-exhaustion problem.
+    This section wraps up with the final recommendations per layer.
+    In one sentence: an application with keepalive properly enabled is unaffected by this change on any Nitro generation.
+  </p>
+  <p>
+    The 350-second default change is a reasonable adjustment to prevent the larger failure of conntrack exhaustion.
+    <strong>Applying keepalive properly (including <span class="mono">SO_KEEPALIVE</span>) resolves it regardless of Nitro generation.</strong>
+    Reverting the ENI timeout to 5 days is not recommended, because it brings back the original allowance-exhaustion problem.
   </p>
   <p>A resilient configuration operates at three layers.</p>
   <ol class="plain">
@@ -1585,6 +1736,7 @@ net.ipv4.tcp_keepalive_probes = 3    <span class="cm"># close the connection aft
 <!-- ===================== References (EN) ===================== -->
 <section class="sec refs" id="refs-en">
   <h2><span class="no">--</span>References</h2>
+  <p>These are the sources behind the figures and judgments in this document.</p>
 
   <h3>Primary source</h3>
   <ul>

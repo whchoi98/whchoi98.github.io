@@ -600,10 +600,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>Claude Code에서 관찰되던 "다았 단계"류 한글 음절 치환의 근본 원인은 <strong>모델이 툴 JSON의 한글을 <span class="mono">\uXXXX</span> 이스케이프로 표기하다 hex를 오기하는 클래스 A(escape-miscoding)</strong>로 확정되었습니다. 이스케이프 표기 런은 45/45(100%), 리터럴 작성 런은 1/60(1.7%)이 손상되었습니다.</li>
-    <li>음절당 hex 4자리를 받아쓰는 과정에서 한 자리 오기가 유효한 인접 음절로 렌더됩니다(새벽 &rarr; 새벅). 리터럴로 작성하면 이 오기 기회 자체가 사라집니다.</li>
-    <li>"컨텍스트 점유율 50% 이상에서 빈발" 가설은 기각되었습니다. 실측 점유 0.1~78% 스윕 2회에서 손상률 곡선은 전 구간 평탄해 fill 가설은 기각되었습니다. 클래스 A는 두 AWS 계정(…6239, …5884)에서 동일하게 재현되어 서빙 계층이 아닌 모델 출력 행동으로 판정되었습니다.</li>
-    <li>"툴 파라미터 한글은 리터럴 UTF-8로 작성" 출력 형식 지시로 클래스 A는 차단됩니다. 저빈도 토큰 치환(클래스 B)은 지시로 차단되지 않으며, 재현 식별자를 포함한 증거 패키지를 AWS에 전달해 서버측 상관 분석을 요청했습니다.</li>
+    <li>원인이 확정되었습니다. Claude Code에서 보이던 "다았 단계"류 한글 깨짐은 <strong>모델이 툴 JSON의 한글을 글자 대신 <span class="mono">\uXXXX</span> 코드 번호(이스케이프)로 적다가 번호를 잘못 적는 클래스 A(escape-miscoding)</strong>였고, 이스케이프로 적은 런은 45/45(100%), 글자 그대로 적은 런은 1/60(1.7%)이 손상되었습니다.</li>
+    <li>한글 한 음절은 hex 코드 4자리로 적히는데, 이 중 한 자리만 틀려도 멀쩡해 보이는 다른 음절이 됩니다(새벽 &rarr; 새벅). 글자를 그대로(리터럴로) 쓰면 번호를 옮겨 적을 일이 없어 이 오기 기회 자체가 사라집니다.</li>
+    <li>"컨텍스트 점유율(입력 공간이 찬 비율) 50% 이상에서 빈발한다"는 가설은 기각되었고, 실측 점유 0.1~78% 스윕 2회에서 손상률 곡선은 전 구간 평탄했습니다. 클래스 A는 두 AWS 계정(…6239, …5884)에서 동일하게 재현되어, 서빙 계층이 아닌 모델의 출력 행동으로 판정되었습니다.</li>
+    <li>클래스 A는 "툴 파라미터의 한글은 리터럴 UTF-8로 작성하라"는 출력 형식 지시 한 줄로 차단됩니다. 지시로 막히지 않는 저빈도 토큰 치환(클래스 B)에 대해서는, 재현 식별자를 담은 증거 패키지를 AWS에 전달해 서버측 상관 분석을 요청했습니다.</li>
   </ul>
 </section>
 
@@ -628,10 +628,19 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>관찰과 가설</h2>
   <p>
-    발단은 현장 관찰이었습니다. Claude Code(Bedrock 백엔드)의 TodoWrite, AskUserQuestion 표면에서 "☐ 다았 단계"처럼 한글 음절이 다른 음절로 치환되는 증상이 반복 보고되었고, 보고자의 체감은 <strong>"컨텍스트 점유율 50% 이상부터 빈발한다"</strong>였습니다. 세션이 길어질수록 잦아진다는 인상이었기 때문에, 처음에는 long-context 서빙 결함이 유력해 보였습니다.
+    이 절은 조사의 출발점을 다룹니다. 현장에서 무엇이 관찰되었고, 그 관찰을 어떤 가설로 나눠 검증하기로 했는지 설명합니다.
   </p>
   <p>
-    체감을 그대로 결론으로 옮기지 않고, 검증 가능한 세 가지 가설로 분해했습니다. 세 가설은 상호 배타적이지 않으며, 각각 독립적인 실험 설계로 판정했습니다.
+    발단은 현장 관찰이었습니다. Claude Code(Bedrock 백엔드)의 TodoWrite, AskUserQuestion 화면에서 "☐ 다았 단계"처럼 한글 음절이 엉뚱한 음절로 바뀌는 증상이 반복 보고되었습니다.
+  </p>
+  <p>
+    보고자의 체감은 <strong>"컨텍스트 점유율 50% 이상부터 빈발한다"</strong>였습니다. 컨텍스트 점유율은 모델이 한 번에 기억할 수 있는 입력 공간(컨텍스트 창)이 얼마나 찼는지를 나타내는 비율입니다. 세션이 길수록 잦아 보였기 때문에, 처음에는 긴 입력을 다루는 서빙 쪽 결함(long-context 결함)이 유력해 보였습니다.
+  </p>
+  <p>
+    다만 체감을 그대로 결론으로 옮기지 않았습니다. 대신 검증 가능한 세 가지 가설로 분해했습니다. 세 가설은 서로 배타적이지 않으며, 각각 독립적인 실험 설계로 판정했습니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 세 가설이 각각 무엇을 가려내려 했고, 최종적으로 어떤 판정을 받았는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -649,7 +658,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    탐지 하니스(<span class="mono">cjk_integrity_probe</span> 계열 스크립트)는 H2를 사전에 대비한 탐지 클래스로 설계되어 있었습니다. raw 스트림에서 한글 <span class="mono">\uXXXX</span> 이스케이프를 별도 계수하도록 만들어 둔 것이 이후 근본 원인 확정의 발판이 되었습니다.
+    여기서 <span class="mono">\uXXXX</span> 이스케이프란 한글을 글자 대신 네 자리 코드 번호로 적는 JSON 표기법입니다. 탐지 하니스(<span class="mono">cjk_integrity_probe</span> 계열 스크립트)는 H2를 미리 대비한 탐지 클래스를 갖추고 있었습니다. raw 스트림(모델 응답을 가공 없이 그대로 기록한 데이터)에서 한글 이스케이프를 별도로 세도록 만들어 둔 설계가, 이후 근본 원인 확정의 발판이 되었습니다.
   </p>
 </section>
 
@@ -657,7 +666,16 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s2">
   <h2><span class="no">02</span>시험 설계</h2>
   <p>
-    비교 경로는 1P(Claude Enterprise 구독, Claude Code CLI)와 3P(Amazon Bedrock) 5개 셀로 구성했습니다. Bedrock 쪽은 Claude Code 백엔드 전환, ConverseStream 직접 호출, InvokeModelWithResponseStream 직접 호출, 리전 / 추론 프로파일 변형을 포괄합니다. 클라이언트는 양 백엔드에서 동일한 Claude Code CLI 2.1.220 바이너리와 boto3 1.42.86을 사용해 클라이언트 변인을 고정했습니다.
+    이 절은 실험을 어떻게 짰는지 다룹니다. 어떤 호출 경로를 비교했고, 어떤 데이터셋을 어떤 규모로 돌렸는지 정리합니다.
+  </p>
+  <p>
+    비교 경로는 5개 셀입니다. 1P는 Claude Enterprise 구독으로 Anthropic에 직접 연결하는 경로(Claude Code CLI)이고, 3P는 Amazon Bedrock을 거치는 경로입니다. Bedrock 쪽은 Claude Code 백엔드 전환, ConverseStream 직접 호출, InvokeModelWithResponseStream 직접 호출, 리전 / 추론 프로파일 변형을 포괄합니다.
+  </p>
+  <p>
+    ConverseStream과 InvokeModelWithResponseStream은 Bedrock이 제공하는 두 가지 모델 호출 API입니다. 클라이언트 변인은 고정했습니다. 양 백엔드에서 동일한 Claude Code CLI 2.1.220 바이너리와 boto3 1.42.86을 사용했습니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 데이터셋 6종 각각의 설계 규모와 핵심 결과입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -678,7 +696,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p>
-    실행 중 두 가지 교정이 있었습니다. 첫째, us-east-1의 <span class="mono">anthropic.claude-sonnet-5</span>는 on-demand 호출이 불가한 추론 프로파일 전용임을 실측으로 확인하고 해당 셀을 <span class="mono">us.anthropic.claude-sonnet-5</span>로 교정했습니다. 둘째, 필러 캘리브레이션에서 스크립트 가정(토큰당 1.5자)과 실측(약 1.03자)의 차이로 1차 스윕의 최고 레벨이 컨텍스트 창을 초과해 무효가 되었고, 2차 스윕에서 fill 레벨을 재교정해 실측 0 / 30.7 / 51.0 / 71.4%를 달성했습니다.
+    실행 중 두 가지를 교정했습니다. 첫째, us-east-1의 <span class="mono">anthropic.claude-sonnet-5</span>는 on-demand 호출이 불가한 추론 프로파일(여러 리전을 묶어 호출하는 Bedrock 설정) 전용임을 실측으로 확인했습니다. 그래서 해당 셀을 <span class="mono">us.anthropic.claude-sonnet-5</span>로 교정했습니다.
+  </p>
+  <p>
+    둘째, 필러 캘리브레이션(컨텍스트를 채우는 더미 텍스트 양 맞추기)에서 오차가 발견되었습니다. 스크립트는 토큰(모델이 텍스트를 처리하는 최소 단위)당 1.5자를 가정했지만 실측은 약 1.03자였습니다. 이 차이로 1차 스윕의 최고 레벨이 컨텍스트 창을 초과해 무효가 되었고, 2차 스윕에서 fill 레벨을 재교정해 실측 0 / 30.7 / 51.0 / 71.4%를 달성했습니다.
   </p>
 
   <div class="callout note">
@@ -691,17 +712,32 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s3">
   <h2><span class="no">03</span>검증 방법론</h2>
   <p>
-    이 조사의 판정 파이프라인은 3단 구성입니다. 자동 탐지와 LLM judge가 후보를 넓게 수집하고, 적대적 반박 패널이 진성 여부를 판정하며, 바이트 포렌식이 기원(모델 대 파이프라인)을 판별합니다. 어느 한 단계의 출력도 단독으로는 사실로 승격되지 않습니다.
+    이 절은 무엇을 진짜 손상으로 인정할지 정하는 절차를 다룹니다. 탐지기가 올린 후보를 그대로 믿지 않고 세 단계로 걸러낸 이유를 설명합니다.
+  </p>
+  <p>
+    판정 파이프라인은 3단 구성입니다. 자동 탐지와 LLM judge(다른 LLM에게 출력 검사를 맡기는 방법)가 후보를 넓게 수집합니다. 이어서 적대적 반박 패널이 진성 여부를 판정하고, 바이트 포렌식이 기원(모델 대 파이프라인)을 판별합니다.
+  </p>
+  <p>
+    어느 한 단계의 출력도 단독으로는 사실로 승격되지 않습니다.
   </p>
 
   <h3>3.1 자동 탐지와 LLM judge</h3>
   <p>
-    자동 탐지 하니스는 U+FFFD, KS X 1001 외 희귀 음절(euc-kr 인코딩 길이를 이용한 판별), raw 툴 JSON 내 한글 <span class="mono">\uXXXX</span> 이스케이프, 외국 문자 혼입의 4개 클래스를 검사합니다. 고정밀이지만 재현율이 낮아, 흔한 음절 사이의 치환(로그인 &rarr; 로까잉류)은 놓칩니다. 이 갭을 LLM judge(claude-haiku-4-5, 1P 경로)로 보강했습니다. 다만 judge 원플래그의 96%가 오탐으로 판명되어(5절), 원플래그는 후보 수집 용도로만 사용했습니다.
+    자동 탐지 하니스는 4개 클래스를 검사합니다. U+FFFD(깨진 문자를 대신 표시하는 유니코드 대체 문자 �), KS X 1001 외 희귀 음절(euc-kr 인코딩 길이를 이용한 판별), raw 툴 JSON 내 한글 <span class="mono">\uXXXX</span> 이스케이프, 외국 문자 혼입입니다.
+  </p>
+  <p>
+    이 하니스는 고정밀이지만 재현율이 낮습니다. 흔한 음절 사이의 치환(로그인 &rarr; 로까잉류)은 놓칩니다. 이 갭을 LLM judge(claude-haiku-4-5, 1P 경로)로 보강했습니다.
+  </p>
+  <p>
+    다만 judge가 처음 올린 플래그(원플래그)의 96%가 오탐으로 판명되었습니다(5절). 그래서 원플래그는 후보 수집 용도로만 사용했습니다.
   </p>
 
   <h3>3.2 적대적 3-lens 반박 패널</h3>
   <p>
-    플래그된 런마다 언어학(오탐 클래스 대조), 인코딩 / 파이프라인(바이트 분석, 실증 테스트 포함), 재현 클래스 / 통계의 세 lens를 각각 독립 에이전트가 맡아 "이것은 손상이 아니다"라는 반박을 시도합니다. <strong>세 lens의 반박을 모두 견디고 만장일치로 생존한 플래그만 진성으로 판정</strong>했습니다. 실제로 일본어 혼입 1건(手戻り)은 이 패널에서 3/3으로 반박되어 정합적 코드스위칭으로 분류되었습니다.
+    플래그된 런마다 세 개의 lens(검토 관점)가 붙습니다. 언어학(오탐 클래스 대조), 인코딩 / 파이프라인(바이트 분석, 실증 테스트 포함), 재현 클래스 / 통계입니다. 각 lens는 독립 에이전트가 맡아 "이것은 손상이 아니다"라는 반박을 시도합니다.
+  </p>
+  <p>
+    <strong>세 lens의 반박을 모두 견디고 만장일치로 생존한 플래그만 진성으로 판정</strong>했습니다. 실제로 일본어 혼입 1건(手戻り)은 이 패널에서 3/3으로 반박되었습니다. 문맥에 맞는 자연스러운 언어 전환(정합적 코드스위칭)으로 분류된 것입니다.
   </p>
 
   <figure class="diagram">
@@ -724,7 +760,7 @@ flowchart LR
 
   <h3>3.3 바이트 포렌식 - 백슬래시 삼분법</h3>
   <p>
-    손상이 모델의 이스케이프 표기에서 왔는지는 검증 지점의 raw 기록에서 백슬래시 겹 수로 판별할 수 있습니다. JSON으로 저장된 raw 파일 기준으로 세 가지 경우가 갈립니다.
+    손상이 모델의 이스케이프 표기에서 왔는지는 어떻게 알 수 있을까요? 검증 지점의 raw 기록에 남은 백슬래시 겹 수로 판별합니다. JSON으로 저장된 raw 파일 기준으로 세 가지 경우가 갈립니다.
   </p>
 
   <div class="codeblock">
@@ -743,10 +779,19 @@ flowchart LR
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
   <h2><span class="no">04</span>결과</h2>
+  <p>
+    이 절은 실험이 내놓은 답을 다룹니다. 세 가설의 판정을 차례로 보고, 남은 두 가지 별도 결함까지 살펴봅니다.
+  </p>
 
   <h3>4.1 용량-반응 곡선 - H-fill 기각</h3>
   <p>
-    실측 점유 0.1~78% 구간을 훑는 fill 스윕을 교정 재현을 포함해 2회 수행한 결과, 손상률 곡선은 전 구간 평탄했습니다. baseline 대비 |z|&gt;1.96이 되는 최초 fill 지점(F*)은 두 번 모두 존재하지 않았고, 전체 최대 |z|는 1.01에 그쳤습니다. 고점유(30~78%) 구간을 병합해도 <strong>0/300</strong>으로 손상이 없었으며, 오히려 검증된 손상 이벤트 5건은 전부 fill이 0에 가까운 조건에서 발생했습니다. 손상 런의 입력 크기도 980토큰에서 52,000토큰까지 산재해, 비율형 임계도 절대형 임계도 성립하지 않았습니다.
+    컨텍스트가 차면 손상이 늘었을까요? 늘지 않았습니다. 실측 점유 0.1~78% 구간을 훑는 fill 스윕을 교정 재현 포함 2회 수행했고, 손상률 곡선은 전 구간 평탄했습니다.
+  </p>
+  <p>
+    baseline 대비 |z|&gt;1.96이 되는 최초 fill 지점(F*)은 두 번 모두 존재하지 않았습니다. 전체 최대 |z|도 1.01에 그쳤습니다. |z|는 두 비율의 차이가 우연 범위를 벗어났는지 가늠하는 통계 지표로, 통상 1.96을 넘어야 유의하다고 봅니다.
+  </p>
+  <p>
+    고점유(30~78%) 구간을 병합해도 <strong>0/300</strong>으로 손상이 없었습니다. 오히려 검증된 손상 이벤트 5건은 전부 fill이 0에 가까운 조건에서 발생했습니다. 손상 런의 입력 크기도 980토큰에서 52,000토큰까지 흩어져 있어, 비율형 임계도 절대형 임계도 성립하지 않았습니다.
   </p>
 
   <div class="callout note">
@@ -756,12 +801,21 @@ flowchart LR
 
   <h3>4.2 경로 A/B - H-path 유의차 미검출</h3>
   <p>
-    D1의 judge 원플래그는 특정 셀에서 33.3%(z=+2.58)까지 치솟았지만, 적대적 재검 후 전원 오탐으로 소멸했습니다. 검증 기준으로 치환 클래스 합계는 Bedrock 4건 대 1P 0건입니다. 방향은 일관되지만 Fisher exact 검정 p는 약 0.6으로 <strong>통계적으로 유의하지 않아 경로 의존성은 결론 불가</strong>입니다. 1P 경로에서 별도 클래스(U+FFFD) 1건이 검증된 점까지 고려하면 경로 특이성 주장은 더 약해집니다. Converse 대 Invoke, global 대 us-geo, 스트리밍 여부, tool 대 prose 어느 축에서도 검증 기준 유의 신호는 없었습니다.
+    그렇다면 Bedrock 경로가 문제였을까요? 유의한 차이는 찾지 못했습니다. D1의 judge 원플래그는 특정 셀에서 33.3%(z=+2.58)까지 치솟았지만, 적대적 재검 후 전원 오탐으로 소멸했습니다.
+  </p>
+  <p>
+    검증 기준으로 치환 클래스 합계는 Bedrock 4건 대 1P 0건입니다. 방향은 일관되지만, Fisher exact 검정(표본이 작을 때 쓰는 통계 검정)의 p는 약 0.6입니다. <strong>통계적으로 유의하지 않아 경로 의존성은 결론 불가</strong>입니다.
+  </p>
+  <p>
+    1P 경로에서 별도 클래스(U+FFFD) 1건이 검증된 점까지 고려하면 경로 특이성 주장은 더 약해집니다. Converse 대 Invoke, global 대 us-geo, 스트리밍 여부, tool 대 prose 어느 축에서도 검증 기준 유의 신호는 없었습니다.
   </p>
 
   <h3>4.3 근본 원인 확정 - 클래스 A: escape-miscoding</h3>
   <p>
-    결정적 단서는 운영 중 발견되었습니다. 모델이 AskUserQuestion 등의 툴 파라미터에서 한글을 <span class="mono">\uXXXX</span> 이스케이프로 직접 표기하는 사례가 관찰되었고, "이스케이프 금지, 리터럴 작성" 메모리 지시 후 증상이 소멸했습니다. 이를 D6 통제 실험으로 확증했습니다. 이스케이프를 유도한 E arm과 리터럴을 지시한 L arm을 두 AWS 계정에서 교차 실행한 결과는 다음과 같습니다.
+    결정적 단서는 운영 중 발견되었습니다. 모델이 AskUserQuestion 등의 툴 파라미터에서 한글을 <span class="mono">\uXXXX</span> 이스케이프로 직접 표기하는 사례가 관찰되었습니다. 그리고 "이스케이프 금지, 리터럴 작성" 메모리 지시 후 증상이 소멸했습니다.
+  </p>
+  <p>
+    이를 D6 통제 실험으로 확증했습니다. 이스케이프를 유도한 E arm과 리터럴을 지시한 L arm을 두 AWS 계정에서 교차 실행했습니다. 이 표에서 볼 것은 두 arm 사이의 손상률 격차입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -779,23 +833,44 @@ flowchart LR
   </div>
 
   <p>
-    조건부 분해 결과, 손상을 가른 것은 지시 문구가 아니라 <strong>런이 실제로 이스케이프를 사용했는지 여부</strong>였습니다. 이스케이프를 6개만 쓴 부분 진입 런에서도 손상(메택, 대시보네)이 나왔습니다. 메커니즘은 음절당 hex 4자리를 받아쓰는 과정의 한 자리 오기가 유효한 인접 음절로 렌더되는 것입니다. 새벽의 "벽"에서 한 자리가 어긋나면 "벅"이 되어 "새벅"이 됩니다. 진입 런에서 손상 밀도는 음절의 3~5%(희귀 음절만 계수한 하한)였고, 형태는 고객 증상과 동일했습니다: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+    조건부 분해 결과, 손상을 가른 것은 지시 문구가 아니라 <strong>런이 실제로 이스케이프를 사용했는지 여부</strong>였습니다. 이스케이프를 6개만 쓴 부분 진입 런에서도 손상(메택, 대시보네)이 나왔습니다.
   </p>
   <p>
-    두 계정에서 동일하게 재현되었으므로 이 현상은 특정 계정이나 서빙 풀의 결함이 아니라 <strong>모델의 출력 행동</strong>입니다. 그리고 리터럴로 작성하면 오기 기회 자체가 사라지므로, 출력 형식 지시만으로 이 클래스는 차단됩니다.
+    메커니즘은 단순합니다. 음절당 hex 4자리를 받아쓰는 과정에서 한 자리가 어긋나면, 유효한 인접 음절로 렌더됩니다. 새벽의 "벽"에서 한 자리가 어긋나면 "벅"이 되어 "새벅"이 됩니다.
+  </p>
+  <p>
+    진입 런에서 손상 밀도는 음절의 3~5%(희귀 음절만 계수한 하한)였습니다. 형태는 고객 증상과 동일했습니다: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+  </p>
+  <p>
+    두 계정에서 동일하게 재현되었으므로, 이 현상은 특정 계정이나 서빙 풀의 결함이 아니라 <strong>모델의 출력 행동</strong>입니다. 리터럴로 작성하면 오기 기회 자체가 사라집니다. 따라서 출력 형식 지시만으로 이 클래스는 차단됩니다.
   </p>
 
   <h3>4.4 클래스 B - 잔존하는 저빈도 토큰 치환</h3>
   <p>
-    클래스 A를 제거하고 남는 별도 결함이 클래스 B입니다. 검증 4건(믄고, 새벅, 사오오, 쪼르)은 raw delta와 AWS Invocation Log 실측에서 전부 리터럴 UTF-8로 도착했고 이스케이프는 0건이었습니다. 단일 부위 치환으로 비단어가 되고, 문맥상 의도어가 명백하며, 서브워드 토큰 오선택 시그니처(쪽 &rarr; 쪼+르)를 보입니다. L arm에서 1건이 발생한 데서 보듯 <strong>출력 형식 지시로는 차단되지 않습니다</strong>. 기저율은 런당 약 0.3~0.4%(음절 기준 약 70,000+개당 1건)입니다. 발생층(모델 자체 대 서빙 디토크나이즈)의 국소화에는 서버측 텔레메트리가 필요해, Bedrock RequestId 3건을 포함한 증거 패키지를 AWS에 전달했습니다.
+    클래스 A를 제거하고 남는 별도 결함이 클래스 B입니다. 검증 4건(믄고, 새벅, 사오오, 쪼르)은 raw delta와 AWS Invocation Log 실측에서 전부 리터럴 UTF-8로 도착했고, 이스케이프는 0건이었습니다.
   </p>
   <p>
-    포렌식 전수 검사도 같은 방향을 가리켰습니다. 하니스가 기록한 1,071런의 raw delta 전체에서 모델 작성 이스케이프는 0건이었고(프로브가 잡은 손상은 전부 클래스 B), CloudWatch Insights로 주간 26,427개 레코드를 스윕한 결과 텍스트 필드에서 <span class="mono">\\u</span> 매치는 0건이었습니다.
+    세 가지 공통점이 있습니다. 단일 부위 치환으로 비단어가 되고, 문맥상 의도어가 명백합니다. 그리고 서브워드 토큰(단어를 더 잘게 쪼갠 조각 단위) 오선택 시그니처(쪽 &rarr; 쪼+르)를 보입니다.
+  </p>
+  <p>
+    얼마나 자주 생길까요? 기저율은 런당 약 0.3~0.4%(음절 기준 약 70,000+개당 1건)입니다. L arm에서 1건이 발생한 데서 보듯 <strong>출력 형식 지시로는 차단되지 않습니다</strong>.
+  </p>
+  <p>
+    발생층이 모델 자체인지 서빙 디토크나이즈(토큰을 다시 글자로 되돌리는 단계)인지 가리려면 서버측 텔레메트리가 필요합니다. 그래서 Bedrock RequestId 3건을 포함한 증거 패키지를 AWS에 전달했습니다.
+  </p>
+  <p>
+    포렌식 전수 검사도 같은 방향을 가리켰습니다. 하니스가 기록한 1,071런의 raw delta 전체에서 모델 작성 이스케이프는 0건이었습니다(프로브가 잡은 손상은 전부 클래스 B). CloudWatch Insights로 주간 26,427개 레코드를 스윕한 결과에서도 텍스트 필드의 <span class="mono">\\u</span> 매치는 0건이었습니다.
   </p>
 
   <h3>4.5 1P 경로의 U+FFFD - 별도 디코드 클래스</h3>
   <p>
-    1P 경로(cc-1p-enterprise)의 TodoWrite JSON에서 "레이아�트에"처럼 실제 콘텐츠가 손실된 U+FFFD 이벤트 1건이 검증되었습니다. 패널의 Node 실증에서 CLI의 청크 분할이 원인이라면 대체 문자가 2~3개 나와야 하지만 관측은 단일 대체 문자와 온전한 후속 텍스트였으므로, 클라이언트는 배제되고 상류(서빙 디토크나이즈 또는 모델의 대체 문자 토큰 방출)로 국소화되었습니다. 고객 증상과는 다른 클래스이며, 1P 경로에도 별도 결함이 존재함을 보여 경로 특이성 주장을 추가로 약화시킵니다.
+    1P 경로에도 별도 결함이 하나 있었습니다. cc-1p-enterprise 셀의 TodoWrite JSON에서 "레이아�트에"처럼 실제 콘텐츠가 손실된 U+FFFD 이벤트 1건이 검증되었습니다.
+  </p>
+  <p>
+    패널의 Node 실증이 클라이언트를 배제했습니다. CLI의 청크 분할이 원인이라면 대체 문자가 2~3개 나와야 하지만, 관측은 단일 대체 문자와 온전한 후속 텍스트였습니다. 따라서 상류(서빙 디토크나이즈 또는 모델의 대체 문자 토큰 방출)로 국소화되었습니다.
+  </p>
+  <p>
+    이 이벤트는 고객 증상과 다른 클래스입니다. 1P 경로에도 자체 결함이 존재함을 보여, 경로 특이성 주장을 추가로 약화시킵니다. 이 표에서 볼 것은 검증된 손상 이벤트 전체의 형태, 클래스, 발생 경로입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -819,10 +894,19 @@ flowchart LR
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
   <h2><span class="no">05</span>방법론적 교훈과 완화</h2>
+  <p>
+    이 절은 이번 조사에서 얻은 검증 방법의 교훈과 실무 완화책을 다룹니다. 같은 문제를 겪는 팀이 바로 적용할 수 있는 내용입니다.
+  </p>
 
   <h3>5.1 LLM judge 원플래그는 손상률이 아닙니다</h3>
   <p>
-    두 A/B 런의 judge 원플래그 74건 중 71건(96%)이 오탐이었습니다. 대표 오탐은 조사 결합 오판으로, "서비스 메시나 인그레스"(메시 또는 인그레스)를 비단어 "메시나"로 판정한 사례가 D1 25건 중 21건을 차지했습니다. 언어베일러블(unavailable), 리브니스(liveness) 같은 음역 변이도 오탐원이었습니다. 오탐이 셀 간 균일하지 않아(출력 문체 빈도 차) 원플래그 기반 z-검정은 신뢰할 수 없었고, 실제로 D1의 z=+2.58 신호가 재검 후 소멸했습니다.
+    judge의 플래그는 얼마나 믿을 만했을까요? 두 A/B 런의 judge 원플래그 74건 중 71건(96%)이 오탐이었습니다.
+  </p>
+  <p>
+    대표 오탐은 조사 결합 오판입니다. "서비스 메시나 인그레스"(메시 또는 인그레스)를 비단어 "메시나"로 판정한 사례가 D1 25건 중 21건을 차지했습니다. 언어베일러블(unavailable), 리브니스(liveness) 같은 음역 변이도 오탐원이었습니다.
+  </p>
+  <p>
+    오탐은 셀 간 균일하지도 않았습니다(출력 문체 빈도 차). 그래서 원플래그 기반 z-검정은 신뢰할 수 없었고, 실제로 D1의 z=+2.58 신호가 재검 후 소멸했습니다.
   </p>
   <p>
     역방향 갭도 있었습니다. 흔한 음절로 착지한 비단어(쪼르)는 희귀 음절 휴리스틱을 통과하므로 <strong>judge 없이는 검출되지 않습니다</strong>. 결국 휴리스틱(정밀), judge(재현), 적대적 재검(정확)의 3단 구성이 모두 필요하다는 것이 이 조사의 방법론적 결론입니다.
@@ -835,7 +919,7 @@ flowchart LR
 
   <h3>5.2 완화 지시 배포</h3>
   <p>
-    클래스 A는 출력 형식 지시 한 줄로 차단됩니다. 개인은 Claude 메모리와 <span class="mono">~/.claude/CLAUDE.md</span>에, 팀은 각 저장소의 <span class="mono">CLAUDE.md</span>에, 조직은 Enterprise 관리형 설정으로 강제 배포하는 3계층 적용을 권고합니다.
+    클래스 A는 출력 형식 지시 한 줄로 차단됩니다. 적용은 3계층을 권고합니다. 개인은 Claude 메모리와 <span class="mono">~/.claude/CLAUDE.md</span>에, 팀은 각 저장소의 <span class="mono">CLAUDE.md</span>에, 조직은 Enterprise 관리형 설정으로 강제 배포합니다.
   </p>
 
   <div class="codeblock">
@@ -845,12 +929,12 @@ flowchart LR
   </div>
 
   <p>
-    업스트림 보고도 완료했습니다. 클래스 A는 E arm raw 기록을 재현 증거로 첨부해 Anthropic에 공개 이슈(anthropics/claude-code#83033)로 보고했고, 클래스 B는 Bedrock RequestId 3건의 서빙 텔레메트리 상관 분석을 요청하는 증거 패키지로 AWS에 전달했습니다.
+    업스트림 보고도 완료했습니다. 클래스 A는 E arm raw 기록을 재현 증거로 첨부해 Anthropic에 공개 이슈(anthropics/claude-code#83033)로 보고했습니다. 클래스 B는 Bedrock RequestId 3건의 서빙 텔레메트리 상관 분석을 요청하는 증거 패키지로 AWS에 전달했습니다.
   </p>
 
   <h3>5.3 재발 캡처 표준</h3>
   <p>
-    재발 시 화면 캡처나 세션 파일은 증거 능력이 없습니다. 지문이 보존되는 소스로 캡처한 뒤 백슬래시 삼분법(3.3절)으로 판별해야 합니다.
+    재발 시 화면 캡처나 세션 파일은 증거 능력이 없습니다. 이스케이프 지문이 보존되는 소스로 캡처한 뒤, 백슬래시 삼분법(3.3절)으로 판별해야 합니다.
   </p>
 
   <div class="codeblock">
@@ -863,13 +947,13 @@ flowchart LR
 <section class="sec" id="s6">
   <h2><span class="no">06</span>한계</h2>
   <p>
-    이 조사가 확정하지 못한 것과, 결과 해석 시 유의할 지점입니다.
+    이 절은 이번 조사가 확정하지 못한 것을 다룹니다. 결과를 해석할 때 함께 봐야 할 전제들입니다.
   </p>
   <ol class="plain">
-    <li>클래스 B의 발생층(모델 자체 대 서빙 디토크나이즈)은 국소화되지 않았습니다. 관측된 Bedrock 4건 대 1P 0건은 시사적이지만 비유의이며, 판정에는 RequestId 상관 분석 또는 셀당 수천 런 규모가 필요합니다.</li>
-    <li>통계 검정력이 제한적입니다. 조건당 n=20~30이므로 0/20 관측은 상한 16.1%만 보장하고, 클래스 B 기저율 추정(0.3~0.4%)의 신뢰구간도 넓습니다.</li>
-    <li>Claude Code 셀의 usage 지표는 세션 누적치(요청당의 약 2배)라 요청당 환산이 필요하며, 조사 호스트의 기본 부하는 요청당 약 52,000토큰이었습니다.</li>
-    <li>fill 스윕은 단일 턴에 필러를 주입하는 구조입니다. 실제 장시간 대화형 세션에서 escape 모드 진입이 잦아지는 동학은 직접 측정하지 않았고, D6의 조건부 분해로 간접 확증했습니다.</li>
+    <li>클래스 B의 발생층(모델 자체 대 서빙 디토크나이즈)은 국소화되지 않았습니다. 관측된 Bedrock 4건 대 1P 0건은 시사적이지만 비유의입니다. 판정에는 RequestId 상관 분석 또는 셀당 수천 런 규모가 필요합니다.</li>
+    <li>통계 검정력이 제한적입니다. 조건당 n=20~30이므로 0/20 관측은 상한 16.1%만 보장합니다. 클래스 B 기저율 추정(0.3~0.4%)의 신뢰구간도 넓습니다.</li>
+    <li>Claude Code 셀의 usage 지표는 세션 누적치(요청당의 약 2배)라 요청당 환산이 필요합니다. 조사 호스트의 기본 부하는 요청당 약 52,000토큰이었습니다.</li>
+    <li>fill 스윕은 단일 턴에 필러를 주입하는 구조입니다. 실제 장시간 대화형 세션에서 escape 모드 진입이 잦아지는 동학은 직접 측정하지 않았습니다. D6의 조건부 분해로 간접 확증했습니다.</li>
     <li>judge는 자연스러운 오타 / 신조어 경계에서 잔여 불확실성이 있습니다. 모든 진성 판정을 3-lens 패널로 이중화해 완화했습니다.</li>
   </ol>
 </section>
@@ -878,13 +962,22 @@ flowchart LR
 <section class="sec" id="s7">
   <h2><span class="no">07</span>결론</h2>
   <p>
-    체감이 가리킨 곳과 실제 원인은 달랐습니다. "컨텍스트 50% 이상에서 빈발"이라는 관찰은 long-context 서빙 결함을 시사했지만, 통제 실험의 결론은 점유율 무관, 경로 유의차 없음, 그리고 <strong>모델이 툴 JSON의 한글을 이스케이프로 받아쓰다 hex를 오기하는 출력 행동(클래스 A)</strong>이었습니다. 이 클래스는 리터럴 작성 지시로 차단되며, 지시로 차단되지 않는 저빈도 토큰 치환(클래스 B)과 1P 경로의 U+FFFD 디코드 손상이 별도 클래스로 잔존합니다.
+    이 절은 조사 전체를 정리합니다. 체감이 가리킨 곳과 실제 원인이 어떻게 달랐는지, 이제 무엇을 하면 되는지 요약합니다.
+  </p>
+  <p>
+    "컨텍스트 50% 이상에서 빈발"이라는 관찰은 long-context 서빙 결함을 시사했습니다. 그러나 통제 실험의 결론은 달랐습니다. 점유율 무관, 경로 유의차 없음, 그리고 <strong>모델이 툴 JSON의 한글을 이스케이프로 받아쓰다 hex를 오기하는 출력 행동(클래스 A)</strong>이 원인이었습니다.
+  </p>
+  <p>
+    이 클래스는 리터럴 작성 지시로 차단됩니다. 지시로 차단되지 않는 저빈도 토큰 치환(클래스 B)과 1P 경로의 U+FFFD 디코드 손상은 별도 클래스로 잔존합니다. 한 문장으로 요약하면, 한글 깨짐의 주범은 긴 세션도 Bedrock도 아니라 모델의 이스케이프 받아쓰기였고, 리터럴 작성 지시 한 줄로 막을 수 있습니다.
   </p>
   <p class="lead-def">
     <b>원칙:</b> 체감 가설은 통제 실험으로 분해하고, 탐지기의 플래그는 적대적 반박을 통과한 뒤에만 사실로 승격합니다.
   </p>
   <p>
-    운영 조치는 세 가지로 정리됩니다. 첫째, 완화 지시 문안을 개인 / 팀 / 조직 3계층에 배포해 클래스 A를 차단합니다. 둘째, 클래스 B는 저빈도 잔존 결함으로 취급해 모니터링을 유지하고, 서버측 상관 분석 결과를 기다립니다. 셋째, 재발 시에는 지문 보존 소스로 캡처해 백슬래시 삼분법으로 기원을 판별한 뒤 해당 채널(Anthropic 또는 AWS)로 보고합니다.
+    운영 조치는 세 가지로 정리됩니다. 첫째, 완화 지시 문안을 개인 / 팀 / 조직 3계층에 배포해 클래스 A를 차단합니다. 둘째, 클래스 B는 저빈도 잔존 결함으로 취급해 모니터링을 유지하면서 서버측 상관 분석 결과를 기다립니다.
+  </p>
+  <p>
+    셋째, 재발 시에는 지문 보존 소스로 캡처합니다. 백슬래시 삼분법으로 기원을 판별한 뒤 해당 채널(Anthropic 또는 AWS)로 보고합니다.
   </p>
 </section>
 
@@ -896,6 +989,9 @@ flowchart LR
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
+  <p>
+    이 절은 본문 수치와 주장의 출처를 모았습니다. 조사 데이터 원본, 공식 문서, 배경 자료 순서입니다.
+  </p>
 
   <h3>핵심 출처</h3>
   <ul>
@@ -1031,10 +1127,10 @@ flowchart LR
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>The root cause of the "다았 단계"-style Hangul syllable substitution observed in Claude Code was confirmed as <strong>Class A (escape-miscoding): the model writes Korean in tool JSON as <span class="mono">\uXXXX</span> escapes and miswrites the hex</strong>. Escape-notation runs were corrupted 45/45 (100%); literal-writing runs 1/60 (1.7%).</li>
-    <li>While transcribing 4 hex digits per syllable, a single-digit slip renders as a valid neighboring syllable (새벽 &rarr; 새벅). Writing literals removes the opportunity for that slip entirely.</li>
-    <li>The "frequent above 50% context fill" hypothesis was rejected. Across two sweeps covering measured fill of 0.1–78%, the corruption-rate curve was flat over the whole range, so the fill hypothesis was rejected. Class A reproduced identically in two AWS accounts (…6239, …5884), so it was ruled a model output behavior, not a serving-layer defect.</li>
-    <li>An output-format instruction — "write Korean tool parameters as literal UTF-8" — blocks Class A. Low-frequency token substitution (Class B) is not blocked by instruction; an evidence package with reproduction identifiers was handed to AWS with a request for server-side correlation analysis.</li>
+    <li>The root cause is confirmed. The "다았 단계"-style Hangul corruption seen in Claude Code is <strong>Class A (escape-miscoding): the model writes Korean in tool JSON as <span class="mono">\uXXXX</span> code numbers (escapes) instead of characters and miswrites the number</strong>, corrupting 45/45 (100%) of escape-notation runs versus 1/60 (1.7%) of literal-writing runs.</li>
+    <li>Each Hangul syllable is written as 4 hex digits, and a single wrong digit yields a different valid-looking syllable (새벽 &rarr; 새벅). Writing the characters literally removes the transcription step, so the slip opportunity disappears entirely.</li>
+    <li>The hypothesis "frequent above 50% context fill (how full the model's input window is)" was rejected: across two sweeps covering measured fill of 0.1–78%, the corruption-rate curve was flat over the whole range. Class A reproduced identically in two AWS accounts (…6239, …5884), so it was ruled a model output behavior, not a serving-layer defect.</li>
+    <li>A single output-format instruction, "write Korean tool parameters as literal UTF-8", blocks Class A. For the low-frequency token substitution it does not block (Class B), an evidence package with reproduction identifiers was handed to AWS with a request for server-side correlation analysis.</li>
   </ul>
 </section>
 
@@ -1059,10 +1155,19 @@ flowchart LR
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Observation and Hypotheses</h2>
   <p>
-    It started with a field observation. On the TodoWrite and AskUserQuestion surfaces of Claude Code (Bedrock backend), Hangul syllables were repeatedly reported being substituted with other syllables — e.g. "☐ 다았 단계" — and the reporter's impression was that <strong>"it becomes frequent above 50% context fill."</strong> Because it seemed to happen more often as sessions grew longer, a long-context serving defect initially looked most plausible.
+    This section covers where the investigation began. It explains what was observed in the field and how that observation was split into testable hypotheses.
   </p>
   <p>
-    Rather than carrying the impression straight into a conclusion, we decomposed it into three testable hypotheses. The three are not mutually exclusive, and each was judged with an independent experiment design.
+    It started with a field observation. On the TodoWrite and AskUserQuestion surfaces of Claude Code (Bedrock backend), Hangul syllables were repeatedly reported being replaced with wrong syllables, e.g. "☐ 다았 단계".
+  </p>
+  <p>
+    The reporter's impression was that <strong>"it becomes frequent above 50% context fill."</strong> Context fill is the ratio of how full the model's input space (context window) is. Because the symptom seemed more frequent in longer sessions, a long-context serving defect (a flaw in how the server handles long inputs) initially looked most plausible.
+  </p>
+  <p>
+    We did not carry the impression straight into a conclusion. Instead, we decomposed it into three testable hypotheses. The three are not mutually exclusive, and each was judged with an independent experiment design.
+  </p>
+  <p>
+    What to look for in this table: what each hypothesis was meant to discriminate, and the final verdict it received.
   </p>
 
   <div class="tbl-wrap">
@@ -1080,7 +1185,7 @@ flowchart LR
   </div>
 
   <p>
-    The detection harness (the <span class="mono">cjk_integrity_probe</span> family of scripts) had been designed with a detection class anticipating H2. Having built it to count Hangul <span class="mono">\uXXXX</span> escapes in the raw stream separately became the stepping stone for later confirming the root cause.
+    Here a <span class="mono">\uXXXX</span> escape is the JSON notation that writes a character as a four-digit code number instead of the character itself. The detection harness (the <span class="mono">cjk_integrity_probe</span> family of scripts) had been designed with a detection class anticipating H2. Building it to separately count Hangul escapes in the raw stream (the model's response recorded verbatim, without processing) became the stepping stone for later confirming the root cause.
   </p>
 </section>
 
@@ -1088,7 +1193,16 @@ flowchart LR
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>Experiment Design</h2>
   <p>
-    The comparison paths comprised 5 cells: 1P (Claude Enterprise subscription, Claude Code CLI) and 3P (Amazon Bedrock). The Bedrock side covers switching the Claude Code backend, direct ConverseStream calls, direct InvokeModelWithResponseStream calls, and region / inference-profile variants. The client was held constant across both backends: the same Claude Code CLI 2.1.220 binary and boto3 1.42.86.
+    This section covers how the experiment was built. It lays out which call paths were compared and which datasets were run at what scale.
+  </p>
+  <p>
+    The comparison paths comprised 5 cells. 1P is the path that connects directly to Anthropic via a Claude Enterprise subscription (Claude Code CLI); 3P is the path that goes through Amazon Bedrock. The Bedrock side covers switching the Claude Code backend, direct ConverseStream calls, direct InvokeModelWithResponseStream calls, and region / inference-profile variants.
+  </p>
+  <p>
+    ConverseStream and InvokeModelWithResponseStream are the two model-invocation APIs Bedrock provides. The client variable was held constant. Both backends used the same Claude Code CLI 2.1.220 binary and boto3 1.42.86.
+  </p>
+  <p>
+    What to look for in this table: the design scale and key result of each of the 6 datasets.
   </p>
 
   <div class="tbl-wrap">
@@ -1109,7 +1223,10 @@ flowchart LR
   </div>
 
   <p>
-    Two corrections happened mid-run. First, we confirmed empirically that <span class="mono">anthropic.claude-sonnet-5</span> in us-east-1 is inference-profile-only with no on-demand invocation, and corrected that cell to <span class="mono">us.anthropic.claude-sonnet-5</span>. Second, in filler calibration, the gap between the script's assumption (1.5 chars per token) and the measurement (about 1.03 chars) pushed the top level of sweep #1 past the context window, voiding it; sweep #2 recalibrated the fill levels and achieved measured 0 / 30.7 / 51.0 / 71.4%.
+    Two corrections happened mid-run. First, we confirmed empirically that <span class="mono">anthropic.claude-sonnet-5</span> in us-east-1 is inference-profile-only (an inference profile is a Bedrock setting that invokes across a bundle of regions) with no on-demand invocation. That cell was corrected to <span class="mono">us.anthropic.claude-sonnet-5</span>.
+  </p>
+  <p>
+    Second, filler calibration (sizing the dummy text used to fill the context) turned out to be off. The script assumed 1.5 characters per token (the smallest unit in which the model processes text), while the measurement was about 1.03. That gap pushed the top level of sweep #1 past the context window and voided it, so sweep #2 recalibrated the fill levels and achieved measured 0 / 30.7 / 51.0 / 71.4%.
   </p>
 
   <div class="callout note">
@@ -1122,17 +1239,32 @@ flowchart LR
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Verification Methodology</h2>
   <p>
-    The verdict pipeline of this investigation has three stages. Automated detection and an LLM judge collect candidates broadly, an adversarial rebuttal panel decides whether each is genuine, and byte forensics determines origin (model vs pipeline). No single stage's output is promoted to fact on its own.
+    This section covers how we decided what counts as real corruption. It explains why detector candidates were never trusted as-is but filtered through three stages.
+  </p>
+  <p>
+    The verdict pipeline has three stages. Automated detection and an LLM judge (having another LLM inspect the output) collect candidates broadly. An adversarial rebuttal panel then decides whether each is genuine, and byte forensics determines origin (model vs pipeline).
+  </p>
+  <p>
+    No single stage's output is promoted to fact on its own.
   </p>
 
   <h3>3.1 Automated detection and the LLM judge</h3>
   <p>
-    The automated detection harness checks 4 classes: U+FFFD, rare syllables outside KS X 1001 (discriminated via euc-kr encoding length), Hangul <span class="mono">\uXXXX</span> escapes inside raw tool JSON, and foreign-character intrusion. It is high-precision but low-recall, missing substitutions between common syllables (the 로그인 &rarr; 로까잉 kind). That gap was covered with an LLM judge (claude-haiku-4-5, 1P path). However, 96% of the judge's raw flags turned out to be false positives (Section 5), so raw flags were used only for candidate collection.
+    The automated detection harness checks 4 classes. They are U+FFFD (the Unicode replacement character � shown in place of a broken character), rare syllables outside KS X 1001 (discriminated via euc-kr encoding length), Hangul <span class="mono">\uXXXX</span> escapes inside raw tool JSON, and foreign-character intrusion.
+  </p>
+  <p>
+    The harness is high-precision but low-recall. It misses substitutions between common syllables (the 로그인 &rarr; 로까잉 kind). That gap was covered with an LLM judge (claude-haiku-4-5, 1P path).
+  </p>
+  <p>
+    However, 96% of the judge's raw flags (its first-pass flags) turned out to be false positives (Section 5). Raw flags were therefore used only for candidate collection.
   </p>
 
   <h3>3.2 Adversarial 3-lens rebuttal panel</h3>
   <p>
-    For every flagged run, three lenses — linguistics (checking against false-positive classes), encoding / pipeline (byte analysis, including empirical tests), and reproduction class / statistics — are each assigned to an independent agent that attempts the rebuttal "this is not corruption." <strong>Only flags that withstood all three lenses' rebuttals and survived unanimously were judged genuine.</strong> In practice, one Japanese-intrusion event (手戻り) was refuted 3/3 by this panel and classified as coherent code-switching.
+    Every flagged run gets three lenses (review perspectives). They are linguistics (checking against false-positive classes), encoding / pipeline (byte analysis, including empirical tests), and reproduction class / statistics. Each lens is assigned to an independent agent that attempts the rebuttal "this is not corruption."
+  </p>
+  <p>
+    <strong>Only flags that withstood all three lenses' rebuttals and survived unanimously were judged genuine.</strong> In practice, one Japanese-intrusion event (手戻り) was refuted 3/3 by this panel. It was classified as coherent code-switching, a natural in-context language switch.
   </p>
 
   <figure class="diagram">
@@ -1155,7 +1287,7 @@ flowchart LR
 
   <h3>3.3 Byte forensics - the backslash trichotomy</h3>
   <p>
-    Whether corruption came from the model's escape notation can be determined by the number of backslash layers in the raw record at the verification point. For a raw file stored as JSON, three cases diverge.
+    How can we tell whether corruption came from the model's escape notation? By the number of backslash layers in the raw record at the verification point. For a raw file stored as JSON, three cases diverge.
   </p>
 
   <div class="codeblock">
@@ -1174,10 +1306,19 @@ flowchart LR
 <!-- ===================== 04 (EN) ===================== -->
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Results</h2>
+  <p>
+    This section covers what the experiments answered. It walks through the verdicts on the three hypotheses, then the two separate defects that remain.
+  </p>
 
   <h3>4.1 Dose-response curve - H-fill rejected</h3>
   <p>
-    Running the fill sweep twice — including a corrected replication — over measured fill of 0.1–78%, the corruption-rate curve was flat across the whole range. The first fill point where |z|&gt;1.96 versus baseline (F*) did not exist in either sweep, and the overall maximum |z| was just 1.01. Merging the high-fill (30–78%) range still yielded <strong>0/300</strong> with no corruption; on the contrary, all 5 verified corruption events occurred under near-zero fill. Input sizes of corrupted runs were also scattered from 980 tokens to 52,000 tokens, so neither a proportional nor an absolute threshold held.
+    Did corruption rise as the context filled up? It did not. The fill sweep ran twice, including a corrected replication, over measured fill of 0.1–78%, and the corruption-rate curve was flat across the whole range.
+  </p>
+  <p>
+    The first fill point where |z|&gt;1.96 versus baseline (F*) did not exist in either sweep. The overall maximum |z| was just 1.01. |z| is a statistical measure of whether a difference between two rates exceeds chance; a value above 1.96 is the usual bar for significance.
+  </p>
+  <p>
+    Merging the high-fill (30–78%) range still yielded <strong>0/300</strong> with no corruption. On the contrary, all 5 verified corruption events occurred under near-zero fill. Input sizes of corrupted runs were also scattered from 980 tokens to 52,000 tokens, so neither a proportional nor an absolute threshold held.
   </p>
 
   <div class="callout note">
@@ -1187,12 +1328,21 @@ flowchart LR
 
   <h3>4.2 Path A/B - no significant difference for H-path</h3>
   <p>
-    D1's judge raw flags spiked to 33.3% (z=+2.58) in one cell, but all evaporated as false positives after adversarial recheck. On verified counts, the substitution classes total Bedrock 4 vs 1P 0. The direction is consistent, but Fisher's exact test gives p of about 0.6 — <strong>not statistically significant, so path dependence cannot be concluded</strong>. Considering that a separate class (U+FFFD) was verified once on the 1P path, the path-specificity claim weakens further. No verified-level significant signal appeared on any axis: Converse vs Invoke, global vs us-geo, streaming or not, tool vs prose.
+    Was the Bedrock path the problem, then? No significant difference was found. D1's judge raw flags spiked to 33.3% (z=+2.58) in one cell, but all evaporated as false positives after adversarial recheck.
+  </p>
+  <p>
+    On verified counts, the substitution classes total Bedrock 4 vs 1P 0. The direction is consistent, but Fisher's exact test (a statistical test suited to small samples) gives p of about 0.6. That is <strong>not statistically significant, so path dependence cannot be concluded</strong>.
+  </p>
+  <p>
+    Considering that a separate class (U+FFFD) was verified once on the 1P path, the path-specificity claim weakens further. No verified-level significant signal appeared on any axis: Converse vs Invoke, global vs us-geo, streaming or not, tool vs prose.
   </p>
 
   <h3>4.3 Root cause confirmed - Class A: escape-miscoding</h3>
   <p>
-    The decisive clue emerged during operations. Cases were observed where the model wrote Korean in tool parameters such as AskUserQuestion directly as <span class="mono">\uXXXX</span> escapes, and the symptom vanished after a "no escapes, write literals" memory instruction. This was confirmed with the controlled D6 experiment. Running an escape-induced E arm and a literal-instructed L arm across two AWS accounts produced the following.
+    The decisive clue emerged during operations. Cases were observed where the model wrote Korean in tool parameters such as AskUserQuestion directly as <span class="mono">\uXXXX</span> escapes. And the symptom vanished after a "no escapes, write literals" memory instruction.
+  </p>
+  <p>
+    This was confirmed with the controlled D6 experiment. An escape-induced E arm and a literal-instructed L arm ran across two AWS accounts. What to look for in this table: the corruption-rate gap between the two arms.
   </p>
 
   <div class="tbl-wrap">
@@ -1210,23 +1360,44 @@ flowchart LR
   </div>
 
   <p>
-    Conditional decomposition showed that what separated corruption was not the instruction wording but <strong>whether the run actually used escapes</strong>. Even a partial-entry run that used only 6 escapes produced corruption (메택, 대시보네). The mechanism is a single-digit slip while transcribing 4 hex digits per syllable, rendering as a valid neighboring syllable. If one digit in the "벽" of 새벽 slips, it becomes "벅", yielding "새벅". In entered runs, corruption density was 3–5% of syllables (a lower bound counting only rare syllables), and the shapes matched the customer symptom: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+    Conditional decomposition showed that what separated corruption was not the instruction wording but <strong>whether the run actually used escapes</strong>. Even a partial-entry run that used only 6 escapes produced corruption (메택, 대시보네).
   </p>
   <p>
-    Since it reproduced identically in two accounts, this phenomenon is not a defect of a particular account or serving pool but <strong>the model's output behavior</strong>. And because writing literals removes the miswriting opportunity itself, an output-format instruction alone blocks this class.
+    The mechanism is simple. A single digit slips while the model transcribes 4 hex digits per syllable, and the result renders as a valid neighboring syllable. If one digit in the "벽" of 새벽 slips, it becomes "벅", yielding "새벅".
+  </p>
+  <p>
+    In entered runs, corruption density was 3–5% of syllables (a lower bound counting only rare syllables). The shapes matched the customer symptom: 백엔드 &rarr; 백엔닜 / 백엔향, 모델 &rarr; 모데로 / 모데버, 보안 &rarr; 버안, 집계 &rarr; 집개.
+  </p>
+  <p>
+    Since it reproduced identically in two accounts, this phenomenon is not a defect of a particular account or serving pool but <strong>the model's output behavior</strong>. Writing literals removes the miswriting opportunity itself. An output-format instruction alone therefore blocks this class.
   </p>
 
   <h3>4.4 Class B - residual low-frequency token substitution</h3>
   <p>
-    Class B is the separate defect that remains after removing Class A. The 4 verified events (믄고, 새벅, 사오오, 쪼르) all arrived as literal UTF-8 in both raw deltas and AWS Invocation Log measurements, with zero escapes. They are single-site substitutions producing non-words, the intended word is obvious from context, and they show a subword token misselection signature (쪽 &rarr; 쪼+르). As the 1 event in the L arm shows, <strong>output-format instructions do not block it</strong>. The base rate is roughly 0.3–0.4% per run (about 1 per 70,000+ syllables). Localizing the originating layer (model itself vs serving detokenize) requires server-side telemetry, so an evidence package including 3 Bedrock RequestIds was handed to AWS.
+    Class B is the separate defect that remains after removing Class A. The 4 verified events (믄고, 새벅, 사오오, 쪼르) all arrived as literal UTF-8 in both raw deltas and AWS Invocation Log measurements, with zero escapes.
   </p>
   <p>
-    Exhaustive forensics pointed the same way. Across all 1,071 runs' raw deltas recorded by the harness, model-written escapes were 0 (every corruption the probe caught was Class B), and a CloudWatch Insights sweep of 26,427 records for the week found 0 <span class="mono">\\u</span> matches in text fields.
+    They share three traits. Each is a single-site substitution producing a non-word, and the intended word is obvious from context. They also show a subword-token misselection signature (쪽 &rarr; 쪼+르), a subword token being one of the small fragments a word is split into.
+  </p>
+  <p>
+    How often does it happen? The base rate is roughly 0.3–0.4% per run, about 1 per 70,000+ syllables. As the 1 event in the L arm shows, <strong>output-format instructions do not block it</strong>.
+  </p>
+  <p>
+    Localizing the originating layer, model itself vs serving detokenize (the step that turns tokens back into characters), requires server-side telemetry. An evidence package including 3 Bedrock RequestIds was therefore handed to AWS.
+  </p>
+  <p>
+    Exhaustive forensics pointed the same way. Across all 1,071 runs' raw deltas recorded by the harness, model-written escapes were 0 (every corruption the probe caught was Class B). A CloudWatch Insights sweep of 26,427 records for the week also found 0 <span class="mono">\\u</span> matches in text fields.
   </p>
 
   <h3>4.5 U+FFFD on the 1P path - a separate decode class</h3>
   <p>
-    One U+FFFD event with real content loss — like "레이아�트에" — was verified in TodoWrite JSON on the 1P path (cc-1p-enterprise). In the panel's Node empirical test, if the CLI's chunk splitting were the cause there should be 2–3 replacement characters, but the observation was a single replacement character followed by intact text; the client was therefore excluded and the event localized upstream (serving detokenize or the model emitting a replacement-character token). It is a different class from the customer symptom, and by showing the 1P path also has its own defect, it further weakens the path-specificity claim.
+    The 1P path had one separate defect of its own. One U+FFFD event with real content loss, like "레이아�트에", was verified in TodoWrite JSON on the 1P path (cc-1p-enterprise).
+  </p>
+  <p>
+    The panel's Node empirical test excluded the client. If the CLI's chunk splitting were the cause, there should be 2–3 replacement characters, but the observation was a single replacement character followed by intact text. The event was therefore localized upstream (serving detokenize or the model emitting a replacement-character token).
+  </p>
+  <p>
+    This event is a different class from the customer symptom. By showing the 1P path also has its own defect, it further weakens the path-specificity claim. What to look for in this table: the form, class, and originating path of every verified corruption event.
   </p>
 
   <div class="tbl-wrap">
@@ -1250,10 +1421,19 @@ flowchart LR
 <!-- ===================== 05 (EN) ===================== -->
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Methodological Lessons and Mitigation</h2>
+  <p>
+    This section covers the verification lessons learned and the practical mitigations. Teams facing the same problem can apply these directly.
+  </p>
 
   <h3>5.1 LLM judge raw flags are not corruption rates</h3>
   <p>
-    Of the 74 judge raw flags across the two A/B runs, 71 (96%) were false positives. The representative false positive was particle-boundary misjudgment: reading "서비스 메시나 인그레스" (mesh-or-ingress) as the non-word "메시나" accounted for 21 of D1's 25 flags. Transliteration variants like 언어베일러블 (unavailable) and 리브니스 (liveness) were also false-positive sources. Because false positives were not uniform across cells (output style frequency differs), z-tests on raw flags were unreliable — and indeed D1's z=+2.58 signal evaporated after recheck.
+    How trustworthy were the judge's flags? Of the 74 judge raw flags across the two A/B runs, 71 (96%) were false positives.
+  </p>
+  <p>
+    The representative false positive was particle-boundary misjudgment. Reading "서비스 메시나 인그레스" (mesh-or-ingress) as the non-word "메시나" accounted for 21 of D1's 25 flags. Transliteration variants like 언어베일러블 (unavailable) and 리브니스 (liveness) were also false-positive sources.
+  </p>
+  <p>
+    False positives were not uniform across cells either (output style frequency differs). That made z-tests on raw flags unreliable, and indeed D1's z=+2.58 signal evaporated after recheck.
   </p>
   <p>
     There was a reverse gap, too. A non-word landing on common syllables (쪼르) passes the rare-syllable heuristic, so <strong>it cannot be detected without the judge</strong>. The methodological conclusion of this investigation is that all three tiers are needed: heuristics (precision), judge (recall), and adversarial recheck (accuracy).
@@ -1266,7 +1446,7 @@ flowchart LR
 
   <h3>5.2 Deploying the mitigation instruction</h3>
   <p>
-    Class A is blocked by a single line of output-format instruction. We recommend three-tier deployment: individuals in Claude memory and <span class="mono">~/.claude/CLAUDE.md</span>, teams in each repository's <span class="mono">CLAUDE.md</span>, and organizations via Enterprise managed settings.
+    Class A is blocked by a single line of output-format instruction. We recommend three-tier deployment. Individuals put it in Claude memory and <span class="mono">~/.claude/CLAUDE.md</span>, teams in each repository's <span class="mono">CLAUDE.md</span>, and organizations enforce it via Enterprise managed settings.
   </p>
 
   <div class="codeblock">
@@ -1276,12 +1456,12 @@ as literal UTF-8; never use \uXXXX Unicode escapes.</code></pre>
   </div>
 
   <p>
-    Upstream reporting is also complete. Class A was reported to Anthropic as a public issue (anthropics/claude-code#83033) with E-arm raw records attached as reproduction evidence, and Class B was handed to AWS as an evidence package requesting serving-telemetry correlation analysis on 3 Bedrock RequestIds.
+    Upstream reporting is also complete. Class A was reported to Anthropic as a public issue (anthropics/claude-code#83033) with E-arm raw records attached as reproduction evidence. Class B was handed to AWS as an evidence package requesting serving-telemetry correlation analysis on 3 Bedrock RequestIds.
   </p>
 
   <h3>5.3 Recurrence capture standard</h3>
   <p>
-    On recurrence, screen captures and session files have no evidentiary power. Capture from a fingerprint-preserving source, then discriminate with the backslash trichotomy (Section 3.3).
+    On recurrence, screen captures and session files have no evidentiary power. Capture from a source that preserves the escape fingerprint, then discriminate with the backslash trichotomy (Section 3.3).
   </p>
 
   <div class="codeblock">
@@ -1294,13 +1474,13 @@ as literal UTF-8; never use \uXXXX Unicode escapes.</code></pre>
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Limitations</h2>
   <p>
-    What this investigation could not confirm, and points to keep in mind when interpreting the results.
+    This section covers what the investigation could not confirm. These are the caveats to keep in mind when interpreting the results.
   </p>
   <ol class="plain">
-    <li>The originating layer of Class B (model itself vs serving detokenize) was not localized. The observed Bedrock 4 vs 1P 0 is suggestive but non-significant; a verdict needs RequestId correlation analysis or thousands of runs per cell.</li>
-    <li>Statistical power is limited. With n=20–30 per condition, an observed 0/20 guarantees only an upper bound of 16.1%, and the confidence interval on the Class B base-rate estimate (0.3–0.4%) is also wide.</li>
-    <li>The Claude Code cells' usage metric is a session-cumulative figure (about 2x the per-request value) requiring per-request conversion, and the investigation host's baseline load was about 52,000 tokens per request.</li>
-    <li>The fill sweep injects filler into a single turn. The dynamics by which escape-mode entry becomes more frequent in real long conversational sessions were not measured directly; they were confirmed indirectly via D6's conditional decomposition.</li>
+    <li>The originating layer of Class B (model itself vs serving detokenize) was not localized. The observed Bedrock 4 vs 1P 0 is suggestive but non-significant. A verdict needs RequestId correlation analysis or thousands of runs per cell.</li>
+    <li>Statistical power is limited. With n=20–30 per condition, an observed 0/20 guarantees only an upper bound of 16.1%. The confidence interval on the Class B base-rate estimate (0.3–0.4%) is also wide.</li>
+    <li>The Claude Code cells' usage metric is a session-cumulative figure (about 2x the per-request value) requiring per-request conversion. The investigation host's baseline load was about 52,000 tokens per request.</li>
+    <li>The fill sweep injects filler into a single turn. The dynamics by which escape-mode entry becomes more frequent in real long conversational sessions were not measured directly. They were confirmed indirectly via D6's conditional decomposition.</li>
     <li>The judge retains residual uncertainty at the boundary of natural typos / neologisms. This was mitigated by double-checking every genuine verdict with the 3-lens panel.</li>
   </ol>
 </section>
@@ -1309,13 +1489,22 @@ as literal UTF-8; never use \uXXXX Unicode escapes.</code></pre>
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Conclusion</h2>
   <p>
-    Where the impression pointed and the actual cause differed. The observation "frequent above 50% context" suggested a long-context serving defect, but the controlled experiments concluded: fill-independent, no significant path difference, and <strong>an output behavior in which the model transcribes Korean in tool JSON as escapes and miswrites the hex (Class A)</strong>. This class is blocked by a literal-writing instruction, while low-frequency token substitution (Class B), which instructions do not block, and the 1P path's U+FFFD decode corruption remain as separate classes.
+    This section wraps up the investigation. It summarizes how the impression and the actual cause differed, and what to do now.
+  </p>
+  <p>
+    The observation "frequent above 50% context" suggested a long-context serving defect. The controlled experiments concluded otherwise. The findings were fill-independence, no significant path difference, and <strong>an output behavior in which the model transcribes Korean in tool JSON as escapes and miswrites the hex (Class A)</strong>.
+  </p>
+  <p>
+    This class is blocked by a literal-writing instruction. Low-frequency token substitution (Class B), which instructions do not block, and the 1P path's U+FFFD decode corruption remain as separate classes. In one sentence: the main culprit behind the broken Hangul was neither long sessions nor Bedrock but the model's escape transcription, and a single literal-writing instruction stops it.
   </p>
   <p class="lead-def">
     <b>Principle:</b> decompose impression-based hypotheses into controlled experiments, and promote detector flags to fact only after they survive adversarial rebuttal.
   </p>
   <p>
-    Operational actions come down to three. First, deploy the mitigation wording across the three tiers — individual / team / organization — to block Class A. Second, treat Class B as a low-frequency residual defect, keep monitoring, and await the server-side correlation results. Third, on recurrence, capture from a fingerprint-preserving source, discriminate origin with the backslash trichotomy, and report to the corresponding channel (Anthropic or AWS).
+    Operational actions come down to three. First, deploy the mitigation wording across the three tiers (individual / team / organization) to block Class A. Second, treat Class B as a low-frequency residual defect, keep monitoring, and await the server-side correlation results.
+  </p>
+  <p>
+    Third, on recurrence, capture from a fingerprint-preserving source. Discriminate origin with the backslash trichotomy, then report to the corresponding channel (Anthropic or AWS).
   </p>
 </section>
 
@@ -1327,6 +1516,9 @@ as literal UTF-8; never use \uXXXX Unicode escapes.</code></pre>
 <!-- ===================== References (EN) ===================== -->
 <section class="sec refs" id="refs-en">
   <h2><span class="no">--</span>References</h2>
+  <p>
+    This section collects the sources behind the figures and claims in this document. They are ordered as raw investigation data, official documentation, then background material.
+  </p>
 
   <h3>Primary sources</h3>
   <ul>

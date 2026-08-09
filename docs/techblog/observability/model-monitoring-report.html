@@ -577,6 +577,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <p class="eyebrow">Observability / Platform Deep Dive</p>
   <h1>Amazon Bedrock LLM Monitor - 37개 LLM 채널 상시 계측 플랫폼 구조 분석</h1>
   <p class="subtitle">
+    같은 모델이라도 어느 경로로 호출하느냐에 따라 속도, 비용, 지원 기능이 달라집니다.
     Bedrock 추론 프로파일, Anthropic Claude Platform on AWS, OpenAI GPT via Bedrock Mantle을 한 화면에서 비교하는
     model-monitoring 프로젝트(v2.19.2)의 프로브 파이프라인, 패리티 스윕 메커니즘, 운영 방식을 저장소 코드 기준으로 분석합니다.
   </p>
@@ -593,10 +594,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>사실 - 이 플랫폼은 <strong>활성 37개 LLM 채널</strong>(Bedrock 17, Anthropic CP on AWS 7, OpenAI Mantle 13)을 EventBridge Scheduler가 5분마다 실행하는 Fargate 태스크로 상시 프로빙하고, 결과를 RDS PostgreSQL 16에 적재합니다.</li>
-    <li>메커니즘 - 기능 지원 여부는 HTTP 200이 아니라 <strong>실행 증거</strong>(도구 카나리 왕복, JSON 유효성, cached-token 카운트, 스트림 델타)로 판정합니다. 12시간마다 6개 API surface × 19개 피처 패리티 스윕이 돕니다.</li>
-    <li>노출 조건 - 같은 모델 family를 Bedrock Global / Bedrock US / Anthropic CP / OpenAI Mantle 채널로 병렬 호출하므로, 채널 선택에 따른 TTFT / TPS / 비용 차이가 그대로 데이터로 남습니다.</li>
-    <li>결론 - 멀티 채널 LLM 운영에서 "어느 채널로 어떤 모델을 태울 것인가"를 감이 아니라 시계열 실측으로 결정하려면, 이 구조(스케줄러 분리 + 실행 증거 판정 + 채널 라벨 규약)를 그대로 참고할 수 있습니다.</li>
+    <li>사실 - 이 플랫폼은 <strong>활성 37개 LLM 채널</strong>(Bedrock 17, Anthropic CP on AWS 7, OpenAI Mantle 13)을 5분마다 자동으로 호출해서 상태를 잽니다. 호출은 EventBridge Scheduler가 띄우는 Fargate 태스크가 맡고, 결과는 RDS PostgreSQL 16에 쌓입니다.</li>
+    <li>메커니즘 - "이 기능을 지원하는가"는 호출 성공(HTTP 200)이 아니라 <strong>실행 증거</strong>로 판정합니다. 모델이 도구를 정말 호출했는지, JSON이 정말 유효한지, 캐시 토큰이 정말 잡히는지, 스트림 조각이 정말 도착하는지를 12시간마다 6개 API surface × 19개 피처 패리티 스윕으로 확인합니다.</li>
+    <li>노출 조건 - 같은 모델 family를 Bedrock Global / Bedrock US / Anthropic CP / OpenAI Mantle 네 채널로 병렬 호출합니다. 그래서 채널 선택에 따른 첫 응답 속도(TTFT), 처리량(TPS), 비용 차이가 그대로 데이터로 남습니다.</li>
+    <li>결론 - "어느 채널로 어떤 모델을 태울 것인가"를 감이 아니라 실측 데이터로 정하고 싶은 팀이라면, 이 구조(스케줄러 분리, 실행 증거 판정, 채널 라벨 규약)를 그대로 참고할 수 있습니다.</li>
   </ul>
 </section>
 
@@ -622,22 +623,37 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>문제 정의 - 무엇을 왜 측정하는가</h2>
   <p>
-    같은 Claude 모델이라도 호출 경로에 따라 다른 서비스가 됩니다. Bedrock Global 추론 프로파일(<span class="mono">global.*</span>),
-    Bedrock US 프로파일(<span class="mono">us.*</span>), Anthropic Claude Platform on AWS(vendor-hosted endpoint),
-    OpenAI GPT via Bedrock Mantle까지 네 갈래 경로는 TTFT, 처리량, 가격, 지원 기능이 제각각이고,
-    그 차이는 리전 상황과 모델 버전에 따라 계속 변합니다. 운영자가 "이 워크로드는 어느 채널로 태울 것인가"를 결정하려면
-    <strong>동일 조건 병렬 실측</strong>이 필요하다는 것이 이 프로젝트의 출발점입니다.
+    이 절은 프로젝트가 풀려는 문제를 정리합니다. 같은 모델을 여러 경로로 불러서 계속 재야 하는 이유가 핵심입니다.
   </p>
   <p>
-    두 번째 문제는 기능 지원 매트릭스입니다. 제공자 문서는 "이 모델이 이 API surface에서 tool use / 캐싱 / structured output을
-    지원하는가"에 대해 채널별 차이를 다 말해주지 않고, 파라미터가 조용히 무시되는 경우도 있습니다.
-    ADR-021은 v2.10.0까지 쓰던 수작업 스크린샷 증명 방식이 카탈로그 확장과 함께 유지 불가능해졌다고 기록합니다.
+    같은 Claude 모델이라도 호출 경로에 따라 다른 서비스가 됩니다. 경로는 네 갈래입니다.
+    Bedrock Global 추론 프로파일(<span class="mono">global.*</span>), Bedrock US 프로파일(<span class="mono">us.*</span>),
+    Anthropic Claude Platform on AWS(제공사가 직접 호스팅하는 endpoint), OpenAI GPT via Bedrock Mantle입니다.
+    추론 프로파일은 Bedrock이 요청을 여러 리전으로 분산해 주는 호출 경로를 말합니다.
+  </p>
+  <p>
+    경로마다 TTFT(요청 후 첫 토큰이 도착할 때까지의 시간), 처리량, 가격, 지원 기능이 다릅니다.
+    그 차이는 리전 상황과 모델 버전에 따라 계속 변합니다. 그래서 운영자가 "이 워크로드는 어느 채널로 태울 것인가"를
+    결정하려면 <strong>동일 조건 병렬 실측</strong>이 필요하다는 것이 이 프로젝트의 출발점입니다.
+  </p>
+  <p>
+    두 번째 문제는 기능 지원 매트릭스입니다. tool use(모델이 외부 도구를 호출하는 기능),
+    캐싱(반복되는 입력을 저장해 재사용하는 기능), structured output(정해진 JSON 형식으로만 답하게 하는 기능)을
+    어느 채널이 지원하는지, 제공자 문서는 채널별 차이를 다 말해주지 않습니다. 요청한 파라미터가 조용히 무시되는 경우도 있습니다.
+  </p>
+  <p>
+    ADR-021(저장소의 아키텍처 결정 기록 문서)은 v2.10.0까지 쓰던 수작업 스크린샷 증명 방식이
+    카탈로그 확장과 함께 유지 불가능해졌다고 기록합니다.
     그래서 지원 여부 자체를 주기적으로 실행해서 증명하는 패리티 런이 추가되었습니다.
   </p>
   <p>
-    측정 대상 채널은 v2.19.1에서 42개에서 37개로 조정되었습니다. OpenAI 1P direct 경로(Path 5, 5개 채널)는
-    사용자 결정으로 노출에서 제외하되 코드와 DB 행은 보존하는 3중 스위치(CDK <span class="mono">ENABLE_OPENAI_1P=false</span>,
-    backend <span class="mono">visibility.py</span> 조회 필터, frontend <span class="mono">EXCLUDED_FAMILIES</span>)로 처리되었습니다.
+    그렇다면 측정 대상은 몇 개일까요? v2.19.1에서 42개가 37개로 조정되었습니다.
+    OpenAI 1P direct 경로(Path 5, 5개 채널)는 사용자 결정으로 화면에서 제외되었습니다.
+    다만 코드와 DB 행은 보존하고, 3중 스위치(CDK <span class="mono">ENABLE_OPENAI_1P=false</span>,
+    backend <span class="mono">visibility.py</span> 조회 필터, frontend <span class="mono">EXCLUDED_FAMILIES</span>)로 노출만 껐습니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 37개 채널이 어느 제공 경로에 몇 개씩 속하는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -660,17 +676,31 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s2">
   <h2><span class="no">02</span>아키텍처 - 프로브 파이프라인과 8개 CDK 스택</h2>
   <p>
-    서비스 경로는 CloudFront VPC Origin &rarr; 내부 ALB(HTTPS:443) &rarr; ECS Fargate 서비스 2개(FastAPI backend, Next.js standalone frontend) &rarr; RDS PostgreSQL 16(t4g.micro, Single-AZ)입니다.
-    ALB를 인터넷에 노출하지 않고 CloudFront VPC Origin으로 감싼 것이 ADR-001의 결정이고,
-    모든 외부 인입은 HTTPS만 허용합니다. 배포 리전은 ap-northeast-2(서울)입니다.
+    이 절은 시스템이 어떻게 구성되어 있는지 다룹니다. 재는 부분과 보여주는 부분이 완전히 분리되어 있다는 점이 핵심입니다.
+  </p>
+
+  <h3>2.1 서비스 경로</h3>
+  <p>
+    사용자가 대시보드를 여는 경로는 다음과 같습니다.
+    CloudFront VPC Origin &rarr; 내부 ALB(HTTPS:443) &rarr; ECS Fargate 서비스 2개(FastAPI backend, Next.js standalone frontend) &rarr; RDS PostgreSQL 16(t4g.micro, Single-AZ)입니다.
+    Fargate는 서버를 직접 관리하지 않고 컨테이너를 실행해 주는 AWS 서비스입니다.
   </p>
   <p>
+    ALB를 인터넷에 직접 노출하지 않고 CloudFront VPC Origin으로 감싼 것은 ADR-001의 결정입니다.
+    모든 외부 인입은 HTTPS만 허용합니다. 배포 리전은 ap-northeast-2(서울)입니다.
+  </p>
+
+  <h3>2.2 측정 파이프라인</h3>
+  <p>
     측정 파이프라인은 서비스 경로와 완전히 분리되어 있습니다. v1에서는 auto-prober가 backend 프로세스 안의
-    daemon thread였지만, v2에서는 EventBridge Scheduler가 주기마다 <strong>일회성 Fargate 태스크</strong>를
-    RunTask로 띄우는 구조로 바뀌었습니다(ADR-003). backend의 <span class="mono">auto_prober.py</span>는
+    daemon thread였습니다. v2에서는 EventBridge Scheduler(정해진 주기에 작업을 실행해 주는 AWS 스케줄러)가
+    주기마다 <strong>일회성 Fargate 태스크</strong>를 RunTask로 띄우는 구조로 바뀌었습니다(ADR-003).
+  </p>
+  <p>
+    코드도 이 분리를 따릅니다. backend의 <span class="mono">auto_prober.py</span>는
     <span class="mono">run_cycle()</span> 함수만 내보내고, <span class="mono">auto_prober_runner.py</span>가
     CLI 엔트리포인트(<span class="mono">--once</span>)를 맡습니다. 프로브 상태 API도 in-process 상태가 아니라
-    DB의 최근 <span class="mono">ProbeRun</span> 행을 source of truth로 씁니다.
+    DB의 최근 <span class="mono">ProbeRun</span> 행을 source of truth(단일 기준 데이터)로 씁니다.
   </p>
 
   <figure class="diagram">
@@ -697,6 +727,10 @@ flowchart LR
     </figcaption>
   </figure>
 
+  <p>
+    아래 표에서 볼 것은 네 개 스케줄의 실행 주기와 각 태스크가 맡은 일입니다.
+  </p>
+
   <div class="tbl-wrap">
     <table>
       <caption>표 2. EventBridge 스케줄 4개 (cdk/lib/stacks/scheduler-stack.ts 기준)</caption>
@@ -715,18 +749,25 @@ flowchart LR
   <div class="callout note">
     <span class="callout-title">참고 - 문서와 코드가 어긋나는 지점은 코드 기준으로 적었습니다</span>
     <p>
-      docs/architecture.md는 EventBridge 스케줄을 3개로 기술하지만, <span class="mono">scheduler-stack.ts</span>에는
-      v2.18.0에서 추가된 GptBench까지 4개가 정의되어 있습니다. 또 저장소 루트의 <span class="mono">config.yaml</span>(모델 4개,
-      SQLite, us-east-1)은 v1 잔재로, 현재 backend / CDK 코드 어디에서도 참조하지 않습니다.
+      docs/architecture.md는 EventBridge 스케줄을 3개로 기술합니다. 그러나 <span class="mono">scheduler-stack.ts</span>에는
+      v2.18.0에서 추가된 GptBench까지 4개가 정의되어 있습니다.
+    </p>
+    <p>
+      또 저장소 루트의 <span class="mono">config.yaml</span>(모델 4개, SQLite, us-east-1)은 v1 잔재로,
+      현재 backend / CDK 코드 어디에서도 참조하지 않습니다.
       실제 프로브 주기는 config가 아니라 EventBridge 스케줄 정의가 결정합니다.
     </p>
   </div>
 
+  <h3>2.3 인프라 스택 8개</h3>
   <p>
-    인프라는 CDK v2 TypeScript 스택 8개로 관리됩니다. Network(VPC, NAT GW, PrivateLink 엔드포인트 9+1개),
-    Data(RDS, Secrets, SSM), Cluster(ECS 클러스터, ECR), AgentCore(챗봇 메모리), AppServices(Fargate 2개, ALB),
-    Edge(CloudFront, WAF), Scheduler(스케줄과 태스크 정의), Observability(알람 7개, 대시보드, SNS) 순으로
-    의존 관계를 따라 배포합니다. 재사용 L3 construct(<span class="mono">fargate-service.ts</span>,
+    인프라는 몇 개의 단위로 관리될까요? CDK v2 TypeScript 스택 8개입니다.
+    Network(VPC, NAT GW, PrivateLink 엔드포인트 9+1개), Data(RDS, Secrets, SSM), Cluster(ECS 클러스터, ECR),
+    AgentCore(챗봇 메모리), AppServices(Fargate 2개, ALB), Edge(CloudFront, WAF),
+    Scheduler(스케줄과 태스크 정의), Observability(알람 7개, 대시보드, SNS) 순으로 의존 관계를 따라 배포합니다.
+  </p>
+  <p>
+    재사용 L3 construct(<span class="mono">fargate-service.ts</span>,
     <span class="mono">pinned-image.ts</span>)가 서비스 정의를 공유합니다.
   </p>
 </section>
@@ -735,11 +776,21 @@ flowchart LR
 <section class="sec" id="s3">
   <h2><span class="no">03</span>측정 지표와 워크로드 프리셋</h2>
   <p>
+    이 절은 한 번의 측정에서 무엇을 어떤 조건으로 기록하는지 다룹니다.
+    모델에게 어떤 종류의 일을 시키느냐에 따라 성적이 달라지기 때문에, 일의 종류부터 정의합니다.
+  </p>
+  <p>
     프로브 한 사이클은 37개 채널 전체에 <strong>워크로드 카테고리 하나</strong>를 적용합니다.
-    카테고리는 6종이고 사이클마다 라운드로빈으로 회전하므로, 같은 카테고리는 30분(5분 × 6)마다 다시 측정됩니다.
+    카테고리는 6종이고 사이클마다 라운드로빈(정해진 순서대로 돌아가며 선택)으로 회전합니다.
+    그래서 같은 카테고리는 30분(5분 × 6)마다 다시 측정됩니다.
+  </p>
+  <p>
     정의는 <span class="mono">backend/auto_prober.py</span>의 <span class="mono">WORKLOAD_PRESETS</span>가
-    source of truth이고, 결과 행에는 <span class="mono">probe_results.category</span> 컬럼이 남아
+    source of truth입니다. 결과 행에는 <span class="mono">probe_results.category</span> 컬럼이 남아
     카테고리별 필터링이 가능합니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 6종 카테고리가 각각 어떤 사용 패턴을 흉내 내는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -760,11 +811,16 @@ flowchart LR
   </div>
 
   <p>
-    호출 하나에서 뽑는 지표는 여섯 가지입니다. TTFT(요청 &rarr; 첫 토큰, ms), Total Latency(요청 &rarr; 마지막 토큰,
-    클라이언트 측, ms), Server Latency(Bedrock이 보고하는 내부 처리 시간, 네트워크 오버헤드 제외, ms),
-    TPS(첫 토큰 이후 출력 처리량, tok/s), 입출력 토큰 수, 그리고 stop reason(<span class="mono">end_turn</span> /
-    <span class="mono">max_tokens</span> / <span class="mono">tool_use</span> 등 enum)입니다.
-    토큰 수는 <span class="mono">backend/pricing.py</span>의 모델별 단가 테이블과 결합해 30일 비용 예측의 입력이 됩니다.
+    호출 하나에서는 몇 가지를 기록할까요? 여섯 가지입니다.
+    TTFT(요청 &rarr; 첫 토큰, ms), Total Latency(요청 &rarr; 마지막 토큰, 클라이언트 측, ms),
+    Server Latency(Bedrock이 보고하는 내부 처리 시간, 네트워크 오버헤드 제외, ms),
+    TPS(첫 토큰 이후 출력 처리량, tok/s), 입출력 토큰 수, 그리고 stop reason(모델이 생성을 멈춘 이유,
+    <span class="mono">end_turn</span> / <span class="mono">max_tokens</span> /
+    <span class="mono">tool_use</span> 등 enum)입니다.
+  </p>
+  <p>
+    토큰 수는 <span class="mono">backend/pricing.py</span>의 모델별 단가 테이블과 결합합니다.
+    이것이 30일 비용 예측의 입력이 됩니다.
   </p>
   <p class="lead-def">
     <b>원칙:</b> 지연 지표를 클라이언트 관측(TTFT / Total)과 서버 보고(Server Latency)로 분리해 두면,
@@ -776,22 +832,38 @@ flowchart LR
 <section class="sec" id="s4">
   <h2><span class="no">04</span>패리티 스윕 딥다이브 - 실행 증거 판정</h2>
   <p>
+    이 절은 "이 채널이 이 기능을 지원하는가"를 어떻게 증명하는지 다룹니다.
+    호출이 성공했다는 사실만으로는 지원한다고 말할 수 없다는 것이 출발점입니다.
+  </p>
+  <p>
     패리티 런의 설계 질문은 "지원 여부를 무엇으로 판정하는가"였습니다. ADR-021의 답은
     HTTP 200은 판정 근거로 불충분하다는 것입니다. 파라미터가 조용히 무시되거나, 요청은 성공해도 기능이
-    실제로 동작하지 않는 경우가 흔하기 때문입니다. 그래서 <span class="mono">backend/parity/</span> 패키지는
-    실제 API를 호출한 뒤 <strong>응답 내용의 증거 검사</strong>를 통과했을 때만 supported로 판정합니다.
+    실제로 동작하지 않는 경우가 흔하기 때문입니다.
+  </p>
+  <p>
+    그래서 <span class="mono">backend/parity/</span> 패키지는 실제 API를 호출한 뒤
+    <strong>응답 내용의 증거 검사</strong>를 통과했을 때만 supported로 판정합니다.
   </p>
 
   <h3>4.1 매트릭스 크기와 증거 검사</h3>
   <p>
-    스윕 범위는 모델 × API surface 6종 × 피처 19종입니다. surface는 <span class="mono">converse</span>,
+    스윕 범위는 얼마나 넓을까요? 모델 × API surface 6종 × 피처 19종입니다.
+    API surface는 같은 모델을 호출하는 API의 종류를 말합니다.
+  </p>
+  <p>
+    surface는 <span class="mono">converse</span>,
     <span class="mono">invoke_model</span>, <span class="mono">messages</span>, <span class="mono">messages_mantle</span>,
-    <span class="mono">chat_completions</span>, <span class="mono">responses</span>이고(<span class="mono">catalog.py:SURFACES</span>),
+    <span class="mono">chat_completions</span>, <span class="mono">responses</span>입니다(<span class="mono">catalog.py:SURFACES</span>).
     피처는 basic / streaming / system_instructions / tool_use / structured_output / reasoning / caching /
     adaptive_thinking / count_tokens / batches / web_search / computer_use / reasoning_effort / json_schema /
     url_sources / memory_tool / code_execution / files_api / models_api 19종입니다.
-    ADR-021 초기 설계는 surface 5종 × 피처 7종이었고, ADR-022(Mantle Messages surface)와
-    ADR-023(피처 19종 확장)을 거쳐 현재 크기가 되었습니다.
+  </p>
+  <p>
+    ADR-021 초기 설계는 surface 5종 × 피처 7종이었습니다.
+    ADR-022(Mantle Messages surface)와 ADR-023(피처 19종 확장)을 거쳐 현재 크기가 되었습니다.
+  </p>
+  <p>
+    증거 검사는 다음 다섯 가지입니다. 여기서 카나리는 미리 심어둔 표식이 응답에 나타나는지 보는 검사 기법을 말합니다.
   </p>
   <ul class="plain">
     <li>도구 카나리 왕복 - 도구 정의를 보내고 모델이 실제로 그 도구를 호출하는지 확인합니다.</li>
@@ -802,11 +874,16 @@ flowchart LR
   </ul>
   <p>
     판정 로직은 <span class="mono">engine.py</span>의 순수 함수로 분리되어 단위 테스트 대상입니다.
-    결과는 supported / unsupported / broken / skipped 네 값으로 나뉩니다. 제공자가 "깨끗한 미지원 거부"
-    시그니처(<span class="mono">unsupported_parameter</span> 등)를 돌려주면 unsupported, 그 외 오류나 증거 실패는 broken,
-    해당 없음(비 reasoning 모델의 reasoning 피처 등)은 skipped입니다. skipped를 unsupported와 구분하는 것이
-    ADR-023이 말하는 "정직한 제외"입니다. run마다 결과와 함께 증거 JSON, 지연 시간, 오류가
-    <span class="mono">parity_runs</span> / <span class="mono">parity_results</span> 테이블에 남고,
+    결과는 supported / unsupported / broken / skipped 네 값으로 나뉩니다.
+  </p>
+  <p>
+    제공자가 "깨끗한 미지원 거부" 시그니처(<span class="mono">unsupported_parameter</span> 등)를 돌려주면 unsupported입니다.
+    그 외 오류나 증거 실패는 broken이고, 해당 없음(비 reasoning 모델의 reasoning 피처 등)은 skipped입니다.
+    skipped를 unsupported와 구분하는 것이 ADR-023이 말하는 "정직한 제외"입니다.
+  </p>
+  <p>
+    run마다 결과와 함께 증거 JSON, 지연 시간, 오류가
+    <span class="mono">parity_runs</span> / <span class="mono">parity_results</span> 테이블에 남습니다.
     <span class="mono">/parity</span> 화면에서 셀을 클릭하면 증거 모달로 원본을 확인할 수 있습니다.
   </p>
 
@@ -814,17 +891,23 @@ flowchart LR
     <span class="callout-title">주의 - Broken 판정은 프로브 결함일 수도 있습니다</span>
     <p>
       ADR-021이 스스로 기록한 사고입니다. 첫 실행에서 <span class="mono">max_tokens=64</span> 절단이
-      structured_output 전량을 false-Broken으로 만들었고, v2.11.1에서 피처별 토큰 예산(<span class="mono">max_tokens_for</span>)으로
-      수정되었습니다. Broken 셀은 증거의 response_snippet으로 프로브와 모델 어느 쪽 결함인지 확인한 뒤에 신뢰해야 합니다.
+      structured_output 전량을 false-Broken으로 만들었습니다.
+      v2.11.1에서 피처별 토큰 예산(<span class="mono">max_tokens_for</span>)으로 수정되었습니다.
+    </p>
+    <p>
+      Broken 셀은 증거의 response_snippet으로 프로브와 모델 어느 쪽 결함인지 확인한 뒤에 신뢰해야 합니다.
     </p>
   </div>
 
   <h3>4.2 멀티 채널 비교가 실제로 찾아낸 것</h3>
   <p>
-    같은 검사를 채널별로 돌리면 문서에 없는 격차가 드러납니다. ADR-021이 기록한 실측 발견은
+    같은 검사를 채널별로 돌리면 문서에 없는 격차가 드러납니다. ADR-021이 기록한 실측 발견은 세 가지입니다.
     Mantle ChatCompletions surface의 전면 미지원(Responses API만 동작), GPT 5.4의 reasoning_tokens 미보고,
-    Claude Fable 5 캐싱의 surface별 차이 등입니다. 비용 측면에서도 GPT 5.6 세대는 Bedrock in-region 가격이
-    OpenAI 1P와 동일(parity)하지만 5.4 / 5.5는 10% 마크업이 있다는 사실이 카탈로그에 반영되어 있습니다.
+    Claude Fable 5 캐싱의 surface별 차이입니다.
+  </p>
+  <p>
+    비용은 어떨까요? GPT 5.6 세대는 Bedrock in-region 가격이 OpenAI 1P와 동일(parity)합니다.
+    반면 5.4 / 5.5는 10% 마크업이 있다는 사실이 카탈로그에 반영되어 있습니다.
   </p>
 </section>
 
@@ -832,10 +915,16 @@ flowchart LR
 <section class="sec" id="s5">
   <h2><span class="no">05</span>분석 화면 9개</h2>
   <p>
+    이 절은 쌓인 데이터를 보는 화면들을 다룹니다. 목적별로 나뉜 9개 페이지가 하나의 대시보드를 이룹니다.
+  </p>
+  <p>
     frontend는 Next.js 14 standalone이고, 공용 헤더(<span class="mono">AppHeader.tsx</span>)가 9개 페이지를 묶습니다.
     README의 프로젝트 구조 절에는 "6 routes"라고 남아 있지만, 실제 <span class="mono">src/app/</span>에는
-    루트(/)와 챗봇 전용 <span class="mono">/chat</span>을 포함해 라우트는 10개(디렉터리 9개)이며 분석 화면은 9개입니다.
-    코드 기준으로 9개 페이지를 정리하면 다음과 같습니다.
+    루트(/)와 챗봇 전용 <span class="mono">/chat</span>을 포함해 라우트가 10개(디렉터리 9개) 있습니다.
+    그중 분석 화면이 9개입니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 각 화면의 경로와 그 화면이 답해 주는 질문입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -859,10 +948,14 @@ flowchart LR
   </div>
 
   <p>
-    화면 외 인터페이스로는 Claude Sonnet 4.6 기반 챗봇이 있습니다. 4개의 커스텀 도구로 시계열 저장소를 조회해
-    자연어 질문에 답하고, 대화 컨텍스트는 AgentCore Memory에 30일 보존됩니다. GPT on AWS 페이지의 벤치는
-    별도 방법론을 씁니다. 약 55.8k 토큰의 고정 캐시 프롬프트로 채널당 10회 순차 호출해
-    TTFB(첫 스트림 이벤트), TTFT(첫 텍스트 델타), GAP(둘의 차이, thinking 근사)을 median / p95로 집계합니다.
+    화면 외 인터페이스로는 Claude Sonnet 4.6 기반 챗봇이 있습니다.
+    4개의 커스텀 도구로 시계열 저장소를 조회해 자연어 질문에 답합니다.
+    대화 컨텍스트는 AgentCore Memory에 30일 보존됩니다.
+  </p>
+  <p>
+    GPT on AWS 페이지의 벤치는 별도 방법론을 씁니다.
+    약 55.8k 토큰의 고정 캐시 프롬프트로 채널당 10회 순차 호출합니다.
+    TTFB(첫 스트림 이벤트까지의 시간), TTFT(첫 텍스트 델타), GAP(둘의 차이, thinking 근사)을 median / p95로 집계합니다.
   </p>
 </section>
 
@@ -870,10 +963,19 @@ flowchart LR
 <section class="sec" id="s6">
   <h2><span class="no">06</span>실제 운영 흐름</h2>
   <p>
-    배포는 runbook(<span class="mono">docs/runbooks/deploy.md</span>)이 규정합니다. <span class="mono">make verify</span>
-    (CDK lint + typecheck + Jest 71개 + cdk-nag + ruff + pytest 91개 + frontend tsc)를 통과시킨 뒤,
-    arm64 컨테이너 이미지를 immutable tag(<span class="mono">v&lt;timestamp&gt;</span>)로 빌드해 ECR에 push하고,
-    CDK deploy에 이미지 URI를 <span class="mono">@sha256:&lt;digest&gt;</span>까지 고정해 넘깁니다.
+    이 절은 이 플랫폼을 실제로 배포하고 굴리는 방법을 다룹니다.
+    저장소가 직접 겪은 사고와 그 대응이 함께 기록되어 있어, 같은 함정을 피하는 데 쓸 수 있습니다.
+  </p>
+
+  <h3>6.1 배포 절차</h3>
+  <p>
+    배포는 runbook(<span class="mono">docs/runbooks/deploy.md</span>)이 규정합니다.
+    먼저 <span class="mono">make verify</span>(CDK lint + typecheck + Jest 71개 + cdk-nag + ruff + pytest 91개 + frontend tsc)를 통과시킵니다.
+  </p>
+  <p>
+    그다음 arm64 컨테이너 이미지를 immutable tag(한 번 붙이면 내용이 바뀌지 않는 태그,
+    <span class="mono">v&lt;timestamp&gt;</span>)로 빌드해 ECR에 push합니다.
+    CDK deploy에는 이미지 URI를 <span class="mono">@sha256:&lt;digest&gt;</span>까지 고정해 넘깁니다.
     frontend 이미지는 RUM 관련 <span class="mono">--build-arg</span>가 빌드 타임에 필요합니다.
   </p>
 
@@ -882,31 +984,49 @@ flowchart LR
     <p>
       이 저장소가 실제로 겪고 ADR-010 / ADR-018로 남긴 사고입니다. <span class="mono">:latest</span>로 push하면
       Docker layer dedupe와 ECS의 이미지 캐시가 겹쳐 <strong>새 코드가 반영되지 않은 채 배포가 성공한 것처럼 보입니다</strong>.
-      대응은 immutable tag + digest 고정이었고, 캐시가 이미 오염된 repository는 이름을 바꿔
+    </p>
+    <p>
+      대응은 immutable tag + digest 고정이었습니다. 캐시가 이미 오염된 repository는 이름을 바꿔
       (<span class="mono">bedrock-monitor-backend-v2</span>) 우회했습니다.
     </p>
   </div>
 
+  <h3>6.2 스케줄 잡의 조용한 실패</h3>
   <p>
     스케줄 잡의 조용한 실패도 runbook화되어 있습니다. EventBridge Scheduler role의 <span class="mono">ecs:RunTask</span>
-    Resource는 task definition family의 <span class="mono">:*</span> wildcard여야 합니다(ADR-011). revision 번호를
-    박으면 새 revision 배포 후 권한 거부로 silent fail이 나고, EventBridge 지표가 비어 있어 디버깅이 어렵습니다.
-    진단 표지는 <span class="mono">/api/auto-probe/status</span>의 <span class="mono">last_run_time</span>이
-    수 시간 전이거나, <span class="mono">/ecs/autoprober</span> 로그 그룹에 5분 내 엔트리가 없는 경우입니다.
+    Resource는 task definition family의 <span class="mono">:*</span> wildcard여야 합니다(ADR-011).
+    revision 번호를 박으면 새 revision 배포 후 권한 거부로 silent fail(오류 표시 없이 그냥 실행이 멈추는 실패)이 납니다.
   </p>
   <p>
+    이때는 EventBridge 지표가 비어 있어 디버깅이 어렵습니다. 진단 표지는 두 가지입니다.
+    <span class="mono">/api/auto-probe/status</span>의 <span class="mono">last_run_time</span>이 수 시간 전이거나,
+    <span class="mono">/ecs/autoprober</span> 로그 그룹에 5분 내 엔트리가 없는 경우입니다.
+  </p>
+
+  <h3>6.3 데이터 수명과 관측</h3>
+  <p>
     데이터 수명 관리는 <span class="mono">retention.py</span>가 맡습니다. <span class="mono">RETENTION_DAYS</span>(기본 60일)를
-    초과한 원본 <span class="mono">probe_results</span>는 시간 단위 집계 테이블로 이관됩니다. DB 마이그레이션은
-    backend 기동 시 lifespan에서 <span class="mono">pg_advisory_lock</span>과 statement_timeout 30초를 걸고
-    <span class="mono">ADD COLUMN IF NOT EXISTS</span>로만 수행해, 다중 태스크 동시 기동에도 멱등입니다.
+    초과한 원본 <span class="mono">probe_results</span>는 시간 단위 집계 테이블로 이관됩니다.
+  </p>
+  <p>
+    DB 마이그레이션은 backend 기동 시 lifespan에서 수행됩니다.
+    <span class="mono">pg_advisory_lock</span>과 statement_timeout 30초를 걸고
+    <span class="mono">ADD COLUMN IF NOT EXISTS</span>로만 수행합니다.
+    그래서 다중 태스크가 동시에 기동해도 멱등(여러 번 실행해도 결과가 같음)입니다.
+  </p>
+  <p>
     관측 계층은 CloudWatch 알람 7개(ALB 5xx / 지연, ECS 태스크 수, RDS CPU / 스토리지 / 커넥션)와
-    자체 호스팅 RUM(v2.16.5)으로 구성됩니다.
+    자체 호스팅 RUM(v2.16.5, 실제 사용자 브라우저에서 성능을 재는 계층)으로 구성됩니다.
   </p>
 </section>
 
 <!-- ===================== 07 ===================== -->
 <section class="sec" id="s7">
   <h2><span class="no">07</span>한계</h2>
+  <p>
+    이 절은 이 구조를 그대로 가져가기 전에 알아야 할 제약을 정리합니다.
+    다섯 가지 모두 설계가 의도한 트레이드오프이거나 코드에서 확인된 사실입니다.
+  </p>
   <ul class="plain">
     <li>측정 비용이 실비용입니다. 5분마다 37개 채널 실호출, 12시간마다 패리티 스윕(호출당 max_tokens 256~8,000 상한(기본 256, reasoning 2,048, adaptive_thinking 8,000), caching 피처는 2회 호출), 15분마다 GPT 벤치 80회(8채널 × 10회) 호출이 계속 과금됩니다.</li>
     <li>단일 리전 관측입니다. 프로브는 ap-northeast-2의 Fargate에서 나가므로, 다른 리전 사용자의 체감 지연과는 네트워크 경로가 다릅니다.</li>
@@ -920,16 +1040,26 @@ flowchart LR
 <section class="sec" id="s8">
   <h2><span class="no">08</span>결론</h2>
   <p>
+    마지막으로 이 프로젝트에서 가져갈 수 있는 것을 정리합니다.
+    한 문장으로 요약하면, 이 플랫폼은 37개 LLM 채널을 같은 조건으로 계속 호출해서 속도, 비용, 기능 지원을 데이터로 증명하는 시스템입니다.
+  </p>
+  <p>
     이 프로젝트가 보여주는 것은 LLM 관측을 애플리케이션 로그 수집이 아니라 <strong>능동 프로빙 문제</strong>로
-    정의한 설계입니다. 측정기를 서비스 프로세스에서 떼어내 EventBridge + 일회성 Fargate 태스크로 만들고,
+    정의한 설계입니다. 측정기를 서비스 프로세스에서 떼어내 EventBridge + 일회성 Fargate 태스크로 만들었습니다.
     채널 라벨 규약("Bedrock / Anthropic / OpenAI <span class="mono">family (channel)</span>")으로 37개 채널을
     한 좌표계에 올리고, 기능 지원 여부는 실행 증거로만 판정합니다.
   </p>
   <p>
-    비슷한 플랫폼을 만들려는 팀이 가져갈 순서는 다음과 같습니다. 1순위는 측정과 조회의 분리(스케줄러 &rarr; 일회성 태스크 &rarr; DB)입니다.
-    이것이 없으면 프로버 장애가 대시보드 장애가 됩니다. 2순위는 워크로드 프리셋 라운드로빈으로,
-    단일 프롬프트 측정이 만드는 착시를 줄입니다. 3순위가 패리티 스윕인데, 실행 증거 판정과 skipped / unsupported 구분
-    없이 만들면 매트릭스가 신뢰를 잃습니다. 운영 함정(immutable tag, Scheduler IAM wildcard)은
+    비슷한 플랫폼을 만들려는 팀이 가져갈 순서는 다음과 같습니다.
+    1순위는 측정과 조회의 분리(스케줄러 &rarr; 일회성 태스크 &rarr; DB)입니다.
+    이것이 없으면 프로버 장애가 대시보드 장애가 됩니다.
+  </p>
+  <p>
+    2순위는 워크로드 프리셋 라운드로빈입니다. 단일 프롬프트 측정이 만드는 착시를 줄입니다.
+    3순위가 패리티 스윕인데, 실행 증거 판정과 skipped / unsupported 구분 없이 만들면 매트릭스가 신뢰를 잃습니다.
+  </p>
+  <p>
+    운영 함정(immutable tag, Scheduler IAM wildcard)은
     이 저장소의 ADR을 먼저 읽는 것으로 상당 부분 피할 수 있습니다.
   </p>
 </section>
@@ -1014,9 +1144,10 @@ flowchart LR
   <p class="eyebrow">Observability / Platform Deep Dive</p>
   <h1>Amazon Bedrock LLM Monitor - Architecture Analysis of an Always-On Measurement Platform for 37 LLM Channels</h1>
   <p class="subtitle">
-    A code-level analysis of the model-monitoring project (v2.19.2) - its probe pipeline, parity sweep mechanism,
-    and operations - which compares Bedrock inference profiles, Anthropic Claude Platform on AWS, and
-    OpenAI GPT via Bedrock Mantle on a single screen.
+    The same model becomes faster, cheaper, or less capable depending on which path you call it through.
+    This is a code-level analysis of the model-monitoring project (v2.19.2) - its probe pipeline, parity sweep
+    mechanism, and operations - which compares Bedrock inference profiles, Anthropic Claude Platform on AWS,
+    and OpenAI GPT via Bedrock Mantle on a single screen.
   </p>
 
   <div class="meta">
@@ -1031,10 +1162,10 @@ flowchart LR
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>Fact - the platform continuously probes <strong>37 active LLM channels</strong> (17 Bedrock, 7 Anthropic CP on AWS, 13 OpenAI Mantle) with Fargate tasks that EventBridge Scheduler launches every 5 minutes, and stores the results in RDS PostgreSQL 16.</li>
-    <li>Mechanism - feature support is judged not by HTTP 200 but by <strong>execution evidence</strong> (tool canary round-trips, JSON validity, cached-token counts, stream deltas). A parity sweep across 6 API surfaces × 19 features every 12 hours backs this up.</li>
-    <li>Exposure - the same model family is called in parallel through the Bedrock Global / Bedrock US / Anthropic CP / OpenAI Mantle channels, so TTFT / TPS / cost differences by channel choice are captured directly as data.</li>
-    <li>Takeaway - if you want to decide "which model rides which channel" in multi-channel LLM operations from time-series measurements rather than gut feeling, this structure (scheduler separation + execution-evidence verdicts + a channel label convention) can be adopted as-is.</li>
+    <li>Fact - the platform automatically calls <strong>37 active LLM channels</strong> (17 Bedrock, 7 Anthropic CP on AWS, 13 OpenAI Mantle) every 5 minutes to take their pulse. The calls run in Fargate tasks launched by EventBridge Scheduler, and the results accumulate in RDS PostgreSQL 16.</li>
+    <li>Mechanism - "does this feature work" is judged not by a successful call (HTTP 200) but by <strong>execution evidence</strong>. Every 12 hours, a parity sweep across 6 API surfaces × 19 features checks whether the model really called the tool, the JSON is really valid, cached tokens are really counted, and stream chunks really arrive.</li>
+    <li>Exposure - the same model family is called in parallel through four channels: Bedrock Global / Bedrock US / Anthropic CP / OpenAI Mantle. So the differences in first-response speed (TTFT), throughput (TPS), and cost by channel choice are captured directly as data.</li>
+    <li>Takeaway - if your team wants to decide "which model rides which channel" from measured data rather than gut feeling, this structure (scheduler separation, execution-evidence verdicts, a channel label convention) can be adopted as-is.</li>
   </ul>
 </section>
 
@@ -1060,25 +1191,41 @@ flowchart LR
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Problem definition - what is measured and why</h2>
   <p>
-    Even the same Claude model becomes a different service depending on the invocation path. The four paths -
+    This section lays out the problem the project tries to solve.
+    The core question is why the same model has to be called through several paths and measured continuously.
+  </p>
+  <p>
+    Even the same Claude model becomes a different service depending on the invocation path. There are four paths:
     Bedrock Global inference profiles (<span class="mono">global.*</span>), Bedrock US profiles (<span class="mono">us.*</span>),
-    Anthropic Claude Platform on AWS (vendor-hosted endpoint), and OpenAI GPT via Bedrock Mantle - each differ in
-    TTFT, throughput, pricing, and supported features, and those differences keep shifting with regional conditions
-    and model versions. The project starts from the premise that an operator deciding "which channel should carry
-    this workload" needs <strong>parallel measurement under identical conditions</strong>.
+    Anthropic Claude Platform on AWS (an endpoint hosted by the vendor itself), and OpenAI GPT via Bedrock Mantle.
+    An inference profile is a Bedrock invocation path that spreads requests across multiple regions.
+  </p>
+  <p>
+    Each path differs in TTFT (the time until the first token arrives after a request), throughput, pricing,
+    and supported features. Those differences keep shifting with regional conditions and model versions.
+    That is why an operator deciding "which channel should carry this workload" needs
+    <strong>parallel measurement under identical conditions</strong> - the project's starting premise.
   </p>
   <p>
     The second problem is the feature support matrix. Provider documentation does not spell out every per-channel
-    difference in whether a model supports tool use / caching / structured output on a given API surface, and
-    parameters are sometimes silently ignored. ADR-021 records that the manual screenshot-proof approach used
-    through v2.10.0 became unsustainable as the catalog grew. That is why a parity run was added that proves
-    support by actually executing it on a schedule.
+    difference in whether a model supports tool use (the model calling external tools), caching (storing repeated
+    input for reuse), or structured output (forcing answers into a fixed JSON shape). Parameters are also sometimes
+    silently ignored.
   </p>
   <p>
-    The number of measured channels was adjusted from 42 to 37 in v2.19.1. The OpenAI 1P direct path (Path 5,
-    5 channels) was hidden from exposure by user decision while preserving the code and DB rows, implemented as a
-    triple switch (CDK <span class="mono">ENABLE_OPENAI_1P=false</span>, the backend <span class="mono">visibility.py</span>
+    ADR-021 (an architecture decision record in the repository) notes that the manual screenshot-proof approach
+    used through v2.10.0 became unsustainable as the catalog grew.
+    That is why a parity run was added that proves support by actually executing it on a schedule.
+  </p>
+  <p>
+    So how many channels are measured? The number was adjusted from 42 to 37 in v2.19.1.
+    The OpenAI 1P direct path (Path 5, 5 channels) was hidden from the screens by user decision.
+    The code and DB rows were preserved, and only the exposure was turned off via a triple switch
+    (CDK <span class="mono">ENABLE_OPENAI_1P=false</span>, the backend <span class="mono">visibility.py</span>
     query filter, and the frontend <span class="mono">EXCLUDED_FAMILIES</span>).
+  </p>
+  <p>
+    What to look for in the table below is how the 37 channels split across the delivery paths.
   </p>
 
   <div class="tbl-wrap">
@@ -1101,19 +1248,34 @@ flowchart LR
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>Architecture - the probe pipeline and 8 CDK stacks</h2>
   <p>
-    The serving path is CloudFront VPC Origin &rarr; internal ALB (HTTPS:443) &rarr; two ECS Fargate services
+    This section covers how the system is put together.
+    The key point is that the part that measures and the part that displays are completely separate.
+  </p>
+
+  <h3>2.1 The serving path</h3>
+  <p>
+    The path a user takes to open the dashboard is:
+    CloudFront VPC Origin &rarr; internal ALB (HTTPS:443) &rarr; two ECS Fargate services
     (FastAPI backend, Next.js standalone frontend) &rarr; RDS PostgreSQL 16 (t4g.micro, Single-AZ).
-    Wrapping the ALB behind a CloudFront VPC Origin instead of exposing it to the internet is the decision of
-    ADR-001, and all external ingress is HTTPS-only. The deployment region is ap-northeast-2 (Seoul).
+    Fargate is an AWS service that runs containers without you managing servers.
   </p>
   <p>
+    Wrapping the ALB behind a CloudFront VPC Origin instead of exposing it to the internet is the decision of
+    ADR-001. All external ingress is HTTPS-only. The deployment region is ap-northeast-2 (Seoul).
+  </p>
+
+  <h3>2.2 The measurement pipeline</h3>
+  <p>
     The measurement pipeline is completely separated from the serving path. In v1 the auto-prober was a daemon
-    thread inside the backend process; in v2 it became a structure where EventBridge Scheduler launches a
-    <strong>one-shot Fargate task</strong> via RunTask on each period (ADR-003). The backend's
-    <span class="mono">auto_prober.py</span> exports only the <span class="mono">run_cycle()</span> function, and
-    <span class="mono">auto_prober_runner.py</span> owns the CLI entrypoint (<span class="mono">--once</span>).
-    The probe status API also uses the most recent <span class="mono">ProbeRun</span> row in the DB as the source
-    of truth rather than in-process state.
+    thread inside the backend process. In v2, EventBridge Scheduler (an AWS scheduler that runs jobs at fixed
+    intervals) launches a <strong>one-shot Fargate task</strong> via RunTask on each period (ADR-003).
+  </p>
+  <p>
+    The code follows this separation. The backend's <span class="mono">auto_prober.py</span> exports only the
+    <span class="mono">run_cycle()</span> function, and <span class="mono">auto_prober_runner.py</span> owns the
+    CLI entrypoint (<span class="mono">--once</span>). The probe status API also uses the most recent
+    <span class="mono">ProbeRun</span> row in the DB as the source of truth (the single authoritative record)
+    rather than in-process state.
   </p>
 
   <figure class="diagram">
@@ -1141,6 +1303,10 @@ flowchart LR
     </figcaption>
   </figure>
 
+  <p>
+    What to look for in the table below is the cadence of the four schedules and the job each task owns.
+  </p>
+
   <div class="tbl-wrap">
     <table>
       <caption>Table 2. The four EventBridge schedules (per cdk/lib/stacks/scheduler-stack.ts)</caption>
@@ -1159,18 +1325,24 @@ flowchart LR
   <div class="callout note">
     <span class="callout-title">Note - where docs and code disagree, this document follows the code</span>
     <p>
-      docs/architecture.md describes three EventBridge schedules, but <span class="mono">scheduler-stack.ts</span>
-      defines four, including GptBench added in v2.18.0. Also, <span class="mono">config.yaml</span> at the
-      repository root (4 models, SQLite, us-east-1) is a v1 leftover that no current backend / CDK code references.
+      docs/architecture.md describes three EventBridge schedules. However, <span class="mono">scheduler-stack.ts</span>
+      defines four, including GptBench added in v2.18.0.
+    </p>
+    <p>
+      Also, <span class="mono">config.yaml</span> at the repository root (4 models, SQLite, us-east-1) is a v1
+      leftover that no current backend / CDK code references.
       The actual probe cadence is determined by the EventBridge schedule definitions, not by config.
     </p>
   </div>
 
+  <h3>2.3 The 8 infrastructure stacks</h3>
   <p>
-    The infrastructure is managed as eight CDK v2 TypeScript stacks, deployed in dependency order:
+    How many units is the infrastructure managed as? Eight CDK v2 TypeScript stacks, deployed in dependency order:
     Network (VPC, NAT GW, 9+1 PrivateLink endpoints), Data (RDS, Secrets, SSM), Cluster (ECS cluster, ECR),
     AgentCore (chatbot memory), AppServices (2 Fargate services, ALB), Edge (CloudFront, WAF),
     Scheduler (schedules and task definitions), and Observability (7 alarms, dashboard, SNS).
+  </p>
+  <p>
     Reusable L3 constructs (<span class="mono">fargate-service.ts</span>, <span class="mono">pinned-image.ts</span>)
     share the service definitions.
   </p>
@@ -1180,11 +1352,21 @@ flowchart LR
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Metrics and workload presets</h2>
   <p>
-    A single probe cycle applies <strong>one workload category</strong> to all 37 channels. There are six
-    categories rotated round-robin per cycle, so the same category is measured again every 30 minutes (5 min × 6).
+    This section covers what a single measurement records and under what conditions.
+    A model's score depends on what kind of work you give it, so the kinds of work are defined first.
+  </p>
+  <p>
+    A single probe cycle applies <strong>one workload category</strong> to all 37 channels.
+    There are six categories, rotated round-robin (picked in a fixed repeating order) per cycle.
+    So the same category is measured again every 30 minutes (5 min × 6).
+  </p>
+  <p>
     The definitions live in <span class="mono">WORKLOAD_PRESETS</span> in <span class="mono">backend/auto_prober.py</span>
-    as the source of truth, and each result row carries a <span class="mono">probe_results.category</span> column,
+    as the source of truth. Each result row carries a <span class="mono">probe_results.category</span> column,
     enabling per-category filtering.
+  </p>
+  <p>
+    What to look for in the table below is which usage pattern each of the six categories imitates.
   </p>
 
   <div class="tbl-wrap">
@@ -1205,12 +1387,15 @@ flowchart LR
   </div>
 
   <p>
-    Six metrics are extracted from each call: TTFT (request &rarr; first token, ms), Total Latency
+    How many things are recorded per call? Six: TTFT (request &rarr; first token, ms), Total Latency
     (request &rarr; last token, client-side, ms), Server Latency (Bedrock-reported internal processing time
     excluding network overhead, ms), TPS (output throughput after the first token, tok/s), input/output token
-    counts, and stop reason (an enum such as <span class="mono">end_turn</span> / <span class="mono">max_tokens</span> /
-    <span class="mono">tool_use</span>). Token counts combine with the per-model price table in
-    <span class="mono">backend/pricing.py</span> as input to the 30-day cost projection.
+    counts, and stop reason (why the model stopped generating - an enum such as <span class="mono">end_turn</span> /
+    <span class="mono">max_tokens</span> / <span class="mono">tool_use</span>).
+  </p>
+  <p>
+    Token counts combine with the per-model price table in <span class="mono">backend/pricing.py</span>.
+    That is the input to the 30-day cost projection.
   </p>
   <p class="lead-def">
     <b>Principle:</b> keeping latency metrics split into client-side observations (TTFT / Total) and
@@ -1223,23 +1408,39 @@ flowchart LR
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Parity sweep deep dive - execution-evidence verdicts</h2>
   <p>
+    This section covers how the platform proves that "this channel supports this feature".
+    The starting point is that a successful call alone does not prove support.
+  </p>
+  <p>
     The design question for the parity run was "what counts as proof of support". ADR-021's answer is that
-    HTTP 200 is insufficient as a verdict basis: parameters are often silently ignored, and a request can succeed
-    while the feature does not actually work. So the <span class="mono">backend/parity/</span> package calls the
-    real API and marks a feature as supported only when the response passes an
-    <strong>evidence check of its content</strong>.
+    HTTP 200 is insufficient as a verdict basis. Parameters are often silently ignored, and a request can succeed
+    while the feature does not actually work.
+  </p>
+  <p>
+    So the <span class="mono">backend/parity/</span> package calls the real API and marks a feature as supported
+    only when the response passes an <strong>evidence check of its content</strong>.
   </p>
 
   <h3>4.1 Matrix size and evidence checks</h3>
   <p>
-    The sweep spans model × 6 API surfaces × 19 features. The surfaces are <span class="mono">converse</span>,
+    How wide is the sweep? Model × 6 API surfaces × 19 features.
+    An API surface is one of the kinds of API through which the same model can be called.
+  </p>
+  <p>
+    The surfaces are <span class="mono">converse</span>,
     <span class="mono">invoke_model</span>, <span class="mono">messages</span>, <span class="mono">messages_mantle</span>,
-    <span class="mono">chat_completions</span>, and <span class="mono">responses</span> (<span class="mono">catalog.py:SURFACES</span>),
-    and the 19 features are basic / streaming / system_instructions / tool_use / structured_output / reasoning /
+    <span class="mono">chat_completions</span>, and <span class="mono">responses</span> (<span class="mono">catalog.py:SURFACES</span>).
+    The 19 features are basic / streaming / system_instructions / tool_use / structured_output / reasoning /
     caching / adaptive_thinking / count_tokens / batches / web_search / computer_use / reasoning_effort /
     json_schema / url_sources / memory_tool / code_execution / files_api / models_api.
-    The initial ADR-021 design was 5 surfaces × 7 features; it reached the current size through ADR-022
-    (the Mantle Messages surface) and ADR-023 (the 19-feature expansion).
+  </p>
+  <p>
+    The initial ADR-021 design was 5 surfaces × 7 features.
+    It reached the current size through ADR-022 (the Mantle Messages surface) and ADR-023 (the 19-feature expansion).
+  </p>
+  <p>
+    There are five evidence checks. A canary here is a check technique that plants a marker and looks for it
+    in the response.
   </p>
   <ul class="plain">
     <li>Tool canary round-trip - sends a tool definition and verifies the model actually calls that tool.</li>
@@ -1250,32 +1451,44 @@ flowchart LR
   </ul>
   <p>
     The verdict logic is isolated as pure functions in <span class="mono">engine.py</span> and is unit-tested.
-    Results take one of four values: supported / unsupported / broken / skipped. If the provider returns a
-    "clean unsupported rejection" signature (<span class="mono">unsupported_parameter</span> etc.) the verdict is
-    unsupported; other errors or evidence failures are broken; not-applicable cases (such as the reasoning feature
-    on a non-reasoning model) are skipped. Distinguishing skipped from unsupported is what ADR-023 calls
-    "honest exclusion". Each run stores the verdicts along with evidence JSON, latency, and errors in the
-    <span class="mono">parity_runs</span> / <span class="mono">parity_results</span> tables, and clicking a cell
-    on the <span class="mono">/parity</span> screen opens an evidence modal with the raw material.
+    Results take one of four values: supported / unsupported / broken / skipped.
+  </p>
+  <p>
+    If the provider returns a "clean unsupported rejection" signature
+    (<span class="mono">unsupported_parameter</span> etc.) the verdict is unsupported.
+    Other errors or evidence failures are broken, and not-applicable cases (such as the reasoning feature on a
+    non-reasoning model) are skipped. Distinguishing skipped from unsupported is what ADR-023 calls
+    "honest exclusion".
+  </p>
+  <p>
+    Each run stores the verdicts along with evidence JSON, latency, and errors in the
+    <span class="mono">parity_runs</span> / <span class="mono">parity_results</span> tables.
+    Clicking a cell on the <span class="mono">/parity</span> screen opens an evidence modal with the raw material.
   </p>
 
   <div class="callout warn">
     <span class="callout-title">Caution - a Broken verdict may be a probe defect</span>
     <p>
       An incident ADR-021 records about itself: on the first run, <span class="mono">max_tokens=64</span> truncation
-      turned every structured_output check into a false Broken, fixed in v2.11.1 with per-feature token budgets
-      (<span class="mono">max_tokens_for</span>). Before trusting a Broken cell, check the response_snippet in the
-      evidence to determine whether the defect is in the probe or the model.
+      turned every structured_output check into a false Broken.
+      It was fixed in v2.11.1 with per-feature token budgets (<span class="mono">max_tokens_for</span>).
+    </p>
+    <p>
+      Before trusting a Broken cell, check the response_snippet in the evidence to determine whether the defect
+      is in the probe or the model.
     </p>
   </div>
 
   <h3>4.2 What multi-channel comparison actually found</h3>
   <p>
-    Running the same checks per channel reveals gaps the documentation does not mention. Measured findings recorded
-    in ADR-021 include the Mantle ChatCompletions surface being entirely unsupported (only the Responses API works),
-    GPT 5.4 not reporting reasoning_tokens, and per-surface differences in Claude Fable 5 caching. On the cost
-    side, the catalog reflects that the GPT 5.6 generation has Bedrock in-region price parity with OpenAI 1P,
-    while 5.4 / 5.5 carry a 10% markup.
+    Running the same checks per channel reveals gaps the documentation does not mention.
+    ADR-021 records three measured findings: the Mantle ChatCompletions surface being entirely unsupported
+    (only the Responses API works), GPT 5.4 not reporting reasoning_tokens, and per-surface differences in
+    Claude Fable 5 caching.
+  </p>
+  <p>
+    What about cost? The catalog reflects that the GPT 5.6 generation has Bedrock in-region price parity with
+    OpenAI 1P, while 5.4 / 5.5 carry a 10% markup.
   </p>
 </section>
 
@@ -1283,10 +1496,17 @@ flowchart LR
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>The 9 analysis screens</h2>
   <p>
+    This section covers the screens for reading the accumulated data.
+    Nine pages, split by purpose, make up one dashboard.
+  </p>
+  <p>
     The frontend is Next.js 14 standalone, and a shared header (<span class="mono">AppHeader.tsx</span>) ties the
     9 pages together. The project-structure section of the README still says "6 routes", but the actual
     <span class="mono">src/app/</span> holds 10 routes (9 directories) including the root (/) and the chatbot-only
-    <span class="mono">/chat</span>, of which 9 are analysis screens. Based on the code, the 9 pages are:
+    <span class="mono">/chat</span>. Of those, 9 are analysis screens.
+  </p>
+  <p>
+    What to look for in the table below is each screen's path and the question that screen answers.
   </p>
 
   <div class="tbl-wrap">
@@ -1310,11 +1530,15 @@ flowchart LR
   </div>
 
   <p>
-    Beyond the screens there is a chatbot built on Claude Sonnet 4.6. It answers natural-language questions by
-    querying the time-series store through 4 custom tools, and conversation context is retained in AgentCore
-    Memory for 30 days. The bench on the GPT on AWS page uses a separate methodology: a fixed cached prompt of
-    about 55.8k tokens is called 10 times sequentially per channel, aggregating TTFB (first stream event),
-    TTFT (first text delta), and GAP (their difference, a thinking approximation) as median / p95.
+    Beyond the screens there is a chatbot built on Claude Sonnet 4.6.
+    It answers natural-language questions by querying the time-series store through 4 custom tools.
+    Conversation context is retained in AgentCore Memory for 30 days.
+  </p>
+  <p>
+    The bench on the GPT on AWS page uses a separate methodology.
+    A fixed cached prompt of about 55.8k tokens is called 10 times sequentially per channel.
+    It aggregates TTFB (the time to the first stream event), TTFT (first text delta), and GAP (their difference,
+    a thinking approximation) as median / p95.
   </p>
 </section>
 
@@ -1322,12 +1546,22 @@ flowchart LR
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Operations in practice</h2>
   <p>
-    Deployment is governed by the runbook (<span class="mono">docs/runbooks/deploy.md</span>). After passing
-    <span class="mono">make verify</span> (CDK lint + typecheck + 71 Jest tests + cdk-nag + ruff + 91 pytest tests +
-    frontend tsc), an arm64 container image is built with an immutable tag (<span class="mono">v&lt;timestamp&gt;</span>),
-    pushed to ECR, and the image URI is passed to CDK deploy pinned all the way down to
-    <span class="mono">@sha256:&lt;digest&gt;</span>. The frontend image requires RUM-related
-    <span class="mono">--build-arg</span> values at build time.
+    This section covers how the platform is actually deployed and run.
+    The incidents the repository hit and the responses are recorded together, so they can be used to avoid the
+    same traps.
+  </p>
+
+  <h3>6.1 Deployment procedure</h3>
+  <p>
+    Deployment is governed by the runbook (<span class="mono">docs/runbooks/deploy.md</span>).
+    First, <span class="mono">make verify</span> (CDK lint + typecheck + 71 Jest tests + cdk-nag + ruff +
+    91 pytest tests + frontend tsc) must pass.
+  </p>
+  <p>
+    Then an arm64 container image is built with an immutable tag (a tag whose content never changes once assigned,
+    <span class="mono">v&lt;timestamp&gt;</span>) and pushed to ECR.
+    The image URI is passed to CDK deploy pinned all the way down to <span class="mono">@sha256:&lt;digest&gt;</span>.
+    The frontend image requires RUM-related <span class="mono">--build-arg</span> values at build time.
   </p>
 
   <div class="callout warn">
@@ -1335,33 +1569,51 @@ flowchart LR
     <p>
       An incident this repository actually hit and recorded as ADR-010 / ADR-018. Pushing as
       <span class="mono">:latest</span> lets Docker layer dedupe and the ECS image cache combine so that
-      <strong>a deployment looks successful while the new code was never picked up</strong>. The response was
-      immutable tags + digest pinning, and a repository whose cache was already poisoned was worked around by
-      renaming it (<span class="mono">bedrock-monitor-backend-v2</span>).
+      <strong>a deployment looks successful while the new code was never picked up</strong>.
+    </p>
+    <p>
+      The response was immutable tags + digest pinning. A repository whose cache was already poisoned was worked
+      around by renaming it (<span class="mono">bedrock-monitor-backend-v2</span>).
     </p>
   </div>
 
+  <h3>6.2 Silent failures of scheduled jobs</h3>
   <p>
     Silent failures of scheduled jobs are runbooked as well. The <span class="mono">ecs:RunTask</span> Resource in
     the EventBridge Scheduler role must be a <span class="mono">:*</span> wildcard on the task definition family
-    (ADR-011). Pinning a revision number causes a permission denial and a silent fail after the next revision is
-    deployed, and empty EventBridge metrics make it hard to debug. The diagnostic markers are
+    (ADR-011). Pinning a revision number causes a permission denial after the next revision is deployed, and the
+    job silently fails - it just stops running with no error shown.
+  </p>
+  <p>
+    Empty EventBridge metrics then make it hard to debug. There are two diagnostic markers:
     <span class="mono">last_run_time</span> in <span class="mono">/api/auto-probe/status</span> being hours old,
     or the <span class="mono">/ecs/autoprober</span> log group having no entries within 5 minutes.
   </p>
+
+  <h3>6.3 Data lifecycle and observability</h3>
   <p>
     Data lifecycle is handled by <span class="mono">retention.py</span>. Raw <span class="mono">probe_results</span>
     older than <span class="mono">RETENTION_DAYS</span> (default 60 days) are migrated into hourly aggregate tables.
-    DB migrations run at backend startup in the lifespan, holding <span class="mono">pg_advisory_lock</span> with a
-    30-second statement_timeout and using only <span class="mono">ADD COLUMN IF NOT EXISTS</span>, so they stay
-    idempotent even when multiple tasks start concurrently. The observability layer consists of 7 CloudWatch alarms
-    (ALB 5xx / latency, ECS task count, RDS CPU / storage / connections) and self-hosted RUM (v2.16.5).
+  </p>
+  <p>
+    DB migrations run at backend startup in the lifespan. They hold <span class="mono">pg_advisory_lock</span> with
+    a 30-second statement_timeout and use only <span class="mono">ADD COLUMN IF NOT EXISTS</span>.
+    So they stay idempotent (safe to run more than once) even when multiple tasks start concurrently.
+  </p>
+  <p>
+    The observability layer consists of 7 CloudWatch alarms
+    (ALB 5xx / latency, ECS task count, RDS CPU / storage / connections) and self-hosted RUM
+    (v2.16.5, a layer that measures performance in real users' browsers).
   </p>
 </section>
 
 <!-- ===================== 07 (EN) ===================== -->
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Limitations</h2>
+  <p>
+    This section lists the constraints to know before adopting this structure as-is.
+    All five are either trade-offs the design intended or facts verified in the code.
+  </p>
   <ul class="plain">
     <li>Measurement cost is real spend. Real calls to 37 channels every 5 minutes, a parity sweep every 12 hours (max_tokens capped at 256~8,000 per call (default 256, reasoning 2,048, adaptive_thinking 8,000); the caching feature makes 2 calls), and 80 GPT bench calls (8 channels × 10) every 15 minutes keep accruing charges.</li>
     <li>It is single-region observation. Probes originate from Fargate in ap-northeast-2, so the network path differs from the latency perceived by users in other regions.</li>
@@ -1375,19 +1627,31 @@ flowchart LR
 <section class="sec" id="s8-en">
   <h2><span class="no">08</span>Conclusion</h2>
   <p>
-    What this project demonstrates is a design that frames LLM observability as an
-    <strong>active probing problem</strong> rather than application log collection. It detaches the measuring
-    instrument from the serving process into EventBridge + one-shot Fargate tasks, puts 37 channels onto one
-    coordinate system with a channel label convention ("Bedrock / Anthropic / OpenAI
-    <span class="mono">family (channel)</span>"), and judges feature support only by execution evidence.
+    Finally, here is what you can take away from this project.
+    In one sentence, this platform keeps calling 37 LLM channels under identical conditions and proves speed,
+    cost, and feature support with data.
   </p>
   <p>
-    For a team building a similar platform, the order of adoption is as follows. First comes the separation of
-    measurement and reads (scheduler &rarr; one-shot task &rarr; DB); without it, a prober failure becomes a
-    dashboard failure. Second is workload preset round-robin, which reduces the illusion created by single-prompt
-    measurement. Third is the parity sweep - built without execution-evidence verdicts and the skipped /
-    unsupported distinction, the matrix loses trust. The operational traps (immutable tags, the Scheduler IAM
-    wildcard) can largely be avoided by reading this repository's ADRs first.
+    What this project demonstrates is a design that frames LLM observability as an
+    <strong>active probing problem</strong> rather than application log collection. It detaches the measuring
+    instrument from the serving process into EventBridge + one-shot Fargate tasks.
+    It puts 37 channels onto one coordinate system with a channel label convention
+    ("Bedrock / Anthropic / OpenAI <span class="mono">family (channel)</span>") and judges feature support only
+    by execution evidence.
+  </p>
+  <p>
+    For a team building a similar platform, the order of adoption is as follows.
+    First comes the separation of measurement and reads (scheduler &rarr; one-shot task &rarr; DB).
+    Without it, a prober failure becomes a dashboard failure.
+  </p>
+  <p>
+    Second is workload preset round-robin. It reduces the illusion created by single-prompt measurement.
+    Third is the parity sweep - built without execution-evidence verdicts and the skipped / unsupported
+    distinction, the matrix loses trust.
+  </p>
+  <p>
+    The operational traps (immutable tags, the Scheduler IAM wildcard) can largely be avoided by reading this
+    repository's ADRs first.
   </p>
 </section>
 

@@ -599,10 +599,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>MCP 서버를 로딩하면 모든 도구의 JSON Schema가 LLM 컨텍스트에 주입됩니다. 도구당 약 2,000토큰이 들어가고, 67개 AWS MCP 서버의 792개 도구를 전부 로딩하면 도구 정의만으로 <strong>약 1,584,000토큰(약 150만)</strong>이 소모됩니다.</li>
-    <li>MCP Tool Forge는 MCP 도구를 한 번 추출해 boto3, AWS CLI, OpenAPI 스키마, AgentCore Gateway, Skill 5가지 네이티브 형식으로 변환합니다. 변환된 코드는 MCP 서버 없이 직접 실행되므로 <strong>도구 정의 토큰과 호출 왕복 토큰이 모두 0</strong>이 됩니다.</li>
-    <li>Kiro-CLI 실측에서 MCP 서버 4개를 켠 대화는 0.71 credits, Skills만 쓴 대화는 0.27 credits로 <strong>62% 절감</strong>되었고, Claude Opus 4.6 입력 단가 기준 토큰 비용은 95% 이상 절감됩니다.</li>
-    <li>함께 제공되는 9개 AWS Skills는 <span class="mono">git clone</span> 후 복사 3줄로 설치되며, MCP 서버 / Python 패키지 / Bedrock 접근 없이 AWS 자격 증명만으로 동작합니다. 실제 AWS 계정 테스트 <strong>17/17 통과</strong>입니다.</li>
+    <li>MCP 서버를 켜두면 쓰지 않는 도구의 설명까지 매 대화에 실리고, 설명 하나가 약 2,000토큰입니다. 67개 AWS MCP 서버의 도구 792개를 전부 로딩하면 도구 정의만으로 <strong>약 1,584,000토큰(약 150만)</strong>이 소모됩니다.</li>
+    <li>MCP Tool Forge는 MCP 도구를 한 번만 추출해 boto3, AWS CLI, OpenAPI 스키마, AgentCore Gateway, Skill 5가지 형식의 실행 코드로 바꿉니다. 변환된 코드는 MCP 서버 없이 바로 실행되므로 <strong>도구 정의 토큰과 호출 왕복 토큰이 모두 0</strong>이 됩니다.</li>
+    <li>Kiro-CLI 실측에서 같은 작업이 MCP 서버 4개를 켜면 0.71 credits, Skills만 쓰면 0.27 credits로 <strong>62% 절감</strong>되었습니다. Claude Opus 4.6 입력 단가로 환산하면 토큰 비용은 95% 이상 줄어듭니다.</li>
+    <li>함께 제공되는 9개 AWS Skills는 <span class="mono">git clone</span> 후 복사 3줄로 설치가 끝납니다. MCP 서버, Python 패키지, Bedrock 접근 없이 AWS 자격 증명만으로 동작하며, 실제 AWS 계정 테스트를 <strong>17/17 통과</strong>했습니다.</li>
   </ul>
 </section>
 
@@ -627,35 +627,58 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="sec" id="s1">
   <h2><span class="no">01</span>개요 - MCP Tool Forge란</h2>
   <p>
-    <a href="https://github.com/whchoi98/mcp-tool-forge">MCP Tool Forge</a>는 MCP(Model Context Protocol)
-    서버의 도구(Tool)를 추출하여 <strong>boto3, AWS CLI, OpenAPI 스키마(Schema), AgentCore Gateway,
-    Claude Code / Kiro-CLI Skill</strong> 5가지 형식으로 변환하는 Python CLI 도구입니다.
+    이 절에서는 MCP Tool Forge가 어떤 도구이고 왜 만들어졌는지 소개합니다.
+    핵심은 하나입니다. AI가 쓰는 도구를 서버 없이 돌아가는 코드로 바꾸는 것입니다.
+  </p>
+  <p>
+    <a href="https://github.com/whchoi98/mcp-tool-forge">MCP Tool Forge</a>는
+    MCP(Model Context Protocol, AI 에이전트가 외부 도구를 호출하게 해주는 표준 프로토콜)
+    서버의 도구(Tool)를 추출하는 Python CLI 도구입니다.
+    추출한 도구는 <strong>boto3, AWS CLI, OpenAPI 스키마(Schema), AgentCore Gateway,
+    Claude Code / Kiro-CLI Skill</strong> 5가지 형식으로 변환됩니다.
     바로 설치해 쓸 수 있는 9개 AWS Skills를 포함하며, Claude Code와 Kiro-CLI를 모두 지원합니다.
   </p>
   <p>
-    이 도구가 존재하는 이유는 MCP의 토큰 비용 구조에 있습니다. MCP 서버를 켜두는 것만으로
-    모든 도구 정의가 매 대화의 컨텍스트에 실리기 때문에, 도구를 쓰지 않아도 비용이 발생합니다.
-    이 문서는 그 비용을 수치로 확인하고(2~3장), 해법인 Skills의 설치와 구성(4장),
-    변환 파이프라인의 동작 방식(5~7장)을 순서대로 정리합니다.
+    용어를 짧게 풀면 이렇습니다. boto3는 AWS를 코드로 다루는 Python 라이브러리이고,
+    OpenAPI 스키마는 도구의 입력과 출력을 기술하는 표준 문서 형식입니다.
+    AgentCore Gateway는 Amazon Bedrock의 도구 게이트웨이 서비스이고,
+    Skill은 에이전트가 필요할 때만 읽어 들이는 마크다운 지침 파일입니다.
+  </p>
+  <p>
+    이 도구가 존재하는 이유는 MCP의 토큰 비용 구조에 있습니다.
+    MCP 서버를 켜두는 것만으로 모든 도구 정의가 매 대화의 컨텍스트에 실립니다.
+    그래서 도구를 쓰지 않아도 비용이 발생합니다.
+  </p>
+  <p>
+    이 문서는 먼저 그 비용을 수치로 확인합니다(2~3장).
+    이어서 해법인 Skills의 설치와 구성을 다루고(4장),
+    변환 파이프라인의 동작 방식을 정리합니다(5~7장).
   </p>
 </section>
 
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2">
   <h2><span class="no">02</span>핵심 문제 - MCP 토큰 비용</h2>
+  <p>
+    이 절에서는 MCP 서버를 켜두기만 해도 왜 비용이 생기는지 살펴봅니다.
+    비용의 단위는 토큰(LLM이 글을 읽고 쓰는 최소 단위이자 과금 기준)입니다.
+  </p>
 
   <h3>2.1 MCP는 왜 토큰을 많이 소모하는가</h3>
   <p>
     MCP 프로토콜은 강력하지만, <strong>모든 도구 정의(Tool Definition)와 요청/응답이 LLM
-    토큰으로 소모</strong>됩니다. MCP 서버가 로딩되면 모든 도구의 JSON Schema가 LLM
-    컨텍스트(Context)에 주입됩니다. LLM이 어떤 도구를 쓸 수 있는지 "알기 위해" 필요한
-    과정이지만, 주입된 도구 대부분은 그 대화에서 사용되지 않습니다.
+    토큰으로 소모</strong>됩니다. MCP 서버가 로딩되면 모든 도구의 JSON Schema(도구의 입력과
+    출력을 기술한 명세)가 LLM 컨텍스트(모델이 대화마다 읽는 입력 전체)에 주입됩니다.
   </p>
   <p>
-    규모를 수치로 보면 이렇습니다. 도구 정의 하나가 약 2,000토큰이므로, IAM MCP 서버
+    이 주입은 LLM이 어떤 도구를 쓸 수 있는지 "알기 위해" 필요한 과정입니다.
+    문제는 주입된 도구 대부분이 그 대화에서 사용되지 않는다는 점입니다.
+  </p>
+  <p>
+    그 비용은 어느 정도일까요? 도구 정의 하나가 약 2,000토큰이므로, IAM MCP 서버
     하나를 로딩하면 도구 29개 &times; 약 2,000토큰 = <strong>약 58,000토큰</strong>이 도구 정의만으로
-    소모됩니다. 여기에 도구를 호출할 때마다 JSON-RPC 요청/응답 왕복으로 호출당 약
-    500토큰이 추가됩니다.
+    소모됩니다. 여기에 도구를 호출할 때마다 JSON-RPC(원격 함수를 호출하는 메시지 규약)
+    요청/응답 왕복으로 호출당 약 500토큰이 추가됩니다.
   </p>
 
   <div class="callout warn">
@@ -669,7 +692,12 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <h3>2.2 실측 결과 (Kiro-CLI 기준)</h3>
   <p>
-    같은 작업을 MCP 서버를 켠 상태와 끈 상태(Skills만 사용)로 실측한 결과입니다.
+    이론이 아니라 실측에서는 얼마나 차이가 날까요?
+    같은 작업을 MCP 서버를 켠 상태와 끈 상태(Skills만 사용)로 각각 실행해 비교했습니다.
+    비용 단위는 credits(Kiro-CLI의 사용량 과금 단위)입니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 같은 작업인데도 벌어지는 credits 차이입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -689,9 +717,9 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <h3>2.3 MCP Tool Forge의 해법</h3>
   <p>
     해법은 <strong>한 번 추출 &rarr; 네이티브 코드로 변환 &rarr; MCP 없이 직접 실행</strong>입니다.
-    MCP 방식은 Agent &harr; MCP Server &harr; AWS API 경로를 매번 거치며 토큰을 소모하지만,
-    Skill 방식은 Agent가 boto3 / CLI 코드를 직접 실행해 AWS API로 가므로 추가 토큰과
-    왕복 지연이 없습니다.
+    MCP 방식은 Agent &harr; MCP Server &harr; AWS API 경로를 매번 거치며 토큰을 소모합니다.
+    Skill 방식은 Agent가 boto3 / CLI 코드를 직접 실행해 AWS API로 가므로, 추가 토큰도
+    왕복 지연도 없습니다.
   </p>
 
   <figure class="flow">
@@ -717,6 +745,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
     </figcaption>
   </figure>
 
+  <p>
+    이 표에서 볼 것은 토큰, 서버, 지연 시간 항목에서 두 방식이 어떻게 갈리는지입니다.
+  </p>
+
   <div class="tbl-wrap">
     <table>
       <caption>표 2. MCP 방식 vs Skill 방식 비교</caption>
@@ -737,6 +769,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3">
   <h2><span class="no">03</span>토큰 경제학 - MCP vs Skills</h2>
+  <p>
+    이 절에서는 두 방식의 비용 차이를 토큰 수와 달러 금액으로 비교합니다.
+    앞 절의 문제가 실제로 얼마짜리인지 확인하는 단계입니다.
+  </p>
 
   <h3>3.1 Skills는 어떻게 토큰을 절약하는가</h3>
   <p>
@@ -744,6 +780,9 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
     예를 들어 "IAM 사용자 목록 보여줘"라는 요청에서, MCP 방식은 IAM 서버의 29개 도구
     스키마 전체(58,000토큰)를 로딩한 뒤 그중 1개만 사용합니다. Skill 방식은
     <span class="mono">aws-iam</span>의 SKILL.md 1개(약 3,000토큰)만 로딩하고 바로 실행합니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 초기 로딩 토큰과 호출당 토큰, 그리고 서버 개수의 차이입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -763,7 +802,9 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
   <h3>3.2 비용 환산 (Claude Opus 4.6 기준)</h3>
   <p>
-    입력 토큰 단가 $15/1M 토큰으로 환산하면 대화당 비용 차이는 다음과 같습니다.
+    돈으로 환산하면 얼마나 차이가 날까요?
+    입력 토큰 단가 $15/1M 토큰을 적용해 대화당 비용으로 바꿔 보았습니다.
+    이 표에서 볼 것은 MCP 서버 개수에 따라 커지는 대화당 비용과 Skill의 비용입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -782,13 +823,17 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   </div>
 
   <p class="lead-def">
-    <b>결론:</b> Skill 방식은 MCP 대비 토큰 비용을 95% 이상 절감합니다.
+    <b>한 문장으로 요약하면,</b> Skill 방식은 MCP 대비 토큰 비용을 95% 이상 절감합니다.
   </p>
 </section>
 
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
   <h2><span class="no">04</span>Skills 설치와 9개 AWS Skills</h2>
+  <p>
+    이 절에서는 함께 제공되는 9개 AWS Skills를 설치하고 쓰는 방법을 다룹니다.
+    설치는 복사 몇 줄이면 끝나고, 이후에는 평소처럼 말로 요청하면 됩니다.
+  </p>
 
   <div class="callout note">
     <span class="callout-title">참고 - 설치 전제 조건은 자격 증명뿐입니다</span>
@@ -830,8 +875,11 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
   <p>
     전체가 필요 없으면 특정 스킬 디렉터리만 골라 복사해도 됩니다
     (예: <span class="mono">aws-iam</span>, <span class="mono">aws-cost</span>,
-    <span class="mono">aws-network</span>만 설치). 설치 후에는 자연어(Natural Language)로
+    <span class="mono">aws-network</span>만 설치). 설치 후에는 자연어(평소 쓰는 일상 언어)로
     요청하면 스킬이 자동 활성화됩니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 어떤 요청이 어떤 스킬을 깨우는지의 대응 관계입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -855,6 +903,10 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
   </div>
 
   <h3>4.2 9개 스킬 구성</h3>
+  <p>
+    9개 스킬은 각각 하나의 AWS 관리 영역을 맡습니다.
+    이 표에서 볼 것은 스킬별 담당 영역과 대표 작업입니다.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -878,8 +930,12 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 
   <h3>4.3 커버리지(Coverage)</h3>
   <p>
+    9개 스킬로 기존 MCP 서버를 얼마나 대체할 수 있을까요?
     9개 수동 스킬은 67개 MCP 서버 중 <strong>52개(78%)</strong>를 커버합니다.
     나머지 15개는 특정 AWS 서비스가 아니거나 전문 영역이라 수동 스킬 대상에서 제외되었습니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 제외된 15개 서버가 어느 카테고리이고 왜 빠졌는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -908,8 +964,12 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 
   <h3>4.4 테스트 결과(Test Results)</h3>
   <p>
+    실제 계정에서도 제대로 동작할까요?
     실제 AWS 계정(서울 리전, IAM 역할 인증)에서 9개 스킬을 17개 항목으로 테스트해
     <strong>17/17 통과</strong>했습니다. 모든 스킬이 표준 AWS 자격 증명만으로 동작합니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 스킬별 테스트 항목과 각 항목의 통과 여부입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -945,8 +1005,11 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 <section class="sec" id="s5">
   <h2><span class="no">05</span>아키텍처 - 3단계 변환 파이프라인</h2>
   <p>
-    변환은 스키마 추출, 정적 매핑, LLM 추론의 3단계 파이프라인으로 동작하고,
-    마지막에 Jinja2 생성기(Generator)가 5가지 형식의 코드를 만들어냅니다.
+    이 절에서는 도구가 실제로 어떤 과정을 거쳐 코드로 바뀌는지 살펴봅니다.
+    변환은 스키마 추출, 정적 매핑, LLM 추론(모델에게 매핑을 추측하게 하는 단계)의
+    3단계로 진행됩니다.
+    마지막에 Jinja2(템플릿으로 코드를 찍어내는 Python 라이브러리) 생성기(Generator)가
+    5가지 형식의 코드를 만들어냅니다.
   </p>
 
   <figure class="diagram">
@@ -966,7 +1029,7 @@ flowchart TB
   </figure>
 
   <ol class="plain">
-    <li><strong>추출(Extract)</strong> - MCP SDK <span class="mono">stdio_client</span>로 서버에 연결하고 <span class="mono">tools/list</span>로 스키마를 추출합니다. 결과는 <span class="mono">~/.mcp-tool-forge/cache/</span>에 캐시(Cache)됩니다.</li>
+    <li><strong>추출(Extract)</strong> - MCP SDK <span class="mono">stdio_client</span>(표준 입출력으로 서버 프로세스와 통신하는 클라이언트)로 서버에 연결하고 <span class="mono">tools/list</span>로 스키마를 추출합니다. 결과는 <span class="mono">~/.mcp-tool-forge/cache/</span>에 캐시(Cache)됩니다.</li>
     <li><strong>정적 매핑(Static Map)</strong> - <span class="mono">mappings/*.yaml</span>에서 알려진 매핑을 조회합니다 (IAM 29 + DynamoDB 6 = 35개).</li>
     <li><strong>LLM 매핑(LLM Map)</strong> - 미매핑(Unmapped) 도구를 Bedrock Claude Opus 4.6에 보내 boto3 매핑을 추론합니다. <span class="mono">--llm-assist</span> 플래그(Flag)로 켭니다.</li>
   </ol>
@@ -974,8 +1037,8 @@ flowchart TB
   <h3>5.1 멀티 AWS 프로필 지원(Multi-Profile Support)</h3>
   <p>
     <span class="mono">--aws-profile</span> 옵션으로 생성되는 boto3 코드에 AWS 프로필을
-    설정할 수 있습니다. AWS Organizations + SSO 환경에서 여러 계정을 오가는 경우 유용하고,
-    호출 시점에 프로필을 오버라이드(Override)할 수도 있습니다.
+    설정할 수 있습니다. AWS Organizations + SSO 환경에서 여러 계정을 오가는 경우 유용합니다.
+    호출 시점에 프로필을 오버라이드(기본값 대신 다른 값을 지정)할 수도 있습니다.
   </p>
 
   <div class="codeblock">
@@ -998,6 +1061,10 @@ list_users(profile_name="staging-account")    <span class="cm"># 다른 계정�
   </div>
 
   <h3>5.2 추출 결과(Extraction Results)</h3>
+  <p>
+    이 파이프라인을 전체 서버에 돌리면 어느 정도 규모가 나올까요?
+    이 표에서 볼 것은 연결 성공률, 추출된 도구 수, 생성 코드의 구문 통과율입니다.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -1021,8 +1088,12 @@ list_users(profile_name="staging-account")    <span class="cm"># 다른 계정�
 <section class="sec" id="s6">
   <h2><span class="no">06</span>출력 형식과 지원 서버</h2>
   <p>
-    변환 결과는 5가지 형식으로 나옵니다. 같은 도구라도 실행 환경에 따라
+    이 절에서는 변환 결과물이 어떤 파일로 나오는지, 그리고 어떤 서버를 변환할 수 있는지
+    정리합니다. 변환 결과는 5가지 형식으로 나오며, 같은 도구라도 실행 환경에 따라
     쓰는 형식이 다릅니다.
+  </p>
+  <p>
+    이 표에서 볼 것은 형식별 출력 파일 위치와 그 형식이 쓰이는 자리입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -1042,7 +1113,8 @@ list_users(profile_name="staging-account")    <span class="cm"># 다른 계정�
   </div>
 
   <p>
-    변환 대상으로 등록된 MCP 서버는 총 67개이며, 카테고리 분포는 다음과 같습니다.
+    변환 대상으로 등록된 MCP 서버는 총 67개입니다.
+    이 표에서 볼 것은 67개 서버가 어떤 카테고리에 몇 개씩 분포하는지입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -1070,6 +1142,10 @@ list_users(profile_name="staging-account")    <span class="cm"># 다른 계정�
 <!-- ===================== 07 ===================== -->
 <section class="sec" id="s7">
   <h2><span class="no">07</span>빠른 시작 - CLI 도구</h2>
+  <p>
+    이 절에서는 MCP 서버를 직접 변환하고 싶은 사람을 위해 CLI 사용법을 정리합니다.
+    설치, 변환, 스킬 등록까지의 명령을 순서대로 담았습니다.
+  </p>
 
   <div class="callout note">
     <span class="callout-title">참고 - Skills만 쓸 거라면 이 섹션은 건너뛰어도 됩니다</span>
@@ -1140,6 +1216,7 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
   <p>
     Skills만 쓰는 경로와 CLI 도구 전체를 쓰는 경로의 요구사항이 다릅니다.
     Skills 경로는 AWS 자격 증명 외에 아무것도 요구하지 않습니다.
+    이 표에서 볼 것은 두 경로에서 각 항목이 필요한지 여부입니다.
   </p>
 
   <div class="tbl-wrap">
@@ -1166,6 +1243,9 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
+  <p>
+    본문에서 인용한 출처의 원문 링크입니다. 최신 수치는 아래 저장소에서 확인할 수 있습니다.
+  </p>
 
   <h3>핵심 출처</h3>
   <ul>
@@ -1267,10 +1347,10 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">TL;DR</h2>
   <ul>
-    <li>Loading an MCP server injects every tool's JSON Schema into the LLM context. Each tool costs roughly 2,000 tokens, so loading all 792 tools across 67 AWS MCP servers consumes <strong>about 1,584,000 tokens (~1.5M)</strong> on tool definitions alone.</li>
-    <li>MCP Tool Forge extracts MCP tools once and converts them into five native formats: boto3, AWS CLI, OpenAPI schema, AgentCore Gateway, and Skill. The converted code runs directly without an MCP server, so <strong>both tool-definition tokens and call round-trip tokens drop to 0</strong>.</li>
-    <li>In real Kiro-CLI measurements, a conversation with 4 MCP servers enabled cost 0.71 credits versus 0.27 credits with Skills only - a <strong>62% reduction</strong> - and at Claude Opus 4.6 input pricing, token cost falls by more than 95%.</li>
-    <li>The bundled nine AWS Skills install with a <span class="mono">git clone</span> plus three copy commands, and run with nothing but AWS credentials - no MCP server, no Python packages, no Bedrock access. Real-account testing passed <strong>17/17</strong>.</li>
+    <li>Keeping an MCP server enabled puts the description of every tool into every conversation, even the tools you never use, at roughly 2,000 tokens each. Loading all 792 tools across 67 AWS MCP servers consumes <strong>about 1,584,000 tokens (~1.5M)</strong> on tool definitions alone.</li>
+    <li>MCP Tool Forge extracts MCP tools once and turns them into executable code in five formats: boto3, AWS CLI, OpenAPI schema, AgentCore Gateway, and Skill. The converted code runs without an MCP server, so <strong>both tool-definition tokens and call round-trip tokens drop to 0</strong>.</li>
+    <li>In real Kiro-CLI measurements, the same task cost 0.71 credits with 4 MCP servers enabled versus 0.27 credits with Skills only, a <strong>62% reduction</strong>. Converted at Claude Opus 4.6 input pricing, token cost falls by more than 95%.</li>
+    <li>The bundled nine AWS Skills install with a <span class="mono">git clone</span> plus three copy commands. They run with nothing but AWS credentials, needing no MCP server, Python packages, or Bedrock access, and passed real-account testing <strong>17/17</strong>.</li>
   </ul>
 </section>
 
@@ -1295,37 +1375,61 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 <section class="sec" id="s1-en">
   <h2><span class="no">01</span>Overview - What Is MCP Tool Forge</h2>
   <p>
-    <a href="https://github.com/whchoi98/mcp-tool-forge">MCP Tool Forge</a> is a Python CLI
-    that extracts tools from MCP (Model Context Protocol) servers and converts them into five
-    formats: <strong>boto3, AWS CLI, OpenAPI schema, AgentCore Gateway, and
-    Claude Code / Kiro-CLI Skill</strong>. It ships with nine ready-to-install AWS Skills and
-    supports both Claude Code and Kiro-CLI.
+    This section introduces what MCP Tool Forge is and why it was built.
+    The core idea is simple: turn the tools an AI uses into code that runs without a server.
   </p>
   <p>
-    The reason this tool exists is MCP's token cost structure. Merely keeping an MCP server
-    enabled puts every tool definition into the context of every conversation, so you pay
-    even when the tools are never used. This document quantifies that cost (chapters 2-3),
-    covers the remedy - installing and organizing Skills (chapter 4) - and then walks through
-    how the conversion pipeline works (chapters 5-7).
+    <a href="https://github.com/whchoi98/mcp-tool-forge">MCP Tool Forge</a> is a Python CLI
+    that extracts tools from MCP (Model Context Protocol, the standard protocol that lets an
+    AI agent call external tools) servers.
+    The extracted tools are converted into five formats: <strong>boto3, AWS CLI, OpenAPI
+    schema, AgentCore Gateway, and Claude Code / Kiro-CLI Skill</strong>.
+    It ships with nine ready-to-install AWS Skills and supports both Claude Code and Kiro-CLI.
+  </p>
+  <p>
+    A quick glossary: boto3 is the Python library for working with AWS, and an OpenAPI schema
+    is a standard document format describing a tool's inputs and outputs.
+    AgentCore Gateway is Amazon Bedrock's tool gateway service.
+    A Skill is a markdown instruction file the agent reads only when it needs it.
+  </p>
+  <p>
+    The reason this tool exists is MCP's token cost structure.
+    Merely keeping an MCP server enabled puts every tool definition into the context of every
+    conversation. That means you pay even when the tools are never used.
+  </p>
+  <p>
+    This document first quantifies that cost (chapters 2-3).
+    It then covers the remedy, installing and organizing Skills (chapter 4),
+    and walks through how the conversion pipeline works (chapters 5-7).
   </p>
 </section>
 
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2-en">
   <h2><span class="no">02</span>The Core Problem - MCP Token Cost</h2>
+  <p>
+    This section looks at why merely keeping an MCP server enabled creates cost.
+    The unit of that cost is the token (the smallest unit an LLM reads and writes, and the
+    basis for billing).
+  </p>
 
   <h3>2.1 Why MCP Consumes So Many Tokens</h3>
   <p>
     The MCP protocol is powerful, but <strong>every tool definition and every request/response
-    is paid for in LLM tokens</strong>. When an MCP server loads, the JSON Schema of every tool
-    is injected into the LLM context. This step is necessary for the LLM to "know" which tools
-    are available, yet most of the injected tools are never used in that conversation.
+    is paid for in LLM tokens</strong>. When an MCP server loads, the JSON Schema (a
+    specification describing each tool's inputs and outputs) of every tool is injected into
+    the LLM context (everything the model reads on each conversation).
   </p>
   <p>
-    The scale, in numbers: one tool definition is roughly 2,000 tokens, so loading a single
+    This injection is necessary for the LLM to "know" which tools are available.
+    The problem is that most of the injected tools are never used in that conversation.
+  </p>
+  <p>
+    How big is that cost? One tool definition is roughly 2,000 tokens, so loading a single
     IAM MCP server means 29 tools &times; ~2,000 tokens = <strong>about 58,000 tokens</strong>
     consumed by tool definitions alone. On top of that, every tool call adds roughly
-    500 tokens for the JSON-RPC request/response round trip.
+    500 tokens for the JSON-RPC (a message convention for calling remote functions)
+    request/response round trip.
   </p>
 
   <div class="callout warn">
@@ -1339,7 +1443,12 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 
   <h3>2.2 Measured Results (Kiro-CLI)</h3>
   <p>
-    The same task was measured with MCP servers enabled and disabled (Skills only).
+    How large is the gap in real measurements rather than theory?
+    The same task was run twice, once with MCP servers enabled and once disabled (Skills only).
+    Cost is given in credits (Kiro-CLI's usage billing unit).
+  </p>
+  <p>
+    What to look for in this table: the credits gap for the exact same task.
   </p>
 
   <div class="tbl-wrap">
@@ -1360,8 +1469,8 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
   <p>
     The remedy is <strong>extract once &rarr; convert to native code &rarr; run directly
     without MCP</strong>. The MCP path travels Agent &harr; MCP Server &harr; AWS API on every
-    call, burning tokens each time, whereas the Skill path has the Agent execute boto3 / CLI
-    code straight against the AWS API - no extra tokens, no round-trip latency.
+    call, burning tokens each time. The Skill path has the Agent execute boto3 / CLI code
+    straight against the AWS API, with no extra tokens and no round-trip latency.
   </p>
 
   <figure class="flow">
@@ -1387,6 +1496,11 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
     </figcaption>
   </figure>
 
+  <p>
+    What to look for in this table: how the two approaches diverge on tokens, server
+    dependency, and latency.
+  </p>
+
   <div class="tbl-wrap">
     <table>
       <caption>Table 2. MCP approach vs Skill approach</caption>
@@ -1407,6 +1521,10 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3-en">
   <h2><span class="no">03</span>Token Economics - MCP vs Skills</h2>
+  <p>
+    This section compares the two approaches in token counts and in dollars.
+    It is where we find out how expensive the previous section's problem really is.
+  </p>
 
   <h3>3.1 How Skills Save Tokens</h3>
   <p>
@@ -1415,6 +1533,10 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
     29 tools on the IAM server (58,000 tokens) and then uses exactly one of them. The Skill
     approach loads a single SKILL.md from <span class="mono">aws-iam</span>
     (about 3,000 tokens) and executes immediately.
+  </p>
+  <p>
+    What to look for in this table: the gap in initial-load tokens, per-call tokens, and
+    server processes.
   </p>
 
   <div class="tbl-wrap">
@@ -1434,8 +1556,10 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 
   <h3>3.2 Cost in Dollars (Claude Opus 4.6)</h3>
   <p>
-    Converting at an input token price of $15 per 1M tokens, the per-conversation cost
-    difference looks like this.
+    How much does the difference come to in money?
+    We converted the token counts at an input price of $15 per 1M tokens.
+    What to look for in this table: per-conversation cost growing with the number of MCP
+    servers, versus the Skill cost.
   </p>
 
   <div class="tbl-wrap">
@@ -1454,13 +1578,18 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
   </div>
 
   <p class="lead-def">
-    <b>Bottom line:</b> the Skill approach cuts token cost by more than 95% compared to MCP.
+    <b>To sum it up in one sentence,</b> the Skill approach cuts token cost by more than 95%
+    compared to MCP.
   </p>
 </section>
 
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>Installing Skills and the 9 AWS Skills</h2>
+  <p>
+    This section covers installing and using the nine bundled AWS Skills.
+    Installation is a few copy commands, and after that you simply ask in plain language.
+  </p>
 
   <div class="callout note">
     <span class="callout-title">Note - The only prerequisite is credentials</span>
@@ -1504,7 +1633,10 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
     If you do not need the full set, copy only the skill directories you want
     (e.g. install just <span class="mono">aws-iam</span>, <span class="mono">aws-cost</span>,
     and <span class="mono">aws-network</span>). Once installed, skills activate automatically
-    from natural-language requests.
+    from natural-language requests, meaning everyday phrasing rather than commands.
+  </p>
+  <p>
+    What to look for in this table: which kind of request wakes up which skill.
   </p>
 
   <div class="tbl-wrap">
@@ -1528,6 +1660,10 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
   </div>
 
   <h3>4.2 The Nine Skills</h3>
+  <p>
+    Each of the nine skills owns one area of AWS management.
+    What to look for in this table: each skill's area and its representative operations.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -1551,9 +1687,13 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 
   <h3>4.3 Coverage</h3>
   <p>
+    How much of the existing MCP server lineup can nine skills replace?
     The nine hand-written skills cover <strong>52 of the 67 MCP servers (78%)</strong>.
     The remaining 15 were excluded from hand-written skills because they either do not map
     to a specific AWS service or belong to a specialist domain.
+  </p>
+  <p>
+    What to look for in this table: which categories the 15 excluded servers fall into and why.
   </p>
 
   <div class="tbl-wrap">
@@ -1583,9 +1723,13 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 
   <h3>4.4 Test Results</h3>
   <p>
+    Do the skills actually work against a real account?
     All nine skills were tested against a real AWS account (Seoul region, IAM role
     authentication) across 17 checks, passing <strong>17/17</strong>. Every skill runs on
     standard AWS credentials alone.
+  </p>
+  <p>
+    What to look for in this table: each skill's test items and whether each one passed.
   </p>
 
   <div class="tbl-wrap">
@@ -1621,8 +1765,11 @@ cp -r mcp-tool-forge/.claude/skills/aws-* ~/.kiro/skills/</code></pre>
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Architecture - 3-Stage Conversion Pipeline</h2>
   <p>
-    Conversion runs as a three-stage pipeline - schema extraction, static mapping, and
-    LLM inference - and finishes with Jinja2 generators emitting code in the five formats.
+    This section looks at how a tool actually becomes code.
+    Conversion runs in three stages: schema extraction, static mapping, and LLM inference
+    (a stage where a model is asked to guess the mapping).
+    At the end, Jinja2 (a Python library that stamps out code from templates) generators emit
+    code in the five formats.
   </p>
 
   <figure class="diagram">
@@ -1642,7 +1789,7 @@ flowchart TB
   </figure>
 
   <ol class="plain">
-    <li><strong>Extract</strong> - connect to the server with the MCP SDK <span class="mono">stdio_client</span> and pull schemas via <span class="mono">tools/list</span>. Results are cached in <span class="mono">~/.mcp-tool-forge/cache/</span>.</li>
+    <li><strong>Extract</strong> - connect to the server with the MCP SDK <span class="mono">stdio_client</span> (a client that talks to the server process over standard input/output) and pull schemas via <span class="mono">tools/list</span>. Results are cached in <span class="mono">~/.mcp-tool-forge/cache/</span>.</li>
     <li><strong>Static Map</strong> - look up known mappings in <span class="mono">mappings/*.yaml</span> (IAM 29 + DynamoDB 6 = 35 mappings).</li>
     <li><strong>LLM Map</strong> - send unmapped tools to Bedrock Claude Opus 4.6 to infer boto3 mappings. Enabled with the <span class="mono">--llm-assist</span> flag.</li>
   </ol>
@@ -1651,7 +1798,7 @@ flowchart TB
   <p>
     The <span class="mono">--aws-profile</span> option bakes an AWS profile into the generated
     boto3 code. This is handy when hopping between accounts in an AWS Organizations + SSO
-    setup, and the profile can still be overridden at call time.
+    setup. The profile can still be overridden (replaced with another value) at call time.
   </p>
 
   <div class="codeblock">
@@ -1674,6 +1821,11 @@ list_users(profile_name="staging-account")    <span class="cm"># switch to anoth
   </div>
 
   <h3>5.2 Extraction Results</h3>
+  <p>
+    What scale does the pipeline reach when run across all servers?
+    What to look for in this table: connection success rate, extracted tool count, and the
+    syntax pass rate of the generated code.
+  </p>
 
   <div class="tbl-wrap">
     <table>
@@ -1697,8 +1849,13 @@ list_users(profile_name="staging-account")    <span class="cm"># switch to anoth
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Output Formats and Supported Servers</h2>
   <p>
-    Conversion produces five formats. The same tool ends up in a different format depending
-    on where it will run.
+    This section lists which files conversion produces and which servers can be converted.
+    Conversion produces five formats, and the same tool ends up in a different format
+    depending on where it will run.
+  </p>
+  <p>
+    What to look for in this table: each format's output file location and where that format
+    is used.
   </p>
 
   <div class="tbl-wrap">
@@ -1718,8 +1875,8 @@ list_users(profile_name="staging-account")    <span class="cm"># switch to anoth
   </div>
 
   <p>
-    A total of 67 MCP servers are registered as conversion targets, distributed across
-    categories as follows.
+    A total of 67 MCP servers are registered as conversion targets.
+    What to look for in this table: how many of the 67 servers sit in each category.
   </p>
 
   <div class="tbl-wrap">
@@ -1747,6 +1904,10 @@ list_users(profile_name="staging-account")    <span class="cm"># switch to anoth
 <!-- ===================== 07 ===================== -->
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Quick Start - The CLI Tool</h2>
+  <p>
+    This section is for readers who want to convert MCP servers themselves.
+    It walks through the commands from install to conversion to skill registration, in order.
+  </p>
 
   <div class="callout note">
     <span class="callout-title">Note - Skip this section if you only need the Skills</span>
@@ -1817,6 +1978,7 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
   <p>
     The Skills-only path and the full CLI path have different requirements.
     The Skills path needs nothing beyond AWS credentials.
+    What to look for in this table: whether each item is required on each path.
   </p>
 
   <div class="tbl-wrap">
@@ -1843,6 +2005,10 @@ mcp-tool-forge register --server aws-iam-mcp-server -d output --target kiro</cod
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs-en">
   <h2><span class="no">--</span>References</h2>
+  <p>
+    Links to the sources cited in this document. The repository below carries the latest
+    numbers.
+  </p>
 
   <h3>Primary Source</h3>
   <ul>

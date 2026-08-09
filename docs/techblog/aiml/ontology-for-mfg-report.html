@@ -579,10 +579,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <section class="tldr" aria-labelledby="tldr-title">
   <h2 id="tldr-title">요약</h2>
   <ul>
-    <li>ontology-for-mfg는 <strong>22개 클래스와 24개 관계</strong>로 하이테크 제조 도메인을 Neptune 지식 그래프로 모델링하고, 그 위에 12개 시나리오(A-L)와 5개 페르소나를 올린 PoC입니다. 수치는 전부 schema.ttl과 코드에서 직접 확인한 값입니다.</li>
-    <li>Bedrock <span class="mono">converse_stream</span> 기반 에이전트가 도구 5종(<span class="mono">search_semantic</span>, <span class="mono">neptune_query</span>, <span class="mono">kb_retrieve</span>, <span class="mono">compliance_check</span>, <span class="mono">memory_save</span>)을 최대 8라운드 호출하며, 답변은 SSE로 토큰 단위 스트리밍됩니다.</li>
-    <li>제조 고유의 차별점은 BOM 4계층(Product, Module, Component, RawMaterial), 표준/규제 4클래스(JEDEC부터 CBAM까지 10개 체계), 그리고 같은 질문을 페르소나별 KPI 어조로 다르게 프레이밍하는 구조입니다.</li>
-    <li>라이브 데모는 https://mfg-ontology.whchoi.net (Cognito 보호)에서 동작합니다. 다만 약 10,644개 노드의 합성 데이터 기반 PoC이므로 실제 협력사, 부품 정보는 포함하지 않습니다.</li>
+    <li>ontology-for-mfg는 제품 구조, 협력사, 규제, 품질 같은 제조 지식을 <strong>22개 클래스와 24개 관계</strong>의 Neptune 지식 그래프로 만든 검증용 프로젝트(PoC)입니다. 그 위에 12개 시나리오(A-L)와 5개 페르소나 화면이 올라가고, 모든 수치는 schema.ttl과 코드에서 직접 확인한 값입니다.</li>
+    <li>질문에 답하는 것은 Bedrock <span class="mono">converse_stream</span> 기반 에이전트입니다. 검색, 그래프 질의 같은 도구 5종을 최대 8라운드까지 골라 쓰고, 답변은 만들어지는 즉시 토큰 단위로 화면에 흘려보냅니다(SSE 스트리밍).</li>
+    <li>제조 도메인만의 특징은 세 가지입니다. 제품에서 원자재까지 4계층으로 내려가는 BOM 구조(Product, Module, Component, RawMaterial), JEDEC부터 CBAM까지 10개 체계를 담은 표준/규제 4클래스, 그리고 같은 질문을 보는 사람의 KPI에 맞춰 다르게 표현하는 페르소나 구조입니다.</li>
+    <li>라이브 데모는 https://mfg-ontology.whchoi.net 에서 동작하며 Cognito 로그인이 필요합니다. 약 10,644개 노드가 전부 합성 데이터라서 실제 협력사나 부품 정보는 들어 있지 않습니다.</li>
   </ul>
 </section>
 
@@ -590,10 +590,10 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 <nav class="toc" aria-label="목차">
   <p class="toc-title">목차</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1">제조 도메인에서 온톨로지가 푸는 문제</a></li>
-    <li><span class="no">02</span><a href="#s2">동작 원리: 22클래스 스키마와 AWS 아키텍처</a></li>
-    <li><span class="no">03</span><a href="#s3">핵심 메커니즘 딥다이브</a></li>
-    <li><span class="no">04</span><a href="#s4">12개 시나리오 개관</a></li>
+    <li><span class="no">01</span><a href="#s1">제조에서 온톨로지가 필요한 이유</a></li>
+    <li><span class="no">02</span><a href="#s2">전체 구조: 22클래스 스키마와 AWS 아키텍처</a></li>
+    <li><span class="no">03</span><a href="#s3">핵심 동작 원리 네 가지</a></li>
+    <li><span class="no">04</span><a href="#s4">12개 시나리오 한눈에 보기</a></li>
     <li><span class="no">05</span><a href="#s5">실제 운영: 배포, 인증, 라이브 데모</a></li>
     <li><span class="no">06</span><a href="#s6">한계</a></li>
     <li><span class="no">07</span><a href="#s7">결론</a></li>
@@ -605,51 +605,80 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 
 <!-- ===================== 01 ===================== -->
 <section class="sec" id="s1">
-  <h2><span class="no">01</span>제조 도메인에서 온톨로지가 푸는 문제</h2>
+  <h2><span class="no">01</span>제조에서 온톨로지가 필요한 이유</h2>
+  <p>
+    이 절은 제조 현장의 데이터 질문이 왜 어려운지 설명합니다.
+    그리고 지식을 그래프 형태로 정리하는 방식이 그 어려움을 어떻게 푸는지 보여줍니다.
+  </p>
   <p>
     하이테크 제조의 데이터 질문은 대부분 관계를 여러 단계 따라가야 답이 나옵니다.
-    "이 제품에 들어가는 부품 중 REACH 규제 물질을 포함한 것은 무엇인가"라는 질문 하나가
-    제품 &rarr; 모듈 &rarr; 부품 &rarr; 물질 &rarr; 규제로 이어지는 <strong>4단계 이상의 조인</strong>을 요구합니다.
-    관계형 테이블로도 답할 수는 있지만, 질문이 바뀔 때마다 조인 경로를 다시 설계해야 하고
-    LLM이 스스로 질의를 만들기도 어렵습니다.
+    예를 들어 "이 제품에 들어가는 부품 중 REACH 규제 물질을 포함한 것은 무엇인가"라는 질문을 봅니다.
+    답을 얻으려면 제품 &rarr; 모듈 &rarr; 부품 &rarr; 물질 &rarr; 규제로 이어지는
+    <strong>4단계 이상의 조인</strong>이 필요합니다.
   </p>
   <p>
-    이 프로젝트가 온톨로지로 명시한 제조 고유의 관계 사슬은 세 갈래입니다.
-    첫째, BOM 계층입니다. <span class="mono">Product -hasModule-&gt; Module -consistsOf-&gt; Component -madeOf-&gt; RawMaterial</span>로
-    제품 구조가 4계층 그래프로 내려갑니다. 둘째, 규제 추적입니다.
-    <span class="mono">Component -containsSubstance-&gt; Substance -regulatedBy-&gt; Regulation</span> 사슬이 있어서
-    부품에서 출발해 REACH-SVHC, RoHS 해당 여부를 그래프 탐색만으로 판정할 수 있습니다.
-    셋째, 품질 추적입니다. <span class="mono">QualityIncident -about-&gt; Component</span>,
-    <span class="mono">EightDReport -addresses-&gt; QualityIncident</span>,
-    <span class="mono">EightDReport -identifies-&gt; RootCause -linkedTo-&gt; Supplier</span>로
-    품질 사고에서 근본 원인, 책임 협력사까지 한 그래프 안에서 연결됩니다.
+    관계형 테이블로도 답할 수는 있습니다.
+    하지만 질문이 바뀔 때마다 조인 경로를 다시 설계해야 합니다.
+    LLM이 스스로 이런 질의를 만들기도 어렵습니다.
   </p>
+  <p>
+    이 프로젝트는 온톨로지(도메인의 개념과 관계를 기계가 읽을 수 있게 정의한 스키마)로
+    제조 고유의 관계 사슬 세 갈래를 명시합니다.
+  </p>
+  <ul class="plain">
+    <li>
+      <strong>BOM 계층.</strong> BOM은 제품이 어떤 부품으로 구성되는지 적은 자재 명세서입니다.
+      <span class="mono">Product -hasModule-&gt; Module -consistsOf-&gt; Component -madeOf-&gt; RawMaterial</span>로
+      제품 구조가 4계층 그래프로 내려갑니다.
+    </li>
+    <li>
+      <strong>규제 추적.</strong>
+      <span class="mono">Component -containsSubstance-&gt; Substance -regulatedBy-&gt; Regulation</span> 사슬이 있습니다.
+      부품에서 출발해 REACH-SVHC, RoHS 해당 여부를 그래프 탐색만으로 판정할 수 있습니다.
+    </li>
+    <li>
+      <strong>품질 추적.</strong> <span class="mono">QualityIncident -about-&gt; Component</span>,
+      <span class="mono">EightDReport -addresses-&gt; QualityIncident</span>,
+      <span class="mono">EightDReport -identifies-&gt; RootCause -linkedTo-&gt; Supplier</span> 관계가 있습니다.
+      품질 사고에서 근본 원인, 책임 협력사까지 한 그래프 안에서 연결됩니다.
+    </li>
+  </ul>
   <p>
     표준과 규제를 데이터가 아니라 클래스로 승격한 점이 자매 프로젝트인 리테일 편과 갈라지는 지점입니다.
-    Standard, Certification, Regulation, Substance 4개 클래스가 스키마에 존재하고,
+    Standard, Certification, Regulation, Substance 4개 클래스가 스키마에 존재합니다.
     JEDEC, IPC, AEC-Q, IATF 16949, ISO 9001, REACH-SVHC, RoHS, CBAM, IRA, USMCA
     10개 체계의 실제 표준 데이터 서브셋이 <span class="mono">data/public/</span>에 적재됩니다.
-    부품의 인증 여부와 무역 규제 노출이 그래프 질의 대상이 되는 것입니다.
+  </p>
+  <p>
+    그 결과 부품의 인증 여부와 무역 규제 노출이 그래프 질의 대상이 됩니다.
   </p>
   <div class="callout note">
     <span class="callout-title">참고 - 이 문서에서 말하는 온톨로지</span>
     <p>
-      여기서 온톨로지는 OWL 추론기까지 쓰는 무거운 시맨틱 웹 스택이 아니라,
+      여기서 온톨로지는 OWL 추론기까지 쓰는 무거운 시맨틱 웹 스택이 아닙니다.
       <span class="mono">schema.ttl</span>에 OWL 문법으로 정의한 클래스/관계 정의를
       Neptune 프로퍼티 그래프의 라벨과 엣지 타입으로 옮겨 쓰는 실용적 스키마를 뜻합니다.
-      질의는 SPARQL이 아니라 openCypher로 합니다.
+      질의는 SPARQL이 아니라 openCypher(그래프 데이터베이스용 질의 언어)로 합니다.
     </p>
   </div>
 </section>
 
 <!-- ===================== 02 ===================== -->
 <section class="sec" id="s2">
-  <h2><span class="no">02</span>동작 원리: 22클래스 스키마와 AWS 아키텍처</h2>
+  <h2><span class="no">02</span>전체 구조: 22클래스 스키마와 AWS 아키텍처</h2>
+  <p>
+    이 절은 시스템의 뼈대를 살펴봅니다.
+    지식을 담는 스키마, 그것을 돌리는 AWS 서비스 구성, 어떤 AI 모델을 어디에 쓰는지 순서로 정리합니다.
+  </p>
 
   <h3>2.1 22클래스 스키마</h3>
   <p>
+    스키마의 크기는 어느 정도일까요?
     <span class="mono">ontology/schema.ttl</span>에는 <strong>22개 owl:Class와 24개 owl:ObjectProperty</strong>가 정의되어 있습니다.
     클래스는 다섯 그룹으로 나뉩니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 22개 클래스가 어떤 다섯 그룹으로 묶이고, 각 그룹이 어떤 관계로 이어지는지입니다.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -687,19 +716,26 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
     </table>
   </div>
   <p>
-    합성 데이터 생성기(<span class="mono">data/synthetic/</span>)가 이 스키마대로
-    약 10,644개 노드를 만들어 ndjson으로 내보내고, VPC 내부 로더가
-    Neptune(openCypher 벌크)과 OpenSearch(<span class="mono">_bulk</span>)에 적재합니다.
-    같은 스키마가 Pydantic 모델(<span class="mono">data/schemas.py</span>)로도 존재해서
-    생성, 적재, API 응답이 하나의 타입 정의를 공유합니다.
+    데이터는 어떻게 채워질까요?
+    합성 데이터 생성기(<span class="mono">data/synthetic/</span>)가 이 스키마대로 약 10,644개 노드를 만들어 ndjson으로 내보냅니다.
+    이어서 VPC 내부 로더가 Neptune(openCypher 벌크)과 OpenSearch(<span class="mono">_bulk</span>)에 적재합니다.
+  </p>
+  <p>
+    같은 스키마는 Pydantic 모델(<span class="mono">data/schemas.py</span>)로도 존재합니다.
+    덕분에 생성, 적재, API 응답이 하나의 타입 정의를 공유합니다.
   </p>
 
   <h3>2.2 AWS 아키텍처</h3>
   <p>
-    실행 환경은 전부 AWS 관리형 서비스입니다. 지식 그래프는 Amazon Neptune(openCypher, VPC 내부 전용),
-    의미 검색은 Amazon OpenSearch Serverless(VECTORSEARCH 컬렉션, 한국어 Nori 분석기 + k-NN HNSW),
-    LLM은 Amazon Bedrock Converse API, 컴퓨트는 ECS Fargate ARM64 서비스 2개(api, web),
-    엣지는 CloudFront와 ACM 커스텀 도메인, 인증은 Amazon Cognito입니다.
+    실행 환경은 전부 AWS 관리형 서비스입니다. 역할별 구성은 다음과 같습니다.
+  </p>
+  <ul class="plain">
+    <li>지식 그래프는 Amazon Neptune입니다(openCypher, VPC 내부 전용).</li>
+    <li>의미 검색은 Amazon OpenSearch Serverless입니다(VECTORSEARCH 컬렉션, 한국어 Nori 분석기 + k-NN HNSW).</li>
+    <li>LLM은 Amazon Bedrock Converse API, 컴퓨트는 ECS Fargate ARM64 서비스 2개(api, web)입니다.</li>
+    <li>엣지는 CloudFront와 ACM 커스텀 도메인, 인증은 Amazon Cognito입니다.</li>
+  </ul>
+  <p>
     인프라 전체는 AWS CDK v2(TypeScript) 6개 스택(network, data, ai, compute, edge, observability)으로 정의됩니다.
   </p>
 
@@ -722,8 +758,12 @@ flowchart LR
 
   <h3>2.3 Bedrock 모델 라우팅</h3>
   <p>
-    모델은 용도별로 나눠 씁니다. 긴 한국어 추론과 다회차 tool-use가 필요한 대화/인사이트는 Sonnet,
-    스키마가 고정된 구조화 출력은 Haiku입니다. 모델 ID는 <span class="mono">api/config.py</span>의 기본값 기준입니다.
+    모델은 용도별로 나눠 씁니다.
+    긴 한국어 추론과 다회차 tool-use(모델이 대화 중에 외부 도구를 호출하는 기능)가 필요한 대화와 인사이트는 Sonnet이 맡습니다.
+    스키마가 고정된 구조화 출력은 Haiku가 맡습니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 용도별 모델 ID이며, 값은 <span class="mono">api/config.py</span>의 기본값 기준입니다.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -743,15 +783,24 @@ flowchart LR
 
 <!-- ===================== 03 ===================== -->
 <section class="sec" id="s3">
-  <h2><span class="no">03</span>핵심 메커니즘 딥다이브</h2>
+  <h2><span class="no">03</span>핵심 동작 원리 네 가지</h2>
+  <p>
+    이 절은 시스템의 심장부 네 곳을 들여다봅니다.
+    에이전트가 도구를 고르는 루프, 두 검색을 합치는 방법, 보는 사람에 맞춘 표현, 대표 시나리오 하나입니다.
+  </p>
   <h3>3.1 에이전트 tool-use 루프: 도구 5종</h3>
   <p>
     대화형 에이전트(시나리오 B)의 중심은 <span class="mono">api/services/agent.py</span>의 AgentRunner입니다.
-    Bedrock <span class="mono">converse_stream</span>을 호출하고, 모델이 도구를 요청하면 실행 결과를
-    대화에 되돌려주는 루프를 <strong>최대 8라운드</strong>(<span class="mono">max_rounds=8</span>) 돕니다.
-    v0.5.6부터는 <span class="mono">contentBlockDelta</span> 텍스트 청크가 도착하는 즉시
-    SSE <span class="mono">delta</span> 이벤트로 전달되어, 저장소 CHANGELOG 기준 첫 토큰까지의 시간이
-    2-5초에서 300-600ms 수준으로 줄었습니다.
+    Bedrock <span class="mono">converse_stream</span>을 호출하고, 모델이 도구를 요청하면 실행 결과를 대화에 되돌려줍니다.
+    이 루프를 <strong>최대 8라운드</strong>(<span class="mono">max_rounds=8</span>) 돕니다.
+  </p>
+  <p>
+    응답은 얼마나 빨라졌을까요? v0.5.6부터 <span class="mono">contentBlockDelta</span> 텍스트 청크가 도착하는 즉시
+    SSE(서버가 응답을 잘게 쪼개 실시간으로 밀어주는 웹 표준) <span class="mono">delta</span> 이벤트로 전달됩니다.
+    저장소 CHANGELOG 기준으로 첫 토큰까지의 시간이 2-5초에서 300-600ms 수준으로 줄었습니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 에이전트가 고를 수 있는 도구 5종과 각 도구가 실제로 부르는 백엔드입니다.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -769,29 +818,47 @@ flowchart LR
     </table>
   </div>
   <p>
-    안정성 장치가 두 겹입니다. 첫째, 8D 파이프라인(및 ops 평가 실행) 등 동기식 Bedrock 호출은
-    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span>로 25초 타임아웃에 묶이고,
-    초과하면 결정적 템플릿으로 폴백합니다(ADR-003). 채팅은 <span class="mono">converse_stream</span>
-    스트리밍으로 별도 처리됩니다. 둘째, 데이터 경로가 죽어도 데모가 빈 화면이 되지 않도록
-    결정형 시나리오 대부분(10개 라우터)에 합성 폴백과 <span class="mono">_synthetic</span> 플래그가 있고,
+    안정성 장치는 두 겹입니다.
+    첫째, 동기식 Bedrock 호출의 타임아웃입니다.
+    8D(품질 사고의 원인과 대책을 8개 항목으로 정리하는 제조업 표준 보고서) 파이프라인과 ops 평가 실행 등은
+    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span>로 25초 타임아웃에 묶입니다.
+  </p>
+  <p>
+    초과하면 결정적 템플릿으로 폴백합니다(ADR-003).
+    채팅은 <span class="mono">converse_stream</span> 스트리밍으로 별도 처리됩니다.
+  </p>
+  <p>
+    둘째, 합성 폴백입니다.
+    데이터 경로가 죽어도 데모가 빈 화면이 되지 않도록, 결정형 시나리오 대부분(10개 라우터)에
+    합성 폴백과 <span class="mono">_synthetic</span> 플래그가 있습니다.
     검색(A)과 채팅(B)에는 없습니다.
   </p>
   <div class="callout warn">
     <span class="callout-title">주의 - LLM에게 그래프 질의를 맡길 때의 방어선</span>
     <p>
-      <span class="mono">neptune_query</span>는 모델이 직접 Cypher를 작성하는 도구라서 프롬프트 인젝션으로
-      쓰기 질의가 흘러들 수 있습니다. 이 프로젝트는 <span class="mono">chat.py:_tool_neptune</span>에서
-      CREATE, DELETE, SET, MERGE, DROP 등을 정규식 거부 목록으로 차단하는 읽기 전용 게이트웨이를 두고(ADR-002),
-      사용자 제공 라벨은 22클래스 허용 목록으로만 통과시킵니다. 같은 구조를 만들 때 이 계층을 생략하면
-      에이전트가 그래프를 변조할 수 있는 경로가 그대로 열립니다.
+      <span class="mono">neptune_query</span>는 모델이 직접 Cypher를 작성하는 도구입니다.
+      그래서 프롬프트 인젝션(악의적 입력으로 모델의 행동을 바꾸는 공격)으로 쓰기 질의가 흘러들 수 있습니다.
+    </p>
+    <p>
+      이 프로젝트는 <span class="mono">chat.py:_tool_neptune</span>에 읽기 전용 게이트웨이를 둡니다.
+      CREATE, DELETE, SET, MERGE, DROP 등을 정규식 거부 목록으로 차단하고(ADR-002),
+      사용자 제공 라벨은 22클래스 허용 목록으로만 통과시킵니다.
+      같은 구조를 만들 때 이 계층을 생략하면 에이전트가 그래프를 변조할 수 있는 경로가 그대로 열립니다.
     </p>
   </div>
 
   <h3>3.2 하이브리드 검색: BM25 + k-NN + RRF</h3>
   <p>
-    의미 검색(시나리오 A)은 두 검색을 병렬로 돌려 합칩니다. 한국어 Nori 분석기 기반 BM25와
-    Titan 1,024차원 임베딩 k-NN을 각각 50건씩 뽑고, Reciprocal Rank Fusion(k=60)으로 순위를 융합해
-    상위 10건을 반환합니다. OpenSearch Serverless에는 search pipeline 모듈이 없어서
+    의미 검색(시나리오 A)은 두 검색을 병렬로 돌려 합칩니다.
+    하나는 한국어 Nori 분석기 기반 BM25(단어 일치 점수로 문서를 찾는 고전적 키워드 검색)입니다.
+    다른 하나는 Titan 1,024차원 임베딩(문장의 의미를 숫자 벡터로 바꾼 표현)을 쓰는
+    k-NN(벡터 거리가 가장 가까운 문서를 찾는 검색)입니다.
+  </p>
+  <p>
+    두 결과는 어떻게 합쳐질까요?
+    각각 50건씩 뽑고, 각 목록에서의 등수만으로 점수를 매기는 Reciprocal Rank Fusion,
+    줄여서 RRF(k=60)로 순위를 융합해 상위 10건을 반환합니다.
+    OpenSearch Serverless에는 search pipeline 모듈이 없어서
     <strong>RRF 융합을 Python에서 직접 수행</strong>합니다.
   </p>
   <div class="codeblock">
@@ -806,51 +873,73 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)</code></pre>
   </div>
   <p>
-    설계 의도는 상호 보완입니다. BM25는 부품 번호나 표준 이름 같은 정확한 토큰에 강하고,
+    설계 의도는 상호 보완입니다.
+    BM25는 부품 번호나 표준 이름 같은 정확한 토큰에 강합니다.
     k-NN은 "차량용 고온 환경 커패시터"처럼 표현이 다른 질의에 강합니다.
-    Bedrock 리랭커 단계는 코드에 준비되어 있으나 ap-northeast-2 미제공으로 현재 배포에서는 비활성입니다.
+  </p>
+  <p>
+    리랭커(검색 결과를 더 정밀한 모델로 다시 정렬하는 단계)는 Bedrock 기반으로 코드에 준비되어 있습니다.
+    다만 ap-northeast-2 미제공으로 현재 배포에서는 비활성입니다.
   </p>
 
   <h3>3.3 페르소나별 프레이밍</h3>
   <p>
-    같은 화면, 같은 질문이라도 보는 사람의 KPI가 다릅니다. 이 프로젝트는 Buyer, Engineer, Quality, SCM, Plant
-    5개 페르소나를 라우팅이 아닌 <strong>런타임 컨텍스트</strong>로 다룹니다.
-    웹에서는 단일 <span class="mono">useActivePersona()</span> 컨텍스트가 12개 시나리오 화면의 프레이밍을 바꾸고,
+    같은 화면, 같은 질문이라도 보는 사람의 KPI가 다릅니다.
+    이 프로젝트는 Buyer, Engineer, Quality, SCM, Plant 5개 페르소나(사용자 역할 유형)를
+    라우팅이 아닌 <strong>런타임 컨텍스트</strong>로 다룹니다.
+  </p>
+  <p>
+    웹에서는 단일 <span class="mono">useActivePersona()</span> 컨텍스트가 12개 시나리오 화면의 프레이밍을 바꿉니다.
     API에서는 시스템 프롬프트가 <span class="mono">persona</span> 값으로 포맷됩니다.
     페르소나별 라우트 디렉터리를 만들었다가 v0.5.2에서 제거한 이력이 CLAUDE.md에 남아 있습니다.
   </p>
   <p>
     매 턴이 끝나면 <span class="mono">api/services/followups.py</span>가 Haiku(300 토큰 한도)로
-    한국어 후속 질문 3개를 생성해 SSE <span class="mono">suggested_followups</span> 이벤트로 내보냅니다.
-    이때 페르소나별 어조 맵이 들어갑니다. Buyer는 단가, 리드타임, MOQ 방향으로,
-    Engineer는 스펙과 AEC-Q, JEDEC 인증 방향으로, Quality는 8D와 REACH-SVHC 방향으로,
-    SCM은 TradeLane과 IRA, CBAM 방향으로, Plant는 OEE와 텔레메트리 방향으로 질문이 기울어집니다.
+    한국어 후속 질문 3개를 생성합니다.
+    결과는 SSE <span class="mono">suggested_followups</span> 이벤트로 내보내고, 이때 페르소나별 어조 맵이 들어갑니다.
+  </p>
+  <p>
+    예를 들어 Buyer는 단가, 리드타임, MOQ 방향으로 질문이 기울어집니다.
+    Engineer는 스펙과 AEC-Q, JEDEC 인증, Quality는 8D와 REACH-SVHC,
+    SCM은 TradeLane과 IRA, CBAM, Plant는 OEE와 텔레메트리 방향입니다.
     생성 실패 시에는 빈 배열로 조용히 폴백합니다.
   </p>
 
   <h3>3.4 대표 시나리오 패턴: 8D / RCA</h3>
   <p>
     8D 보고서 시나리오(J)는 이 아키텍처의 조합 방식을 가장 잘 보여줍니다.
-    그래프에는 QualityIncident에서 EightDReport, RootCause를 거쳐 Supplier까지 이어지는 품질 사슬이 있고,
+    그래프에는 QualityIncident에서 EightDReport, RootCause를 거쳐 Supplier까지 이어지는 품질 사슬이 있습니다.
     보고서 초안은 <span class="mono">api/services/eight_d_writer.py</span>가 작성합니다.
-    Haiku가 <span class="mono">emit_eight_d</span> 도구를 정확히 한 번 호출하도록 강제하고,
-    도구 스키마가 <strong>8개 필수 문자열 필드</strong>(D1-D8)를 요구하므로 출력 형식이 프롬프트가 아니라
-    스키마로 보장됩니다. <span class="mono">maxTokens=1500</span>으로 25초 예산 안에 들어옵니다.
+  </p>
+  <p>
+    출력 형식은 어떻게 보장될까요?
+    Haiku가 <span class="mono">emit_eight_d</span> 도구를 정확히 한 번 호출하도록 강제되고,
+    도구 스키마가 <strong>8개 필수 문자열 필드</strong>(D1-D8)를 요구하므로
+    형식이 프롬프트가 아니라 스키마로 보장됩니다.
+    <span class="mono">maxTokens=1500</span>으로 25초 예산 안에 들어옵니다.
   </p>
   <p class="lead-def">
-    <b>원칙:</b> 정형 출력은 작은 모델 + tool-use 스키마로, 자유 추론은 큰 모델 + 도구 루프로 푼다는 분리가
-    이 프로젝트 전체를 관통합니다(ADR-001).
+    <b>원칙:</b> 정형 출력은 작은 모델과 tool-use 스키마로 풉니다.
+    자유 추론은 큰 모델과 도구 루프로 풉니다.
+    이 분리가 프로젝트 전체를 관통합니다(ADR-001).
   </p>
 </section>
 
 <!-- ===================== 04 ===================== -->
 <section class="sec" id="s4">
-  <h2><span class="no">04</span>12개 시나리오 개관</h2>
+  <h2><span class="no">04</span>12개 시나리오 한눈에 보기</h2>
   <p>
-    시나리오 A부터 L까지가 제조 라이프사이클을 덮습니다. 각 시나리오는
-    <span class="mono">api/routers/</span>의 라우터 하나와 웹 페이지 하나로 대응되며,
-    아래 핵심 엔진 열은 각 라우터가 실제로 import하는 서비스 기준입니다.
+    이 절은 데모가 제공하는 12개 화면을 한 표로 정리합니다.
+    무엇이 LLM을 쓰고 무엇이 쓰지 않는지가 핵심입니다.
+  </p>
+  <p>
+    시나리오 A부터 L까지가 제조 라이프사이클을 덮습니다.
+    각 시나리오는 <span class="mono">api/routers/</span>의 라우터 하나와 웹 페이지 하나로 대응됩니다.
     LLM이 개입하는 것은 B, J 계열이고 나머지 다수는 그래프 질의와 결정적 도메인 엔진의 조합입니다.
+  </p>
+  <p>
+    아래 표에서 볼 것은 각 시나리오를 구현하는 라우터와 핵심 엔진이며,
+    핵심 엔진 열은 각 라우터가 실제로 import하는 서비스 기준입니다.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -875,24 +964,39 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
     </table>
   </div>
   <p>
-    패턴은 셋으로 압축됩니다. 검색형(A, D)은 하이브리드 검색이 후보를 만들고 그래프가 맥락을 붙입니다.
+    패턴은 셋으로 압축됩니다.
+    검색형(A, D)은 하이브리드 검색이 후보를 만들고 그래프가 맥락을 붙입니다.
     결정형(C, E, F, G, H, I, K, L)은 openCypher 질의와 도메인 엔진(관세 lane 시뮬레이션, RFM 점수, 탄소 계산)이
-    LLM 없이 값을 계산합니다. 생성형(B, J)만 Bedrock이 개입하고, 전부 SSE 스트리밍과 타임아웃 폴백을 갖습니다.
-    다만 인사이트(C)는 저장소 문서(ADR-001)가 LLM 서사 생성을 서술하는 반면 현재 코드는 Neptune 집계와
-    결정적 템플릿만 사용하는, 문서와 코드가 어긋나는 지점입니다.
+    LLM 없이 값을 계산합니다.
+  </p>
+  <p>
+    생성형(B, J)만 Bedrock이 개입하고, 전부 SSE 스트리밍과 타임아웃 폴백을 갖습니다.
     12개를 나열식으로 읽기보다 이 세 패턴의 조합으로 읽는 편이 구조 이해에 유리합니다.
+  </p>
+  <p>
+    한 가지 어긋남이 있습니다.
+    인사이트(C)는 저장소 문서(ADR-001)가 LLM 서사 생성을 서술합니다.
+    반면 현재 코드는 Neptune 집계와 결정적 템플릿만 사용하는, 문서와 코드가 어긋나는 지점입니다.
   </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
 <section class="sec" id="s5">
   <h2><span class="no">05</span>실제 운영: 배포, 인증, 라이브 데모</h2>
+  <p>
+    이 절은 이 시스템을 실제로 어떻게 배포하고 보호하는지 다룹니다.
+    그리고 어디에서 직접 볼 수 있는지도 안내합니다.
+  </p>
 
   <h3>5.1 배포 파이프라인</h3>
   <p>
-    CI는 GitHub Actions 3개 병렬 잡(api: pytest, web: tsc + next build, cdk: Jest 불변식 테스트)이고,
-    이미지 배포는 수동입니다. ARM64 이미지를 빌드해 ECR에 푸시한 뒤 ECS 서비스를 강제 재배포합니다.
-    v0.5.6 기준 pytest 스위트는 175개가 통과합니다.
+    CI(코드가 올라올 때마다 자동으로 도는 빌드와 테스트)는 GitHub Actions 3개 병렬 잡입니다.
+    api는 pytest, web은 tsc + next build, cdk는 Jest 불변식 테스트를 돌립니다.
+    테스트 규모는 어느 정도일까요? v0.5.6 기준 pytest 스위트는 175개가 통과합니다.
+  </p>
+  <p>
+    이미지 배포는 수동입니다.
+    ARM64 이미지를 빌드해 ECR에 푸시한 뒤 ECS 서비스를 강제 재배포합니다.
   </p>
   <div class="codeblock">
     <div class="code-caption">배포 - 개발 호스트에서 실행 (CLAUDE.md의 절차)</div>
@@ -904,27 +1008,36 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 
   <h3>5.2 인증과 가드레일</h3>
   <p>
-    전체 사이트는 Amazon Cognito User Pool(us-east-1)로 보호되고, API 미들웨어가 JWT를 검증합니다.
-    <span class="mono">/healthz</span> 같은 경로만 예외입니다. 여기에 Bedrock Guardrails가
-    제조 특화 4개 토픽(기밀 IP, 경쟁사 비방, 규제 위반, 유해 화학물질)을 걸러
-    개입 내역을 운영 콘솔에서 노출합니다. Neptune과 OpenSearch는 VPC 내부 전용이라
-    외부에서 직접 접근할 수 없고 API 태스크 롤로만 접근이 허용됩니다.
+    전체 사이트는 Amazon Cognito User Pool(us-east-1)로 보호됩니다.
+    API 미들웨어가 JWT(로그인 사실을 담은 서명된 토큰)를 검증하고,
+    <span class="mono">/healthz</span> 같은 경로만 예외입니다.
+  </p>
+  <p>
+    여기에 Bedrock Guardrails(LLM의 입출력을 정책으로 거르는 필터)가
+    제조 특화 4개 토픽(기밀 IP, 경쟁사 비방, 규제 위반, 유해 화학물질)을 거릅니다.
+    개입 내역은 운영 콘솔에서 노출됩니다.
+    Neptune과 OpenSearch는 VPC 내부 전용이라 외부에서 직접 접근할 수 없고 API 태스크 롤로만 접근이 허용됩니다.
   </p>
 
   <h3>5.3 라이브 데모와 운영 콘솔</h3>
   <p>
     라이브 데모는 https://mfg-ontology.whchoi.net 에서 동작하며 <strong>Cognito 로그인이 필요</strong>합니다
-    (계정은 프로젝트 소유자를 통해 발급). 운영 콘솔에는 30개 제조 도메인 질의를 재실행해 점수를 매기는
-    평가 보드(<span class="mono">/api/ops/eval</span>)와 최근 200개 tool_call 이벤트를 보여주는
-    트레이스 링 버퍼(<span class="mono">/api/ops/trace</span>)가 있어, 에이전트가 어떤 도구를 어떤 인자로
-    불렀는지 배포 환경에서 바로 확인할 수 있습니다.
+    (계정은 프로젝트 소유자를 통해 발급).
+    운영 콘솔에는 관측 도구 두 가지가 있습니다.
+  </p>
+  <p>
+    하나는 30개 제조 도메인 질의를 재실행해 점수를 매기는 평가 보드(<span class="mono">/api/ops/eval</span>)입니다.
+    다른 하나는 최근 200개 tool_call 이벤트를 보여주는 트레이스 링 버퍼(<span class="mono">/api/ops/trace</span>)입니다.
+    에이전트가 어떤 도구를 어떤 인자로 불렀는지 배포 환경에서 바로 확인할 수 있습니다.
   </p>
   <div class="callout note">
     <span class="callout-title">참고 - SSE와 CloudFront의 궁합</span>
     <p>
-      토큰 스트리밍은 중간의 어떤 계층이라도 버퍼링하면 무너집니다. 이 프로젝트는
-      CloudFront의 origin 압축을 SSE 경로에서 비활성화하고(ADR-007), Lambda@Edge를
-      viewer request(인증)에만 붙여 origin response 단계의 버퍼링을 피했습니다.
+      토큰 스트리밍은 중간의 어떤 계층이라도 버퍼링하면 무너집니다.
+      이 프로젝트는 CloudFront의 origin 압축을 SSE 경로에서 비활성화했습니다(ADR-007).
+      Lambda@Edge는 viewer request(인증)에만 붙여 origin response 단계의 버퍼링을 피했습니다.
+    </p>
+    <p>
       SSE가 배포에서만 한 덩어리로 도착한다면 이 두 지점을 먼저 확인할 필요가 있습니다.
     </p>
   </div>
@@ -934,12 +1047,16 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <section class="sec" id="s6">
   <h2><span class="no">06</span>한계</h2>
   <p>
-    이 프로젝트는 PoC이고, 저장소 스스로도 그렇게 선언합니다. 문서를 근거로 도입 판단을 하기 전에
-    다음 경계를 확인해야 합니다.
+    이 절은 이 프로젝트를 근거로 판단하기 전에 알아야 할 경계를 정리합니다.
+    좋은 점만 보지 않기 위한 목록입니다.
+  </p>
+  <p>
+    이 프로젝트는 PoC(개념 검증용 프로젝트)이고, 저장소 스스로도 그렇게 선언합니다.
+    도입 판단을 하기 전에 다음을 확인해야 합니다.
   </p>
   <ul class="plain">
     <li><strong>합성 데이터입니다.</strong> 그래프의 약 10,644개 노드는 생성기가 만든 것으로, 실제 협력사와 부품 정보는 포함하지 않습니다. 표준/규제 데이터만 실제 체계의 서브셋입니다. 실데이터 규모(수백만 노드)에서의 Neptune 질의 성능은 검증되지 않았습니다.</li>
-    <li>리랭커가 비활성 상태입니다. ap-northeast-2 미제공으로 검색 품질은 RRF 융합까지만 반영되어 있고, 코드의 리랭크 단계는 현재 배포에서 통과(pass-through)합니다.</li>
+    <li>리랭커가 비활성 상태입니다. ap-northeast-2 미제공으로 검색 품질은 RRF 융합까지만 반영되어 있습니다. 코드의 리랭크 단계는 현재 배포에서 통과(pass-through)합니다.</li>
     <li>이미지 배포가 수동입니다. CI는 테스트만 수행하고, ECR 푸시와 ECS 재배포는 사람이 실행합니다.</li>
     <li>Cypher 읽기 전용 게이트웨이는 정규식 거부 목록 기반입니다. 방어층으로 유효하지만, 프로덕션이라면 권한 분리(읽기 전용 엔드포인트나 IAM 정책 수준의 제약)를 병행하는 편이 안전합니다.</li>
     <li>데모가 Cognito로 잠겨 있어 문서만으로는 화면을 검증할 수 없습니다. 코드와 docs/의 서술이 1차 근거입니다.</li>
@@ -951,15 +1068,23 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <section class="sec" id="s7">
   <h2><span class="no">07</span>결론</h2>
   <p>
+    마지막으로 이 프로젝트가 남기는 교훈을 정리합니다.
+    한 문장으로 요약하면, 지식은 그래프에, 정확한 계산은 결정적 엔진에, 해석과 서술만 LLM에 맡기는
+    역할 분리가 이 프로젝트의 핵심입니다.
+  </p>
+  <p>
     ontology-for-mfg가 보여주는 것은 "LLM에 제조 데이터를 붙이는" 일반론이 아니라 역할 분리의 구체적인 배치입니다.
     도메인 지식은 22클래스 스키마와 그래프에, 정확한 계산은 결정적 엔진에, 모호한 질의 해석과 서술만 LLM에 둡니다.
     그 결과 12개 시나리오 중 LLM이 필요한 것은 2개(B, J)뿐이고, 나머지는 재현 가능한 그래프 질의로 답합니다.
   </p>
   <p>
-    제조 도메인에 온톨로지 기반 에이전트를 검토한다면 이 저장소에서 가져갈 수 있는 재사용 가능한 패턴은
-    네 가지입니다. BOM과 규제를 클래스로 승격한 스키마 설계, 읽기 전용 Cypher 게이트웨이,
-    Sonnet/Haiku 역할 분리와 25초 타임아웃 + 결정적 폴백, 그리고 페르소나를 라우팅이 아닌
-    런타임 컨텍스트로 다루는 프레이밍 구조입니다. 코드는 GitHub에 공개되어 있으므로
+    제조 도메인에 온톨로지 기반 에이전트를 검토한다면 재사용할 수 있는 패턴은 네 가지입니다.
+    BOM과 규제를 클래스로 승격한 스키마 설계, 읽기 전용 Cypher 게이트웨이,
+    Sonnet/Haiku 역할 분리와 25초 타임아웃에 결정적 폴백을 더한 구성,
+    그리고 페르소나를 라우팅이 아닌 런타임 컨텍스트로 다루는 프레이밍 구조입니다.
+  </p>
+  <p>
+    코드는 GitHub에 공개되어 있습니다.
     schema.ttl과 <span class="mono">api/services/agent.py</span>부터 읽기 시작하는 것을 권합니다.
   </p>
 </section>
@@ -972,6 +1097,9 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <!-- ===================== References ===================== -->
 <section class="sec refs" id="refs">
   <h2><span class="no">--</span>참고 자료</h2>
+  <p>
+    본문이 근거로 삼은 저장소와 공식 문서 목록입니다.
+  </p>
 
   <h3>핵심 출처</h3>
   <ul>
@@ -1066,10 +1194,10 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <section class="tldr" aria-labelledby="tldr-title-en">
   <h2 id="tldr-title-en">Summary</h2>
   <ul>
-    <li>ontology-for-mfg models the high-tech manufacturing domain as a Neptune knowledge graph with <strong>22 classes and 24 relationships</strong>, and layers 12 scenarios (A-L) and 5 personas on top. Every number here was verified directly against schema.ttl and the code.</li>
-    <li>A Bedrock <span class="mono">converse_stream</span>-based agent calls 5 tools (<span class="mono">search_semantic</span>, <span class="mono">neptune_query</span>, <span class="mono">kb_retrieve</span>, <span class="mono">compliance_check</span>, <span class="mono">memory_save</span>) for up to 8 rounds, and answers are streamed token by token over SSE.</li>
-    <li>What is distinctly manufacturing-specific: a 4-level BOM hierarchy (Product, Module, Component, RawMaterial), 4 standards/regulation classes (10 frameworks from JEDEC to CBAM), and a structure that reframes the same question in each persona's KPI language.</li>
-    <li>A live demo runs at https://mfg-ontology.whchoi.net (Cognito-protected). Note that it is a PoC built on roughly 10,644 nodes of synthetic data, so it contains no real supplier or component information.</li>
+    <li>ontology-for-mfg turns manufacturing knowledge (product structure, suppliers, regulations, quality) into a Neptune knowledge graph with <strong>22 classes and 24 relationships</strong>, as a proof-of-concept (PoC) project. On top sit 12 scenarios (A-L) and 5 persona views, and every number here was verified directly against schema.ttl and the code.</li>
+    <li>Questions are answered by a Bedrock <span class="mono">converse_stream</span>-based agent. It picks from 5 tools such as search and graph queries for up to 8 rounds, and answers reach the screen token by token as they are generated (SSE streaming).</li>
+    <li>Three things are distinctly manufacturing-specific. A BOM structure that descends 4 levels from product to raw material (Product, Module, Component, RawMaterial), 4 standards/regulation classes covering 10 frameworks from JEDEC to CBAM, and a persona structure that rewords the same question for each viewer's KPIs.</li>
+    <li>A live demo runs at https://mfg-ontology.whchoi.net and requires a Cognito login. The roughly 10,644 nodes are all synthetic data, so it contains no real supplier or component information.</li>
   </ul>
 </section>
 
@@ -1077,9 +1205,9 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <nav class="toc" aria-label="Table of contents">
   <p class="toc-title">Contents</p>
   <ol>
-    <li><span class="no">01</span><a href="#s1-en">The Problem Ontology Solves in Manufacturing</a></li>
-    <li><span class="no">02</span><a href="#s2-en">How It Works: the 22-Class Schema and AWS Architecture</a></li>
-    <li><span class="no">03</span><a href="#s3-en">Deep Dive into the Core Mechanisms</a></li>
+    <li><span class="no">01</span><a href="#s1-en">Why Manufacturing Needs an Ontology</a></li>
+    <li><span class="no">02</span><a href="#s2-en">The Big Picture: the 22-Class Schema and AWS Architecture</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Four Core Mechanisms</a></li>
     <li><span class="no">04</span><a href="#s4-en">The 12 Scenarios at a Glance</a></li>
     <li><span class="no">05</span><a href="#s5-en">Running It: Deployment, Auth, Live Demo</a></li>
     <li><span class="no">06</span><a href="#s6-en">Limitations</a></li>
@@ -1092,32 +1220,53 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 
 <!-- ===================== 01 (EN) ===================== -->
 <section class="sec" id="s1-en">
-  <h2><span class="no">01</span>The Problem Ontology Solves in Manufacturing</h2>
+  <h2><span class="no">01</span>Why Manufacturing Needs an Ontology</h2>
+  <p>
+    This section explains why data questions on a manufacturing floor are hard to answer.
+    It then shows how organizing knowledge as a graph removes that difficulty.
+  </p>
   <p>
     Most data questions in high-tech manufacturing can only be answered by following relationships
-    across several hops. A single question like "which components in this product contain substances
-    regulated under REACH" requires a <strong>join of four or more hops</strong>:
+    across several hops. Take a single question: "which components in this product contain substances
+    regulated under REACH?"
+    Answering it requires a <strong>join of four or more hops</strong>:
     product &rarr; module &rarr; component &rarr; substance &rarr; regulation.
-    Relational tables can answer it, but every new question forces the join path to be redesigned,
-    and it is hard for an LLM to compose such queries on its own.
   </p>
   <p>
-    The manufacturing-specific relationship chains this project makes explicit in its ontology come in three strands.
-    First, the BOM hierarchy: <span class="mono">Product -hasModule-&gt; Module -consistsOf-&gt; Component -madeOf-&gt; RawMaterial</span>
-    takes the product structure down into a 4-level graph. Second, regulatory tracing:
-    the <span class="mono">Component -containsSubstance-&gt; Substance -regulatedBy-&gt; Regulation</span> chain
-    lets you start from a component and determine REACH-SVHC or RoHS applicability with graph traversal alone.
-    Third, quality tracing: <span class="mono">QualityIncident -about-&gt; Component</span>,
-    <span class="mono">EightDReport -addresses-&gt; QualityIncident</span>, and
-    <span class="mono">EightDReport -identifies-&gt; RootCause -linkedTo-&gt; Supplier</span> connect
-    a quality incident to its root cause and the responsible supplier within a single graph.
+    Relational tables can answer it.
+    But every new question forces the join path to be redesigned.
+    It is also hard for an LLM to compose such queries on its own.
   </p>
+  <p>
+    This project uses an ontology (a schema that defines a domain's concepts and relationships in a
+    machine-readable way) to make three manufacturing-specific relationship chains explicit.
+  </p>
+  <ul class="plain">
+    <li>
+      <strong>The BOM hierarchy.</strong> A BOM (bill of materials) lists which parts a product is built from.
+      <span class="mono">Product -hasModule-&gt; Module -consistsOf-&gt; Component -madeOf-&gt; RawMaterial</span>
+      takes the product structure down into a 4-level graph.
+    </li>
+    <li>
+      <strong>Regulatory tracing.</strong>
+      The <span class="mono">Component -containsSubstance-&gt; Substance -regulatedBy-&gt; Regulation</span> chain exists in the schema.
+      You can start from a component and determine REACH-SVHC or RoHS applicability with graph traversal alone.
+    </li>
+    <li>
+      <strong>Quality tracing.</strong> The schema holds <span class="mono">QualityIncident -about-&gt; Component</span>,
+      <span class="mono">EightDReport -addresses-&gt; QualityIncident</span>, and
+      <span class="mono">EightDReport -identifies-&gt; RootCause -linkedTo-&gt; Supplier</span>.
+      A quality incident connects to its root cause and the responsible supplier within a single graph.
+    </li>
+  </ul>
   <p>
     Promoting standards and regulations from data to classes is where this project diverges from its
-    sibling retail project. Four classes (Standard, Certification, Regulation, Substance) exist in the schema,
-    and real standards-data subsets from 10 frameworks (JEDEC, IPC, AEC-Q, IATF 16949, ISO 9001,
+    sibling retail project. Four classes (Standard, Certification, Regulation, Substance) exist in the schema.
+    Real standards-data subsets from 10 frameworks (JEDEC, IPC, AEC-Q, IATF 16949, ISO 9001,
     REACH-SVHC, RoHS, CBAM, IRA, USMCA) are loaded from <span class="mono">data/public/</span>.
-    A component's certification status and trade-regulation exposure become graph-queryable.
+  </p>
+  <p>
+    As a result, a component's certification status and trade-regulation exposure become graph-queryable.
   </p>
   <div class="callout note">
     <span class="callout-title">Note - what "ontology" means in this document</span>
@@ -1125,19 +1274,27 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
       Here, ontology does not mean a heavyweight semantic-web stack with an OWL reasoner.
       It means a pragmatic schema: class and relationship definitions written in OWL syntax in
       <span class="mono">schema.ttl</span>, then carried over as labels and edge types in a Neptune
-      property graph. Queries are written in openCypher, not SPARQL.
+      property graph. Queries are written in openCypher (a query language for graph databases), not SPARQL.
     </p>
   </div>
 </section>
 
 <!-- ===================== 02 (EN) ===================== -->
 <section class="sec" id="s2-en">
-  <h2><span class="no">02</span>How It Works: the 22-Class Schema and AWS Architecture</h2>
+  <h2><span class="no">02</span>The Big Picture: the 22-Class Schema and AWS Architecture</h2>
+  <p>
+    This section walks through the system's skeleton.
+    It covers the schema that holds the knowledge, the AWS services that run it, and which AI model is used where.
+  </p>
 
   <h3>2.1 The 22-class schema</h3>
   <p>
+    How big is the schema?
     <span class="mono">ontology/schema.ttl</span> defines <strong>22 owl:Class and 24 owl:ObjectProperty</strong> entries.
     The classes fall into five groups.
+  </p>
+  <p>
+    What to look for in the table below: how the 22 classes group into five families, and which relationships tie each family together.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -1175,20 +1332,28 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
     </table>
   </div>
   <p>
+    Where does the data come from?
     A synthetic-data generator (<span class="mono">data/synthetic/</span>) produces roughly 10,644 nodes
-    following this schema and exports them as ndjson; an in-VPC loader ingests them into
-    Neptune (openCypher bulk) and OpenSearch (<span class="mono">_bulk</span>).
-    The same schema also exists as Pydantic models (<span class="mono">data/schemas.py</span>),
-    so generation, loading, and API responses share a single type definition.
+    following this schema and exports them as ndjson.
+    An in-VPC loader then ingests them into Neptune (openCypher bulk) and OpenSearch (<span class="mono">_bulk</span>).
+  </p>
+  <p>
+    The same schema also exists as Pydantic models (<span class="mono">data/schemas.py</span>).
+    Thanks to this, generation, loading, and API responses share a single type definition.
   </p>
 
   <h3>2.2 AWS architecture</h3>
   <p>
-    The runtime environment is entirely AWS managed services. The knowledge graph is Amazon Neptune
-    (openCypher, VPC-internal only), semantic search is Amazon OpenSearch Serverless
-    (VECTORSEARCH collection, Korean Nori analyzer + k-NN HNSW), the LLM is the Amazon Bedrock Converse API,
-    compute is two ECS Fargate ARM64 services (api, web), the edge is CloudFront with an ACM custom domain,
-    and auth is Amazon Cognito. The entire infrastructure is defined as 6 AWS CDK v2 (TypeScript) stacks
+    The runtime environment is entirely AWS managed services. By role, the lineup is as follows.
+  </p>
+  <ul class="plain">
+    <li>The knowledge graph is Amazon Neptune (openCypher, VPC-internal only).</li>
+    <li>Semantic search is Amazon OpenSearch Serverless (VECTORSEARCH collection, Korean Nori analyzer + k-NN HNSW).</li>
+    <li>The LLM is the Amazon Bedrock Converse API, and compute is two ECS Fargate ARM64 services (api, web).</li>
+    <li>The edge is CloudFront with an ACM custom domain, and auth is Amazon Cognito.</li>
+  </ul>
+  <p>
+    The entire infrastructure is defined as 6 AWS CDK v2 (TypeScript) stacks
     (network, data, ai, compute, edge, observability).
   </p>
 
@@ -1211,9 +1376,13 @@ flowchart LR
 
   <h3>2.3 Bedrock model routing</h3>
   <p>
-    Models are split by purpose. Conversation and insights, which need long-form Korean reasoning and
-    multi-round tool use, go to Sonnet; structured output with a fixed schema goes to Haiku.
-    Model IDs are the defaults in <span class="mono">api/config.py</span>.
+    Models are split by purpose.
+    Conversation and insights, which need long-form Korean reasoning and multi-round tool use
+    (the model calling external tools mid-conversation), go to Sonnet.
+    Structured output with a fixed schema goes to Haiku.
+  </p>
+  <p>
+    What to look for in the table below: the model ID for each purpose, using the defaults in <span class="mono">api/config.py</span>.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -1233,15 +1402,27 @@ flowchart LR
 
 <!-- ===================== 03 (EN) ===================== -->
 <section class="sec" id="s3-en">
-  <h2><span class="no">03</span>Deep Dive into the Core Mechanisms</h2>
+  <h2><span class="no">03</span>Four Core Mechanisms</h2>
+  <p>
+    This section looks into four parts at the heart of the system.
+    They are the loop where the agent picks tools, the way two searches are merged,
+    the viewer-specific framing, and one representative scenario.
+  </p>
   <h3>3.1 The agent tool-use loop: 5 tools</h3>
   <p>
     The heart of the conversational agent (scenario B) is the AgentRunner in <span class="mono">api/services/agent.py</span>.
     It calls Bedrock <span class="mono">converse_stream</span> and, whenever the model requests a tool,
-    feeds the execution result back into the conversation, looping for <strong>up to 8 rounds</strong>
-    (<span class="mono">max_rounds=8</span>). Since v0.5.6, <span class="mono">contentBlockDelta</span> text chunks
-    are forwarded as SSE <span class="mono">delta</span> events the moment they arrive; per the repository CHANGELOG,
-    time to first token dropped from 2-5 seconds to around 300-600ms.
+    feeds the execution result back into the conversation.
+    This loop runs for <strong>up to 8 rounds</strong> (<span class="mono">max_rounds=8</span>).
+  </p>
+  <p>
+    How much faster did responses get? Since v0.5.6, <span class="mono">contentBlockDelta</span> text chunks
+    are forwarded as SSE (a web standard where the server pushes a response in small real-time pieces)
+    <span class="mono">delta</span> events the moment they arrive.
+    Per the repository CHANGELOG, time to first token dropped from 2-5 seconds to around 300-600ms.
+  </p>
+  <p>
+    What to look for in the table below: the 5 tools the agent can pick from, and the backend each tool actually calls.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -1259,30 +1440,49 @@ flowchart LR
     </table>
   </div>
   <p>
-    There are two layers of stability protection. First, synchronous Bedrock calls such as the 8D pipeline
-    (and ops evaluation runs) are bounded by a 25-second timeout via
-    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span> and fall back to a deterministic
-    template on expiry (ADR-003). Chat is handled separately as <span class="mono">converse_stream</span> streaming.
-    Second, so that the demo never renders an empty screen when a data path dies, most deterministic scenarios
-    (10 routers) carry a synthetic fallback and a <span class="mono">_synthetic</span> flag;
-    search (A) and chat (B) do not.
+    There are two layers of stability protection.
+    First, timeouts on synchronous Bedrock calls.
+    The 8D pipeline (8D is a standard manufacturing report format that organizes a quality incident's
+    causes and countermeasures into 8 items) and ops evaluation runs are bounded by a 25-second timeout via
+    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span>.
+  </p>
+  <p>
+    On expiry they fall back to a deterministic template (ADR-003).
+    Chat is handled separately as <span class="mono">converse_stream</span> streaming.
+  </p>
+  <p>
+    Second, synthetic fallbacks.
+    So that the demo never renders an empty screen when a data path dies, most deterministic scenarios
+    (10 routers) carry a synthetic fallback and a <span class="mono">_synthetic</span> flag.
+    Search (A) and chat (B) do not.
   </p>
   <div class="callout warn">
     <span class="callout-title">Caution - the defenses you need when an LLM writes graph queries</span>
     <p>
-      <span class="mono">neptune_query</span> is a tool where the model writes Cypher directly, so prompt
-      injection could smuggle in write queries. This project puts a read-only gateway in
-      <span class="mono">chat.py:_tool_neptune</span> that blocks CREATE, DELETE, SET, MERGE, DROP and similar
-      via a regex denylist (ADR-002), and passes user-supplied labels only through a 22-class allowlist.
+      <span class="mono">neptune_query</span> is a tool where the model writes Cypher directly.
+      That means prompt injection (an attack that alters the model's behavior through malicious input)
+      could smuggle in write queries.
+    </p>
+    <p>
+      This project puts a read-only gateway in <span class="mono">chat.py:_tool_neptune</span>.
+      It blocks CREATE, DELETE, SET, MERGE, DROP and similar via a regex denylist (ADR-002),
+      and passes user-supplied labels only through a 22-class allowlist.
       If you build the same structure and omit this layer, you leave open a path for the agent to mutate the graph.
     </p>
   </div>
 
   <h3>3.2 Hybrid search: BM25 + k-NN + RRF</h3>
   <p>
-    Semantic search (scenario A) runs two searches in parallel and merges them. Korean Nori-analyzer-based BM25
-    and Titan 1,024-dimension embedding k-NN each fetch 50 hits, and Reciprocal Rank Fusion (k=60) fuses the
-    rankings to return the top 10. OpenSearch Serverless has no search pipeline module, so
+    Semantic search (scenario A) runs two searches in parallel and merges them.
+    One is Korean Nori-analyzer-based BM25 (classic keyword search that scores documents by word matches).
+    The other is k-NN (search that finds the documents whose vectors are closest) over Titan
+    1,024-dimension embeddings (a sentence's meaning encoded as a numeric vector).
+  </p>
+  <p>
+    How are the two result sets combined?
+    Each fetches 50 hits, and Reciprocal Rank Fusion, or RRF (k=60), which scores documents purely by
+    their rank in each list, fuses the rankings to return the top 10.
+    OpenSearch Serverless has no search pipeline module, so
     <strong>the RRF fusion is performed directly in Python</strong>.
   </p>
   <div class="codeblock">
@@ -1297,41 +1497,58 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)</code></pre>
   </div>
   <p>
-    The design intent is complementarity. BM25 is strong on exact tokens like part numbers and standard names,
-    while k-NN is strong on differently-worded queries like "capacitor for automotive high-temperature environments".
-    A Bedrock reranker stage is prepared in the code but disabled in the current deployment because it is
-    not available in ap-northeast-2.
+    The design intent is complementarity.
+    BM25 is strong on exact tokens like part numbers and standard names.
+    k-NN is strong on differently-worded queries like "capacitor for automotive high-temperature environments".
+  </p>
+  <p>
+    A reranker (a stage that re-orders search results with a more precise model) is prepared in the code,
+    backed by Bedrock.
+    It is disabled in the current deployment, however, because it is not available in ap-northeast-2.
   </p>
 
   <h3>3.3 Per-persona framing</h3>
   <p>
-    Same screen, same question - but each viewer has different KPIs. This project treats its five personas
-    (Buyer, Engineer, Quality, SCM, Plant) as <strong>runtime context</strong>, not routing.
+    Same screen, same question - but each viewer has different KPIs.
+    This project treats its five personas (Buyer, Engineer, Quality, SCM, Plant - user role types)
+    as <strong>runtime context</strong>, not routing.
+  </p>
+  <p>
     On the web, a single <span class="mono">useActivePersona()</span> context changes the framing of all
-    12 scenario screens; in the API, the system prompt is formatted with the <span class="mono">persona</span> value.
+    12 scenario screens.
+    In the API, the system prompt is formatted with the <span class="mono">persona</span> value.
     CLAUDE.md records that per-persona route directories were built and then removed in v0.5.2.
   </p>
   <p>
     At the end of every turn, <span class="mono">api/services/followups.py</span> uses Haiku
-    (300-token budget) to generate three Korean follow-up questions, emitted as an SSE
-    <span class="mono">suggested_followups</span> event. A per-persona tone map goes in at this point:
-    Buyer questions lean toward unit cost, lead time, and MOQ; Engineer toward specs and AEC-Q/JEDEC
-    certification; Quality toward 8D and REACH-SVHC; SCM toward TradeLane, IRA, and CBAM;
-    Plant toward OEE and telemetry. On generation failure it quietly falls back to an empty array.
+    (300-token budget) to generate three Korean follow-up questions.
+    They are emitted as an SSE <span class="mono">suggested_followups</span> event,
+    and a per-persona tone map goes in at this point.
+  </p>
+  <p>
+    For example, Buyer questions lean toward unit cost, lead time, and MOQ.
+    Engineer leans toward specs and AEC-Q/JEDEC certification, Quality toward 8D and REACH-SVHC,
+    SCM toward TradeLane, IRA, and CBAM, and Plant toward OEE and telemetry.
+    On generation failure it quietly falls back to an empty array.
   </p>
 
   <h3>3.4 A representative scenario pattern: 8D / RCA</h3>
   <p>
     The 8D report scenario (J) best illustrates how this architecture composes.
-    The graph holds the quality chain from QualityIncident through EightDReport and RootCause to Supplier,
-    and <span class="mono">api/services/eight_d_writer.py</span> drafts the report.
+    The graph holds the quality chain from QualityIncident through EightDReport and RootCause to Supplier.
+    <span class="mono">api/services/eight_d_writer.py</span> drafts the report.
+  </p>
+  <p>
+    How is the output format guaranteed?
     Haiku is forced to call the <span class="mono">emit_eight_d</span> tool exactly once, and the tool schema
-    requires <strong>8 mandatory string fields</strong> (D1-D8), so the output format is guaranteed by the
-    schema, not the prompt. <span class="mono">maxTokens=1500</span> keeps it inside the 25-second budget.
+    requires <strong>8 mandatory string fields</strong> (D1-D8), so the format is guaranteed by the
+    schema, not the prompt.
+    <span class="mono">maxTokens=1500</span> keeps it inside the 25-second budget.
   </p>
   <p class="lead-def">
-    <b>Principle:</b> structured output goes to a small model plus a tool-use schema; free-form reasoning goes
-    to a large model plus a tool loop. This separation runs through the whole project (ADR-001).
+    <b>Principle:</b> structured output goes to a small model plus a tool-use schema.
+    Free-form reasoning goes to a large model plus a tool loop.
+    This separation runs through the whole project (ADR-001).
   </p>
 </section>
 
@@ -1339,10 +1556,18 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>The 12 Scenarios at a Glance</h2>
   <p>
-    Scenarios A through L cover the manufacturing lifecycle. Each scenario maps to one router in
-    <span class="mono">api/routers/</span> and one web page, and the core-engine column below reflects
-    the services each router actually imports. The LLM is involved only in the B and J family;
-    most of the rest are combinations of graph queries and deterministic domain engines.
+    This section lays out the demo's 12 screens in a single table.
+    The key point is which of them use an LLM and which do not.
+  </p>
+  <p>
+    Scenarios A through L cover the manufacturing lifecycle.
+    Each scenario maps to one router in <span class="mono">api/routers/</span> and one web page.
+    The LLM is involved only in the B and J family; most of the rest are combinations of graph queries
+    and deterministic domain engines.
+  </p>
+  <p>
+    What to look for in the table below: the router and core engine behind each scenario,
+    where the core-engine column reflects the services each router actually imports.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -1367,26 +1592,41 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
     </table>
   </div>
   <p>
-    The patterns compress into three. Search-type (A, D): hybrid search generates candidates and the graph
-    attaches context. Deterministic (C, E, F, G, H, I, K, L): openCypher queries and domain engines
+    The patterns compress into three.
+    Search-type (A, D): hybrid search generates candidates and the graph attaches context.
+    Deterministic (C, E, F, G, H, I, K, L): openCypher queries and domain engines
     (tariff lane simulation, RFM scoring, carbon calculation) compute values without an LLM.
+  </p>
+  <p>
     Only the generative pair (B, J) involves Bedrock, and all of them have SSE streaming and timeout fallbacks.
-    One caveat: for insights (C), the repository documentation (ADR-001) describes LLM narrative generation
-    while the current code uses only Neptune aggregation and deterministic templates - a point where docs and
-    code diverge. Reading the 12 as combinations of these three patterns is more useful for understanding
+    Reading the 12 as combinations of these three patterns is more useful for understanding
     the structure than reading them as a list.
+  </p>
+  <p>
+    One caveat exists.
+    For insights (C), the repository documentation (ADR-001) describes LLM narrative generation.
+    The current code, however, uses only Neptune aggregation and deterministic templates - a point where
+    docs and code diverge.
   </p>
 </section>
 
 <!-- ===================== 05 (EN) ===================== -->
 <section class="sec" id="s5-en">
   <h2><span class="no">05</span>Running It: Deployment, Auth, Live Demo</h2>
+  <p>
+    This section covers how the system is actually deployed and protected.
+    It also points to where you can see it running.
+  </p>
 
   <h3>5.1 Deployment pipeline</h3>
   <p>
-    CI is three parallel GitHub Actions jobs (api: pytest, web: tsc + next build, cdk: Jest invariant tests);
-    image deployment is manual. An ARM64 image is built, pushed to ECR, then the ECS service is force-redeployed.
-    As of v0.5.6 the pytest suite passes 175 tests.
+    CI (the build and tests that run automatically on every push) is three parallel GitHub Actions jobs.
+    api runs pytest, web runs tsc + next build, and cdk runs Jest invariant tests.
+    How large is the test suite? As of v0.5.6 the pytest suite passes 175 tests.
+  </p>
+  <p>
+    Image deployment is manual.
+    An ARM64 image is built, pushed to ECR, then the ECS service is force-redeployed.
   </p>
   <div class="codeblock">
     <div class="code-caption">Deployment - run from the dev host (procedure from CLAUDE.md)</div>
@@ -1398,28 +1638,39 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 
   <h3>5.2 Auth and guardrails</h3>
   <p>
-    The whole site is protected by an Amazon Cognito User Pool (us-east-1), and API middleware validates JWTs.
-    Only paths like <span class="mono">/healthz</span> are exempt. On top of this, Bedrock Guardrails filters
+    The whole site is protected by an Amazon Cognito User Pool (us-east-1).
+    API middleware validates JWTs (signed tokens that carry proof of login),
+    and only paths like <span class="mono">/healthz</span> are exempt.
+  </p>
+  <p>
+    On top of this, Bedrock Guardrails (a policy filter over the LLM's inputs and outputs) screens
     four manufacturing-specific topics (confidential IP, competitor disparagement, regulatory violations,
-    hazardous chemicals) and surfaces intervention records in the ops console. Neptune and OpenSearch are
-    VPC-internal only - unreachable from outside and accessible only via the API task role.
+    hazardous chemicals).
+    Intervention records surface in the ops console.
+    Neptune and OpenSearch are VPC-internal only - unreachable from outside and accessible only via the API task role.
   </p>
 
   <h3>5.3 Live demo and ops console</h3>
   <p>
     The live demo runs at https://mfg-ontology.whchoi.net and <strong>requires a Cognito login</strong>
-    (accounts are issued through the project owner). The ops console includes an evaluation board
-    (<span class="mono">/api/ops/eval</span>) that replays 30 manufacturing-domain queries and scores them,
-    and a trace ring buffer (<span class="mono">/api/ops/trace</span>) showing the last 200 tool_call events,
-    so you can see in the deployed environment exactly which tools the agent called and with which arguments.
+    (accounts are issued through the project owner).
+    The ops console includes two observability tools.
+  </p>
+  <p>
+    One is an evaluation board (<span class="mono">/api/ops/eval</span>) that replays 30 manufacturing-domain
+    queries and scores them.
+    The other is a trace ring buffer (<span class="mono">/api/ops/trace</span>) showing the last 200 tool_call events.
+    You can see in the deployed environment exactly which tools the agent called and with which arguments.
   </p>
   <div class="callout note">
     <span class="callout-title">Note - how SSE and CloudFront get along</span>
     <p>
-      Token streaming collapses if any intermediate layer buffers. This project disables CloudFront origin
-      compression on the SSE path (ADR-007) and attaches Lambda@Edge only to viewer request (auth),
-      avoiding buffering at the origin response stage. If SSE arrives as one lump only in the deployed
-      environment, these are the two places to check first.
+      Token streaming collapses if any intermediate layer buffers.
+      This project disables CloudFront origin compression on the SSE path (ADR-007).
+      Lambda@Edge is attached only to viewer request (auth), avoiding buffering at the origin response stage.
+    </p>
+    <p>
+      If SSE arrives as one lump only in the deployed environment, these are the two places to check first.
     </p>
   </div>
 </section>
@@ -1428,12 +1679,16 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <section class="sec" id="s6-en">
   <h2><span class="no">06</span>Limitations</h2>
   <p>
-    This project is a PoC, and the repository says so itself. Before using this document as grounds for an
-    adoption decision, check the following boundaries.
+    This section lists the boundaries you should know before judging anything based on this project.
+    It exists so the picture is not only the good parts.
+  </p>
+  <p>
+    This project is a PoC (proof of concept), and the repository says so itself.
+    Before making an adoption decision, check the following.
   </p>
   <ul class="plain">
     <li><strong>The data is synthetic.</strong> The roughly 10,644 nodes in the graph were produced by a generator and contain no real supplier or component information. Only the standards/regulation data is a subset of real frameworks. Neptune query performance at real-data scale (millions of nodes) has not been validated.</li>
-    <li>The reranker is disabled. Because it is not available in ap-northeast-2, search quality reflects only up to RRF fusion, and the rerank stage in the code is currently a pass-through in the deployment.</li>
+    <li>The reranker is disabled. Because it is not available in ap-northeast-2, search quality reflects only up to RRF fusion. The rerank stage in the code is currently a pass-through in the deployment.</li>
     <li>Image deployment is manual. CI runs tests only; ECR push and ECS redeploy are executed by a human.</li>
     <li>The read-only Cypher gateway is based on a regex denylist. It is a valid defensive layer, but in production it would be safer to pair it with privilege separation (a read-only endpoint or IAM-policy-level constraints).</li>
     <li>The demo is locked behind Cognito, so the screens cannot be verified from documentation alone. The code and the docs/ descriptions are the primary evidence.</li>
@@ -1445,18 +1700,26 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <section class="sec" id="s7-en">
   <h2><span class="no">07</span>Conclusion</h2>
   <p>
-    What ontology-for-mfg demonstrates is not the generic idea of "attaching manufacturing data to an LLM"
-    but a concrete arrangement of separated roles. Domain knowledge lives in the 22-class schema and the graph,
-    exact computation lives in deterministic engines, and only ambiguous query interpretation and narration
-    go to the LLM. As a result, only 2 of the 12 scenarios (B, J) need an LLM; the rest answer with
-    reproducible graph queries.
+    Finally, here is what this project teaches.
+    To sum it up in one sentence: keep knowledge in the graph, keep exact computation in deterministic engines,
+    and give only interpretation and narration to the LLM - that role separation is the core of this project.
   </p>
   <p>
-    If you are evaluating an ontology-backed agent for a manufacturing domain, this repository offers four
-    reusable patterns: a schema design that promotes BOM and regulations to classes, a read-only Cypher gateway,
+    What ontology-for-mfg demonstrates is not the generic idea of "attaching manufacturing data to an LLM"
+    but a concrete arrangement of separated roles.
+    Domain knowledge lives in the 22-class schema and the graph, exact computation lives in deterministic
+    engines, and only ambiguous query interpretation and narration go to the LLM.
+    As a result, only 2 of the 12 scenarios (B, J) need an LLM; the rest answer with reproducible graph queries.
+  </p>
+  <p>
+    If you are evaluating an ontology-backed agent for a manufacturing domain, four patterns here are reusable.
+    They are a schema design that promotes BOM and regulations to classes, a read-only Cypher gateway,
     the Sonnet/Haiku role split with a 25-second timeout plus deterministic fallback, and a framing structure
-    that treats personas as runtime context rather than routing. The code is public on GitHub, so a good
-    starting point is to read schema.ttl and <span class="mono">api/services/agent.py</span> first.
+    that treats personas as runtime context rather than routing.
+  </p>
+  <p>
+    The code is public on GitHub.
+    A good starting point is to read schema.ttl and <span class="mono">api/services/agent.py</span> first.
   </p>
 </section>
 
@@ -1468,6 +1731,9 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
 <!-- ===================== References (EN) ===================== -->
 <section class="sec refs" id="refs-en">
   <h2><span class="no">--</span>References</h2>
+  <p>
+    These are the repository and official documents this analysis is grounded in.
+  </p>
 
   <h3>Primary sources</h3>
   <ul>
