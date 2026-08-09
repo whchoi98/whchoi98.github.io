@@ -1,7 +1,7 @@
 ---
 layout: default
 ---
-{% assign posts = site.pages | where: "layout", "post" | sort: "date" | reverse %}
+{% assign posts = site.pages | where_exp: "p", "p.layout == 'post' or p.layout == 'report'" | sort: "date" | reverse %}
 {% assign featured = posts | where: "featured", true | first %}
 {% unless featured %}{% assign featured = posts | first %}{% endunless %}
 

@@ -1,0 +1,147 @@
+---
+layout: default
+---
+{% assign posts = site.pages | where_exp: "p", "p.layout == 'post' or p.layout == 'report'" | sort: "date" | reverse %}
+
+<header class="site-header">
+  <div class="wrap">
+    {% include topbar.html %}
+    <div class="post-hero">
+      <div class="crumb">
+        <a href="/">홈</a> / <a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>
+      </div>
+      <h1 class="post-hero-title">{{ page.title }}</h1>
+      <div class="post-hero-meta">
+        <span class="meta-light">{{ page.date | date: "%Y.%m.%d" }} · {{ page.minutes }}분 · {{ site.author }}</span>
+        {% for t in page.tags %}<span class="chip chip-dark">{{ t }}</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="report-main">
+  {% assign intro_size = content | strip | size %}
+  {% if intro_size > 0 %}
+  <div class="report-intro">{{ content }}</div>
+  {% endif %}
+  <a href="#after-report" class="skip-link">임베드 문서 건너뛰고 하단으로 이동</a>
+  <iframe id="report-frame" src="{{ page.report_src }}" title="{{ page.title }}" loading="eager"></iframe>
+  <noscript>
+    <p class="report-fallback"><a href="{{ page.report_src }}">전체 문서를 새 창에서 열기</a></p>
+  </noscript>
+  <div class="wrap report-foot" id="after-report" tabindex="-1">
+    <button type="button" id="report-print" class="report-print">인쇄</button>
+    <a href="{{ page.report_src }}" target="_blank" rel="noopener">문서만 크게 보기 ↗</a>
+  </div>
+
+  <div class="wrap">
+    {% assign prev = nil %}{% assign next = nil %}{% assign idx = -1 %}
+    {% for p in posts %}
+      {% if p.url == page.url %}{% assign idx = forloop.index0 %}{% endif %}
+    {% endfor %}
+    {% assign prev_idx = idx | plus: 1 %}
+    {% assign next_idx = idx | minus: 1 %}
+    {% for p in posts %}
+      {% if forloop.index0 == prev_idx %}{% assign prev = p %}{% endif %}
+      {% if forloop.index0 == next_idx %}{% assign next = p %}{% endif %}
+    {% endfor %}
+    <div class="pn-grid report-pn">
+      {% if prev %}
+      <a href="{{ prev.url }}" class="card pn-card">
+        <span class="pn-label">← 이전 글</span>
+        <span class="pn-title">{{ prev.title }}</span>
+      </a>
+      {% else %}<span></span>{% endif %}
+      {% if next %}
+      <a href="{{ next.url }}" class="card pn-card pn-next">
+        <span class="pn-label">다음 글 →</span>
+        <span class="pn-title">{{ next.title }}</span>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</main>
+
+<script>
+/* techblogs 리포트 임베드: 높이 자동 조절, 블로그 테마 동기화, 앵커/외부 링크 보정, 인쇄. */
+(function () {
+  var frame = document.getElementById("report-frame");
+  if (!frame) return;
+
+  /* 문서의 자체 테마 초기화가 처음부터 블로그 테마와 일치하도록 심어둔다. */
+  try {
+    localStorage.setItem("techblogs-theme",
+      document.documentElement.classList.contains("dark") ? "dark" : "light");
+  } catch (e) {}
+
+  function inner() { try { return frame.contentDocument; } catch (e) { return null; } }
+
+  function syncTheme() {
+    var d = inner();
+    if (!d || !d.documentElement) return;
+    var want = document.documentElement.classList.contains("dark") ? "dark" : "light";
+    if (d.documentElement.getAttribute("data-theme") === want) return;
+    d.documentElement.setAttribute("data-theme", want);
+    d.dispatchEvent(new CustomEvent("themechange", { detail: { theme: want } }));
+  }
+
+  function resize() {
+    var d = inner();
+    if (!d || !d.body) return;
+    /* documentElement.scrollHeight는 뷰포트에 클램프되어 줄어들지 않으므로 body 실측을 쓴다. */
+    frame.style.height = (Math.ceil(d.body.getBoundingClientRect().height) + 6) + "px";
+  }
+
+  var lastDoc = null;
+  function ready() {
+    var d = inner();
+    if (!d || !d.body || d === lastDoc) return;
+    /* about:blank 등 실제 리포트가 아닌 문서에서 초기화하지 않는다 */
+    if (!d.querySelector(".page")) return;
+    lastDoc = d;
+
+    /* 테마의 단일 진실 원천은 블로그 상단 토글 - 문서 자체 토글은 숨긴다. */
+    var bar = d.querySelector(".theme-bar");
+    if (bar) bar.style.display = "none";
+
+    /* 외부 링크가 iframe 자체를 이동시키면 높이/테마 제어가 끊긴다 - 새 탭으로. */
+    Array.prototype.forEach.call(d.querySelectorAll('a[href^="http"]'), function (a) {
+      a.target = "_blank";
+      a.rel = "noopener";
+    });
+
+    /* 문서 내 앵커는 부모 창 스크롤로 처리해 히스토리 누적을 막는다. */
+    d.addEventListener("click", function (e) {
+      var t = e.target;
+      while (t && t !== d && !(t.tagName === "A")) t = t.parentNode;
+      if (!t || t === d || !t.getAttribute) return;
+      var href = t.getAttribute("href") || "";
+      if (href.charAt(0) !== "#") return;
+      var el = d.getElementById(href.slice(1));
+      if (!el) return;
+      e.preventDefault();
+      var top = el.getBoundingClientRect().top + frame.getBoundingClientRect().top + window.scrollY - 16;
+      window.scrollTo({ top: top, behavior: "smooth" });
+    });
+
+    syncTheme();
+    resize();
+    if (window.ResizeObserver) new ResizeObserver(resize).observe(d.body);
+    else setInterval(resize, 1200);
+  }
+
+  frame.addEventListener("load", ready);
+  /* 캐시 즉시 로드로 load 이벤트를 놓친 경우의 가드 */
+  var d0 = inner();
+  if (d0 && d0.readyState === "complete") ready();
+
+  new MutationObserver(function () { syncTheme(); resize(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+  var printBtn = document.getElementById("report-print");
+  if (printBtn) printBtn.addEventListener("click", function () {
+    /* 내부 창을 직접 인쇄해야 문서의 print CSS가 온전히 적용된다. */
+    try { frame.contentWindow.print(); } catch (e) { window.print(); }
+  });
+})();
+</script>
