@@ -7,7 +7,7 @@ layout: default
   <div class="wrap">
     {% include topbar.html %}
     <div class="page-hero">
-      <h1 class="page-hero-title">태그</h1>
+      <h1 class="page-hero-title"><span class="l-ko">태그</span><span class="l-en">Tags</span></h1>
       <p class="page-hero-sub" id="tag-heading">전체 {{ posts | size }}편</p>
     </div>
   </div>
@@ -20,11 +20,11 @@ layout: default
     <div class="card post-card" data-tags="{{ p.tags | join: '|' }}{% if p.category %}|{{ p.category }}{% endif %}">
       <img src="/assets/icons/{{ p.icon | default: 'bedrock' }}.svg" alt="" class="post-card-icon">
       <div class="post-card-body">
-        <a href="{{ p.url }}" class="post-card-title">{{ p.title }}</a>
-        <span class="post-card-excerpt">{{ p.excerpt }}</span>
+        <a href="{{ p.url }}" class="post-card-title">{% if p.title_en %}<span class="l-ko">{{ p.title }}</span><span class="l-en">{{ p.title_en }}</span>{% else %}{{ p.title }}{% endif %}</a>
+        <span class="post-card-excerpt">{% if p.excerpt_en %}<span class="l-ko">{{ p.excerpt }}</span><span class="l-en">{{ p.excerpt_en }}</span>{% else %}{{ p.excerpt }}{% endif %}</span>
         <div class="meta-row">
           {% for t in p.tags %}<button type="button" class="chip chip-btn" data-tag="{{ t }}">{{ t }}</button>{% endfor %}
-          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}분</span>
+          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
         </div>
       </div>
     </div>

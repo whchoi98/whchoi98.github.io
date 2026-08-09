@@ -8,11 +8,11 @@ layout: default
     {% include topbar.html %}
     <div class="post-hero">
       <div class="crumb">
-        <a href="/">홈</a> / <a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>
+        <a href="/"><span class="l-ko">홈</span><span class="l-en">Home</span></a> / <a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>
       </div>
-      <h1 class="post-hero-title">{{ page.title }}</h1>
+      <h1 class="post-hero-title">{% if page.title_en %}<span class="l-ko">{{ page.title }}</span><span class="l-en">{{ page.title_en }}</span>{% else %}{{ page.title }}{% endif %}</h1>
       <div class="post-hero-meta">
-        <span class="meta-light">{{ page.date | date: "%Y.%m.%d" }} · {{ page.minutes }}분 · {{ site.author }}</span>
+        <span class="meta-light">{{ page.date | date: "%Y.%m.%d" }} · {{ page.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> · {{ site.author }}</span>
         {% for t in page.tags %}<span class="chip chip-dark">{{ t }}</span>{% endfor %}
       </div>
     </div>
@@ -38,21 +38,21 @@ layout: default
     <div class="pn-grid">
       {% if prev %}
       <a href="{{ prev.url }}" class="card pn-card">
-        <span class="pn-label">← 이전 글</span>
-        <span class="pn-title">{{ prev.title }}</span>
+        <span class="pn-label">← <span class="l-ko">이전 글</span><span class="l-en">Previous</span></span>
+        <span class="pn-title">{% if prev.title_en %}<span class="l-ko">{{ prev.title }}</span><span class="l-en">{{ prev.title_en }}</span>{% else %}{{ prev.title }}{% endif %}</span>
       </a>
       {% else %}<span></span>{% endif %}
       {% if next %}
       <a href="{{ next.url }}" class="card pn-card pn-next">
-        <span class="pn-label">다음 글 →</span>
-        <span class="pn-title">{{ next.title }}</span>
+        <span class="pn-label"><span class="l-ko">다음 글</span><span class="l-en">Next</span> →</span>
+        <span class="pn-title">{% if next.title_en %}<span class="l-ko">{{ next.title }}</span><span class="l-en">{{ next.title_en }}</span>{% else %}{{ next.title }}{% endif %}</span>
       </a>
       {% endif %}
     </div>
   </article>
   <aside class="toc-aside" id="toc-aside" hidden>
-    <span class="toc-label">목차</span>
+    <span class="toc-label"><span class="l-ko">목차</span><span class="l-en">Contents</span></span>
     <nav class="toc-nav" id="toc-nav" aria-label="목차"></nav>
-    <a href="/" class="toc-home">← 홈으로</a>
+    <a href="/" class="toc-home">← <span class="l-ko">홈으로</span><span class="l-en">Home</span></a>
   </aside>
 </main>

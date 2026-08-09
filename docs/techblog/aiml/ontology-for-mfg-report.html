@@ -748,15 +748,17 @@ flowchart LR
         <tr><td><span class="mono">neptune_query</span></td><td>BOM, Supplier, Plant, TradeLane의 정밀 그래프 질의</td><td>Neptune openCypher</td></tr>
         <tr><td><span class="mono">kb_retrieve</span></td><td>데이터시트, 8D, 규제 문서 패시지 검색</td><td>Bedrock Knowledge Base</td></tr>
         <tr><td><span class="mono">compliance_check</span></td><td>부품 ID 기준 REACH, RoHS, AEC-Q 검증</td><td>결정적 규칙 엔진</td></tr>
-        <tr><td><span class="mono">memory_save</span></td><td>세션 단위 사실 저장</td><td>메모리 저장소 (Aurora Serverless)</td></tr>
+        <tr><td><span class="mono">memory_save</span></td><td>세션 단위 사실 저장</td><td>DynamoDB 테이블 (<span class="mono">ontology-mfg-dev-memory</span>) - 코드 주석의 Aurora 전환 계획은 아직 미반영</td></tr>
       </tbody>
     </table>
   </div>
   <p>
-    안정성 장치가 두 겹입니다. 첫째, Bedrock을 부르는 모든 핸들러는
-    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span>로 호출을 25초에 묶고,
-    초과하면 결정적 템플릿으로 폴백합니다(ADR-003). 둘째, 데이터 경로가 죽어도 데모가 빈 화면이 되지 않도록
-    모든 시나리오에 합성 폴백이 있고 응답에 <span class="mono">_synthetic</span> 플래그가 붙습니다.
+    안정성 장치가 두 겹입니다. 첫째, 8D 파이프라인(및 ops 평가 실행) 등 동기식 Bedrock 호출은
+    <span class="mono">ThreadPoolExecutor.submit().result(timeout=25)</span>로 25초 타임아웃에 묶이고,
+    초과하면 결정적 템플릿으로 폴백합니다(ADR-003). 채팅은 <span class="mono">converse_stream</span>
+    스트리밍으로 별도 처리됩니다. 둘째, 데이터 경로가 죽어도 데모가 빈 화면이 되지 않도록
+    결정형 시나리오 대부분(10개 라우터)에 합성 폴백과 <span class="mono">_synthetic</span> 플래그가 있고,
+    검색(A)과 채팅(B)에는 없습니다.
   </p>
   <div class="callout warn">
     <span class="callout-title">주의 - LLM에게 그래프 질의를 맡길 때의 방어선</span>
@@ -832,7 +834,7 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
     시나리오 A부터 L까지가 제조 라이프사이클을 덮습니다. 각 시나리오는
     <span class="mono">api/routers/</span>의 라우터 하나와 웹 페이지 하나로 대응되며,
     아래 핵심 엔진 열은 각 라우터가 실제로 import하는 서비스 기준입니다.
-    LLM이 개입하는 것은 B, C, J 계열이고 나머지 다수는 그래프 질의와 결정적 도메인 엔진의 조합입니다.
+    LLM이 개입하는 것은 B, J 계열이고 나머지 다수는 그래프 질의와 결정적 도메인 엔진의 조합입니다.
   </p>
   <div class="tbl-wrap">
     <table>
@@ -843,7 +845,7 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
       <tbody>
         <tr><td>A</td><td>의미 검색</td><td><span class="mono">search.py</span></td><td>하이브리드 검색(BM25 + k-NN + RRF) + Neptune</td></tr>
         <tr><td>B</td><td>대화형 에이전트</td><td><span class="mono">chat.py</span></td><td>AgentRunner(Sonnet 4.6) + 도구 5종, SSE</td></tr>
-        <tr><td>C</td><td>인사이트</td><td><span class="mono">insights.py</span></td><td>Neptune 집계 + Sonnet 4.6, SSE</td></tr>
+        <tr><td>C</td><td>인사이트</td><td><span class="mono">insights.py</span></td><td>Neptune 집계 + 결정적 템플릿 (LLM 미사용, 일반 POST)</td></tr>
         <tr><td>D</td><td>스펙 매치</td><td><span class="mono">spec_match.py</span></td><td>하이브리드 검색 + 리랭커 인터페이스</td></tr>
         <tr><td>E</td><td>규제 검증</td><td><span class="mono">compliance.py</span></td><td>compliance_engine + Neptune</td></tr>
         <tr><td>F</td><td>대체 부품</td><td><span class="mono">substitute.py</span></td><td>Neptune 그래프 질의</td></tr>
@@ -858,8 +860,10 @@ def rrf(hit_lists: list[list[dict]], k: int = 60) -&gt; list[tuple[str, float]]:
   </div>
   <p>
     패턴은 셋으로 압축됩니다. 검색형(A, D)은 하이브리드 검색이 후보를 만들고 그래프가 맥락을 붙입니다.
-    결정형(E, F, G, H, I, K, L)은 openCypher 질의와 도메인 엔진(관세 lane 시뮬레이션, RFM 점수, 탄소 계산)이
-    LLM 없이 값을 계산합니다. 생성형(B, C, J)만 Bedrock이 개입하고, 전부 SSE 스트리밍과 타임아웃 폴백을 갖습니다.
+    결정형(C, E, F, G, H, I, K, L)은 openCypher 질의와 도메인 엔진(관세 lane 시뮬레이션, RFM 점수, 탄소 계산)이
+    LLM 없이 값을 계산합니다. 생성형(B, J)만 Bedrock이 개입하고, 전부 SSE 스트리밍과 타임아웃 폴백을 갖습니다.
+    다만 인사이트(C)는 저장소 문서(ADR-001)가 LLM 서사 생성을 서술하는 반면 현재 코드는 Neptune 집계와
+    결정적 템플릿만 사용하는, 문서와 코드가 어긋나는 지점입니다.
     12개를 나열식으로 읽기보다 이 세 패턴의 조합으로 읽는 편이 구조 이해에 유리합니다.
   </p>
 </section>
@@ -933,7 +937,7 @@ aws ecs update-service --cluster ontology-mfg-dev-cluster \
   <p>
     ontology-for-mfg가 보여주는 것은 "LLM에 제조 데이터를 붙이는" 일반론이 아니라 역할 분리의 구체적인 배치입니다.
     도메인 지식은 22클래스 스키마와 그래프에, 정확한 계산은 결정적 엔진에, 모호한 질의 해석과 서술만 LLM에 둡니다.
-    그 결과 12개 시나리오 중 LLM이 필요한 것은 3개 계열뿐이고, 나머지는 재현 가능한 그래프 질의로 답합니다.
+    그 결과 12개 시나리오 중 LLM이 필요한 것은 2개(B, J)뿐이고, 나머지는 재현 가능한 그래프 질의로 답합니다.
   </p>
   <p>
     제조 도메인에 온톨로지 기반 에이전트를 검토한다면 이 저장소에서 가져갈 수 있는 재사용 가능한 패턴은

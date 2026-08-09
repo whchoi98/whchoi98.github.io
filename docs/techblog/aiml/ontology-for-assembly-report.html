@@ -696,7 +696,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
     observability)으로 배포됩니다. FastAPI 백엔드(21개 라우터)와 Next.js 14 프론트엔드가 ECS Fargate ARM64에서 돌고,
     CloudFront와 Lambda@Edge JWT가 앞단을 막습니다. 그래프는 Neptune openCypher, 검색은 OpenSearch Serverless의
     Nori BM25 + Cohere KNN 하이브리드(RRF 융합 후 rerank-v3), LLM 계층은 Bedrock Sonnet 4.6과 AgentCore
-    Memory / Code Interpreter입니다. B2B 페르소나는 별도로 API Gateway Usage Plan + API Key 경로를 탑니다.
+    Memory / Code Interpreter입니다(단, AgentCore Memory는 CDK placeholder, Code Interpreter는 mock 응답에만 존재하는 계획 항목으로, 실제 API 통합 코드는 아직 없습니다). B2B 페르소나는 별도로 API Gateway Usage Plan + API Key 경로를 탑니다.
   </p>
 
   <figure class="diagram">
@@ -711,7 +711,7 @@ flowchart LR
   API --> NEP[("Neptune openCypher")]
   API --> OS[("OpenSearch Serverless BM25+KNN")]
   API --> BR["Bedrock Sonnet 4.6 + Guardrails"]
-  API --> AC["AgentCore Memory / Code Interpreter"]
+  API --> AC["AgentCore Memory / Code Interpreter (계획)"]
   API --> ADL["Ad Matcher Lambda"]
     </div>
     <figcaption>
@@ -763,7 +763,7 @@ flowchart LR
     4개 에이전트의 역할 프롬프트는 <span class="mono">multi_agent.py:AGENT_PROMPTS</span>에 상수로 정의되어 있으며,
     Analyst는 필요 시 "Graph 에이전트에 재질의 필요"라는 형식으로 그래프 단계에 되물을 수 있습니다.
     모든 LLM 호출은 <span class="mono">api/services/bedrock.py:invoke()/invoke_stream()</span> 단일 진입점을 거치고,
-    AWS 자격증명이 없으면 <strong>결정적 demo mock</strong>으로 폴백합니다. 이 폴백 덕분에 오프라인에서도 데모와 테스트가 재현됩니다.
+    <span class="mono">DEMO_PUBLIC_MODE=true</span>일 때 <strong>결정적 demo mock</strong>으로 동작합니다(자격증명 유무가 아니라 이 환경 변수가 트리거입니다). 이 모드 덕분에 오프라인에서도 데모와 테스트가 재현됩니다.
     스트리밍은 SSE로 통일되어 있고 이벤트 어휘(<span class="mono">phase|delta|log|result|error|done</span>)는
     <span class="mono">api/routers/chat.py</span> docstring이 단일 진실원입니다.
   </p>
@@ -875,13 +875,13 @@ flowchart LR
           <th scope="row">3단계 대화 비교</th>
           <td>B</td>
           <td><span class="mono">chat.py</span></td>
-          <td>three_stage + multi_agent, SSE 스트리밍, AgentCore Memory</td>
+          <td>three_stage + multi_agent, SSE 스트리밍 (AgentCore Memory는 계획 항목)</td>
         </tr>
         <tr>
           <th scope="row">LLM 인사이트, 차트, 타임라인</th>
           <td>C, G, K, M, N</td>
           <td><span class="mono">insights.py</span> 외 시나리오별 라우터</td>
-          <td>Sonnet 4.6 스트리밍 요약, Code Interpreter 한글 차트, 표결 이상치 탐지</td>
+          <td>Sonnet 4.6 스트리밍 요약, 표결 이상치 탐지 (Code Interpreter 차트는 계획 항목)</td>
         </tr>
         <tr>
           <th scope="row">페르소나 매칭, 룩어라이크</th>
@@ -967,7 +967,7 @@ flowchart LR
   <ul class="plain">
     <li>PoC 데모입니다. 인증은 edge 계층(Lambda@Edge, API Gateway)에만 있고 API 계층은 upstream을 신뢰하며, <span class="mono">DEMO_PUBLIC_MODE</span> 같은 데모 전용 우회가 존재합니다.</li>
     <li>독자, 광고, 기사 데이터는 전부 합성입니다. 광고 매칭 거버넌스의 사업적 유효성은 실 인벤토리 없이 검증되지 않았습니다.</li>
-    <li>Bedrock 미연결 시 결정적 mock으로 폴백하고 Stage 2 Tool Use도 시뮬레이션이므로, 화면에 보이는 모든 것이 실 LLM 호출은 아닙니다. 실 데이터 경로(T-W의 Neptune openCypher)와 mock 경로가 혼재합니다.</li>
+    <li><span class="mono">DEMO_PUBLIC_MODE=true</span>에서는 결정적 mock으로 동작하고 Stage 2 Tool Use도 시뮬레이션이므로, 화면에 보이는 모든 것이 실 LLM 호출은 아닙니다. 실 데이터 경로(T-W의 Neptune openCypher)와 mock 경로가 혼재합니다.</li>
     <li>문서와 코드의 정합은 계속 따라잡는 중입니다. CHANGELOG에 시나리오 수(14 &rarr; 23), 클래스 수(25+ &rarr; 31), 라우터 수(17 &rarr; 21) 정정 기록이 남아 있으며, 이 문서의 수치는 모두 코드 기준입니다.</li>
     <li>중립성 가드레일은 한국어 정규식과 사전 검증 질문 풀에 크게 의존합니다. 자유 입력이 늘어나는 production 시나리오에서는 별도 검증이 필요합니다.</li>
   </ul>
@@ -977,7 +977,7 @@ flowchart LR
     ontology-for-assembly의 가치는 개별 시나리오의 화려함이 아니라 반복 가능한 골격에 있습니다.
     실 공공 데이터와 합성 데이터를 스키마 레벨 출처 태깅으로 섞고, 같은 질문에 대한 세 가지 AI 패러다임의 차이를
     비교 가능하게 만들고, 민감 도메인의 거버넌스를 프롬프트가 아닌 스키마와 메트릭과 인프라에 나눠 강제하는 구조는
-    국회 데이터가 아닌 다른 도메인에도 그대로 이식됩니다. 실제로 이 저장소 자체가 화학 도메인 PoC(ontology-for-gcc)의
+    국회 데이터가 아닌 다른 도메인에도 그대로 이식됩니다. 실제로 이 저장소 자체가 GS칼텍스 고객분석 도메인 PoC(ontology-for-gcc)의
     골격을 차용해 도메인만 교체한 결과물이라는 점이 그 이식성의 증거입니다.
   </p>
   <p class="lead-def">

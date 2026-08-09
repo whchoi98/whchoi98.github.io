@@ -541,7 +541,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
   <div class="meta">
     <p>작성 기준일은 2026-08-09입니다.</p>
     <p>분석 대상은 로컬 저장소 ontology-for-retail(FastAPI + Next.js 14 + AWS CDK v2 모노레포, 마지막 커밋 <span class="mono">c852ba0</span>, 2026-05-09)입니다.</p>
-    <p>핵심 백엔드는 Neptune openCypher, OpenSearch Serverless, Bedrock Sonnet 4.6, AgentCore Memory와 Code Interpreter입니다.</p>
+    <p>핵심 백엔드는 Neptune openCypher, OpenSearch Serverless, Bedrock Sonnet 4.6, AgentCore Memory이며, Code Interpreter 래퍼는 존재하나 아직 미배선입니다.</p>
     <p>본문의 모든 수치는 저장소의 코드(<span class="mono">api/</span>)와 데이터(<span class="mono">data/output/</span>)에서 직접 확인한 값입니다.</p>
   </div>
 </header>
@@ -584,7 +584,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
     ontology-for-retail은 이 관계들을 Neptune 지식그래프의 명시적 스키마로 고정하고, 그 위에 <strong>13개 시나리오(A-M)</strong>를 얹어 "온톨로지 하나가 얼마나 많은 경험을 구동할 수 있는가"를 30-60분 데모로 보여주는 PoC입니다. 의미 검색과 대화형 에이전트 같은 LLM 시나리오부터, 이탈 위험 진단과 등급 상승 lift 같은 순수 그래프 집계 시나리오까지 같은 그래프를 공유합니다.
   </p>
   <p>
-    데모 전체를 관통하는 장치는 5개의 스파인 페르소나(임산부, 4세 아이 엄마, 캠퍼, 민감성 피부, 글루텐 알레르기)입니다. 40개의 서사형 페르소나(<span class="mono">psn_*</span>)가 <span class="mono">DERIVED_FROM</span> 엣지로 스파인에 연결되어 있어, UI에서 어떤 페르소나를 선택해도 결국 스파인을 거쳐 회원 집합으로 해석됩니다. 시나리오 A부터 M까지 같은 페르소나 컨텍스트가 일관되게 유지되는 것이 이 PoC의 설계 목표 중 하나입니다.
+    데모 전체를 관통하는 장치는 5개의 스파인 페르소나(임산부, 4세 아이 엄마, 캠퍼, 민감성 피부, 글루텐 알레르기)입니다. 40개의 서사형 페르소나(<span class="mono">psn_*</span>) 중 라벨 키워드가 스파인과 매칭되는 것(현재 9/40)만 <span class="mono">DERIVED_FROM</span> 엣지로 스파인에 연결되며, 나머지는 회원 집합으로 해석되지 않습니다. 시나리오 A부터 M까지 같은 페르소나 컨텍스트가 일관되게 유지되는 것이 이 PoC의 설계 목표 중 하나입니다.
   </p>
   <p class="lead-def">
     <b>원칙:</b> 시나리오마다 데이터 모델을 새로 만드는 대신, 온톨로지 스키마 하나에 계층(커머스, 물류, 멤버십, 외부 소비)을 누적하며 시나리오를 늘립니다.
@@ -647,7 +647,7 @@ html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150
 flowchart LR
   U["브라우저"] --> CF["CloudFront + Lambda@Edge 쿠키 인증"]
   CF -.-> COG["Cognito User Pool"]
-  CF --> ALB["ALB - Origin 헤더 검증"]
+  CF --> ALB["ALB (CloudFront prefix list SG)"]
   ALB --> WEB["Web - Next.js 14 Fargate x2"]
   ALB --> API["API - FastAPI Fargate x2"]
   API --> NEP[("Neptune openCypher")]
@@ -661,10 +661,10 @@ flowchart LR
   </figure>
 
   <p>
-    요청 경로의 특징은 인증과 원본 보호가 애플리케이션 바깥에 있다는 점입니다. CloudFront의 Lambda@Edge가 모든 요청에서 쿠키를 검사해 미인증 사용자를 Cognito Hosted UI로 302시키고, ALB는 Secrets Manager 기반 <span class="mono">X-Origin-Auth-Token</span> 헤더와 CloudFront 전용 prefix list로 잠긴 보안 그룹으로만 열립니다. API 서비스는 FastAPI + uvicorn 2 replica이며, 같은 컨테이너 이미지가 커맨드 오버라이드로 일회성 데이터 로더 역할도 겸합니다.
+    요청 경로의 특징은 인증과 원본 보호가 애플리케이션 바깥에 있다는 점입니다. CloudFront의 Lambda@Edge가 모든 요청에서 쿠키를 검사해 미인증 사용자를 Cognito Hosted UI로 302시키고, ALB는 CloudFront 전용 prefix list로 잠긴 보안 그룹으로만 열리며, Secrets Manager 기반 <span class="mono">X-Origin-Auth-Token</span> 헤더는 API 미들웨어가 검증합니다. API 서비스는 FastAPI + uvicorn 2 replica이며, 같은 컨테이너 이미지가 커맨드 오버라이드로 일회성 데이터 로더 역할도 겸합니다.
   </p>
   <p>
-    데이터 계층은 역할이 분리되어 있습니다. Neptune이 온톨로지 그래프(openCypher, IAM SigV4 인증), OpenSearch Serverless가 하이브리드 검색 인덱스, Aurora PostgreSQL Serverless v2가 세션 메타데이터를 맡습니다. AI 계층은 Bedrock의 Sonnet 4.6(채팅/인사이트), Cohere embed-v4(1,024차원 임베딩), Cohere rerank-v3(재정렬), Guardrails(입출력 스크럽), Knowledge Base(관리형 RAG)에 AgentCore Memory와 Code Interpreter가 더해집니다.
+    데이터 계층은 역할이 분리되어 있습니다. Neptune이 온톨로지 그래프(openCypher, IAM SigV4 인증), OpenSearch Serverless가 하이브리드 검색 인덱스를 맡고, Aurora PostgreSQL Serverless v2는 세션 메타데이터 용도로 프로비저닝되어 있으나 현재 API 코드는 접속하지 않습니다(드라이버 미포함). AI 계층은 Bedrock의 Sonnet 4.6(채팅/인사이트), Cohere embed-v4(1,536차원 임베딩), Cohere rerank-v3(재정렬), Guardrails(입출력 스크럽), Knowledge Base(관리형 RAG)에 AgentCore Memory가 더해집니다(Code Interpreter는 래퍼만 있고 insights 경로에는 아직 배선되지 않았습니다).
   </p>
 
   <div class="callout warn">
@@ -700,13 +700,13 @@ except Exception:
 
   <h3>4.2 멀티턴 에이전트와 AgentCore Memory</h3>
   <p>
-    시나리오 B의 에이전트(<span class="mono">api/services/agent.py</span>)는 Bedrock Converse의 도구 호출 루프입니다. <span class="mono">TOOL_SPECS</span>에 등록된 도구는 <strong>7개</strong>입니다 - <span class="mono">semantic_search</span>, <span class="mono">kb_lookup</span>, <span class="mono">neptune_subgraph</span>, <span class="mono">memory_recall</span>에 물류 3종(<span class="mono">nearest_warehouses</span> haversine k-NN, <span class="mono">shortest_path</span> BFS, <span class="mono">inventory_lookup</span>)이 더해진 구성입니다. 모든 스트리밍 엔드포인트는 <span class="mono">phase / delta / log / final</span>의 공통 SSE 어휘를 쓰고, 도구 호출은 <span class="mono">log</span> 이벤트로 자동 스트리밍되어 프론트엔드의 실시간 도구 호출 패널에 나타납니다.
+    시나리오 B의 에이전트(<span class="mono">api/services/agent.py</span>)는 Bedrock Converse의 도구 호출 루프입니다. <span class="mono">TOOL_SPECS</span>에 등록된 도구는 <strong>7개</strong>입니다 - <span class="mono">semantic_search</span>, <span class="mono">kb_lookup</span>, <span class="mono">neptune_subgraph</span>, <span class="mono">memory_recall</span>에 물류 3종(<span class="mono">nearest_warehouses</span> haversine k-NN, <span class="mono">shortest_path</span> BFS, <span class="mono">inventory_lookup</span>)이 더해진 구성입니다. 모든 스트리밍 엔드포인트는 <span class="mono">phase</span>/<span class="mono">delta</span>에 종결 이벤트(<span class="mono">stop</span> 또는 <span class="mono">result</span>)를 더한 공통 SSE 어휘를 쓰고, 도구 호출 <span class="mono">log</span> 이벤트는 에이전트 스트림에만 있어 프론트엔드의 실시간 도구 호출 패널에 나타납니다.
   </p>
   <p>
     메모리는 AgentCore Memory 하나로 단기와 장기를 모두 처리합니다. 단기는 세션 단위 이벤트 저장이고, 장기는 <span class="mono">user/{actor_id}/preferences</span> 네임스페이스에 사용자별 사실을 7일 TTL로 보관합니다. 대화 시작 시 <span class="mono">memory_recall</span>이 장기 메모리에서 페르소나 관련 사실을 회수해 시스템 컨텍스트에 주입하므로, 세션이 바뀌어도 "지난번에 임산부용을 찾았다"는 맥락이 이어집니다. 입력과 출력 양쪽에 Guardrails 검사가 phase 이벤트로 노출됩니다.
   </p>
   <p>
-    시나리오 C는 같은 루프에 AgentCore Code Interpreter를 결합한 변형입니다. Neptune 트렌드 집계를 Sonnet 4.6이 한국어로 스트리밍 요약하는 동안, Firecracker microVM 안에서 matplotlib이 NanumGothic 폰트로 실제 PNG 차트를 렌더링합니다. LLM이 차트를 "그리는 척"하는 것이 아니라 샌드박스에서 코드가 실행됩니다.
+    시나리오 C는 Neptune 트렌드 집계를 Sonnet 4.6이 한국어로 스트리밍 요약하는 구성입니다(에이전트 도구 루프가 아닌 단순 <span class="mono">converse_stream</span> 호출입니다). Code Interpreter 래퍼(<span class="mono">api/services/code_interpreter.py</span>)는 존재하지만 insights 엔드포인트에 아직 배선되지 않았고(프론트 문구도 "Phase 4 wiring"), 실제 차트는 API가 반환한 <span class="mono">chart_spec</span> JSON을 프론트엔드가 렌더링합니다.
   </p>
 
   <h3>4.3 그래프 순회 시나리오의 대표 패턴</h3>
@@ -747,9 +747,9 @@ except Exception:
       <tbody>
         <tr><td>A</td><td>의미 검색</td><td>BM25 + KNN 하이브리드, RRF 융합, rerank-v3, 1-hop 부분그래프</td></tr>
         <tr><td>B</td><td>대화형 에이전트</td><td>Converse 멀티턴 + AgentCore Memory + 도구 7개, SSE 스트리밍</td></tr>
-        <tr><td>C</td><td>MD 인사이트</td><td>Neptune 트렌드 집계 + Sonnet 4.6 스트리밍 요약 + Code Interpreter 차트</td></tr>
+        <tr><td>C</td><td>MD 인사이트</td><td>Neptune 트렌드 집계 + Sonnet 4.6 스트리밍 요약 + chart_spec 프론트 렌더링(Code Interpreter 미배선)</td></tr>
         <tr><td>D</td><td>페르소나 매칭</td><td>페르소나 40종 대상 HAS_CONCERN 순회 + 가중 SKU 추천</td></tr>
-        <tr><td>E</td><td>안전성 렌즈</td><td>Guardrails + KFDA/INCI 성분 블랙리스트 필터링</td></tr>
+        <tr><td>E</td><td>안전성 렌즈</td><td>Concern AVOIDS_INGREDIENT 순회 기반 KFDA/INCI 성분 블랙리스트 필터링(Guardrails 미사용)</td></tr>
         <tr><td>F</td><td>대체재 추천</td><td>동일 카테고리 / 다른 브랜드 순회 + 가격 차이 카드</td></tr>
         <tr><td>G</td><td>가격/가용성 비교</td><td>4채널 가격/할인/재고 매트릭스 + 페르소나-채널 친화도 가중</td></tr>
         <tr><td>H</td><td>물류 네트워크</td><td>시도 지도에 거점 30 / lane 76 / 재고 940, 인라인 LLM 패널</td></tr>
@@ -763,7 +763,7 @@ except Exception:
   </div>
 
   <p>
-    표에서 읽어야 할 것은 개별 시나리오의 화려함이 아니라 재사용 구조입니다. A와 B가 검색 스택을, H와 I와 K와 L이 한국 시도 코로플레스 컴포넌트를, I부터 M까지가 페르소나 스파인 필터를 공유합니다. 시나리오가 13개여도 기반 메커니즘은 4절에서 본 세 패턴과 검색/에이전트 스택의 조합으로 수렴합니다.
+    표에서 읽어야 할 것은 개별 시나리오의 화려함이 아니라 재사용 구조입니다. A와 B가 검색 스택을, H와 I와 K와 L이 한국 시도 코로플레스 컴포넌트를, I, K, L, M이 페르소나 스파인 필터를 공유합니다(J는 TARGETS 기반 페르소나 x 채널 매트릭스입니다). 시나리오가 13개여도 기반 메커니즘은 4절에서 본 세 패턴과 검색/에이전트 스택의 조합으로 수렴합니다.
   </p>
 </section>
 
@@ -771,7 +771,7 @@ except Exception:
 <section class="sec" id="s6">
   <h2><span class="no">06</span>메타 페이지 /codegraph - 코드베이스 자체의 지식그래프</h2>
   <p>
-    이 저장소는 "온톨로지로 도메인을 그린다"는 주제를 자기 자신에게도 적용합니다. <span class="mono">/codegraph</span> 페이지는 graphify가 소스 코드 AST에서 추출한 그래프를 임베드하는데, <span class="mono">web/public/codegraph/graph.json</span>을 직접 세어 보면 <strong>노드 1,751개 / 엣지 2,217개 / 커뮤니티 159개</strong>이고 소스 파일 151개가 대상입니다. GRAPH_REPORT 기준으로 엣지의 97%가 AST에서 직접 추출(EXTRACTED)되었고 빌드 시점 LLM 호출은 0회입니다.
+    이 저장소는 "온톨로지로 도메인을 그린다"는 주제를 자기 자신에게도 적용합니다. <span class="mono">/codegraph</span> 페이지는 graphify가 소스 코드 AST에서 추출한 그래프를 임베드하는데, <span class="mono">web/public/codegraph/graph.json</span>을 직접 세어 보면 <strong>노드 1,751개 / 엣지 2,217개 / 커뮤니티 159개</strong>이고 소스 파일 150개가 대상입니다. GRAPH_REPORT 기준으로 엣지의 97%가 AST에서 직접 추출(EXTRACTED)되었고 빌드 시점 LLM 호출은 0회입니다.
   </p>
   <p>
     LLM은 빌드가 아니라 라벨링 단계에만 개입합니다. <span class="mono">scripts/label_codegraph_communities.py</span>가 커뮤니티 159개 각각에 대해 Bedrock Sonnet 4.6을 호출해 4개 필드(label, description, key_concepts, top_files)의 구조화 JSON을 받고, <span class="mono">graph.html</span>을 in-place 패치해 "Community 42" 같은 ID를 의미 있는 한국어 라벨로 바꿉니다. 전체 갱신은 <span class="mono">./scripts/refresh_codegraph.sh</span> 한 번으로 끝나며 Bedrock 호출 159회를 포함해 약 3분이 걸립니다.

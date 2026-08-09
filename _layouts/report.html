@@ -8,22 +8,22 @@ layout: default
   <div class="wrap">
     {% include topbar.html %}
     <div class="crumb crumb-bar">
-      <a href="/">홈</a> /
+      <a href="/"><span class="l-ko">홈</span><span class="l-en">Home</span></a> /
       {% if cat %}<a href="{{ cat.url }}">{{ page.category }}</a>{% else %}<a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>{% endif %} /
-      <span>{{ page.title }}</span>
+      <span>{% if page.title_en %}<span class="l-ko">{{ page.title }}</span><span class="l-en">{{ page.title_en }}</span>{% else %}{{ page.title }}{% endif %}</span>
     </div>
   </div>
 </header>
 
 <main class="report-main">
-  <a href="#after-report" class="skip-link">임베드 문서 건너뛰고 하단으로 이동</a>
+  <a href="#after-report" class="skip-link"><span class="l-ko">임베드 문서 건너뛰고 하단으로 이동</span><span class="l-en">Skip embedded document</span></a>
   <iframe id="report-frame" src="{{ page.report_src }}" title="{{ page.title }}" loading="eager"></iframe>
   <noscript>
-    <p class="report-fallback"><a href="{{ page.report_src }}">전체 문서를 새 창에서 열기</a></p>
+    <p class="report-fallback"><a href="{{ page.report_src }}"><span class="l-ko">전체 문서를 새 창에서 열기</span><span class="l-en">Open the full document</span></a></p>
   </noscript>
   <div class="wrap report-foot" id="after-report" tabindex="-1">
-    <button type="button" id="report-print" class="report-print">인쇄</button>
-    <a href="{{ page.report_src }}" target="_blank" rel="noopener">문서만 크게 보기 ↗</a>
+    <button type="button" id="report-print" class="report-print"><span class="l-ko">인쇄</span><span class="l-en">Print</span></button>
+    <a href="{{ page.report_src }}" target="_blank" rel="noopener"><span class="l-ko">문서만 크게 보기</span><span class="l-en">Open document only</span> ↗</a>
   </div>
 
   <div class="wrap">
@@ -40,14 +40,14 @@ layout: default
     <div class="pn-grid report-pn">
       {% if prev %}
       <a href="{{ prev.url }}" class="card pn-card">
-        <span class="pn-label">← 이전 글</span>
-        <span class="pn-title">{{ prev.title }}</span>
+        <span class="pn-label">← <span class="l-ko">이전 글</span><span class="l-en">Previous</span></span>
+        <span class="pn-title">{% if prev.title_en %}<span class="l-ko">{{ prev.title }}</span><span class="l-en">{{ prev.title_en }}</span>{% else %}{{ prev.title }}{% endif %}</span>
       </a>
       {% else %}<span></span>{% endif %}
       {% if next %}
       <a href="{{ next.url }}" class="card pn-card pn-next">
-        <span class="pn-label">다음 글 →</span>
-        <span class="pn-title">{{ next.title }}</span>
+        <span class="pn-label"><span class="l-ko">다음 글</span><span class="l-en">Next</span> →</span>
+        <span class="pn-title">{% if next.title_en %}<span class="l-ko">{{ next.title }}</span><span class="l-en">{{ next.title_en }}</span>{% else %}{{ next.title }}{% endif %}</span>
       </a>
       {% endif %}
     </div>
@@ -60,10 +60,12 @@ layout: default
   var frame = document.getElementById("report-frame");
   if (!frame) return;
 
-  /* 문서의 자체 테마 초기화가 처음부터 블로그 테마와 일치하도록 심어둔다. */
+  /* 문서의 자체 테마/언어 초기화가 처음부터 블로그와 일치하도록 심어둔다. */
   try {
     localStorage.setItem("techblogs-theme",
       document.documentElement.classList.contains("dark") ? "dark" : "light");
+    localStorage.setItem("techblogs-lang",
+      document.documentElement.classList.contains("lang-en") ? "en" : "ko");
   } catch (e) {}
 
   function inner() { try { return frame.contentDocument; } catch (e) { return null; } }
@@ -75,6 +77,16 @@ layout: default
     if (d.documentElement.getAttribute("data-theme") === want) return;
     d.documentElement.setAttribute("data-theme", want);
     d.dispatchEvent(new CustomEvent("themechange", { detail: { theme: want } }));
+  }
+
+  function syncLang() {
+    var d = inner();
+    if (!d || !d.documentElement) return;
+    var want = document.documentElement.classList.contains("lang-en") ? "en" : "ko";
+    if (d.documentElement.getAttribute("data-lang") === want) return;
+    d.documentElement.setAttribute("data-lang", want);
+    /* 이중 언어 문서는 langchange로 Mermaid 재렌더 등 후처리를 한다 (단일 언어 문서는 무시) */
+    d.dispatchEvent(new CustomEvent("langchange", { detail: { lang: want } }));
   }
 
   function resize() {
@@ -117,6 +129,7 @@ layout: default
     });
 
     syncTheme();
+    syncLang();
     resize();
     if (window.ResizeObserver) new ResizeObserver(resize).observe(d.body);
     else setInterval(resize, 1200);
@@ -127,7 +140,7 @@ layout: default
   var d0 = inner();
   if (d0 && d0.readyState === "complete") ready();
 
-  new MutationObserver(function () { syncTheme(); resize(); })
+  new MutationObserver(function () { syncTheme(); syncLang(); resize(); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
   var printBtn = document.getElementById("report-print");

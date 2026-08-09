@@ -1,8 +1,8 @@
 <div class="topbar">
   <a href="/" class="brand"><span class="brand-name">whchoi98</span><span class="brand-tld">.github.io</span></a>
   <nav class="topnav" aria-label="주 메뉴">
-    <a href="/" {% if page.layout == 'home' %}class="active"{% endif %}>홈</a>
-    <a href="/tags/" {% if page.layout == 'tags' %}class="active"{% endif %}>태그</a>
+    <a href="/" {% if page.layout == 'home' %}class="active"{% endif %}><span class="l-ko">홈</span><span class="l-en">Home</span></a>
+    <a href="/tags/" {% if page.layout == 'tags' %}class="active"{% endif %}><span class="l-ko">태그</span><span class="l-en">Tags</span></a>
     <a href="/docs/workshop/" {% if page.section == 'workshop' %}class="active"{% endif %}>Workshop</a>
     <a href="/about/" {% if page.url == '/about/' %}class="active"{% endif %}>About</a>
   </nav>
@@ -10,8 +10,12 @@
   {% if page.layout == 'home' %}
   <input id="home-search" type="search" placeholder="검색 - 제목, 태그" aria-label="글 검색" autocomplete="off">
   {% endif %}
+  <div class="lang-seg" role="group" aria-label="언어 선택">
+    <button type="button" class="seg seg-ko" data-lang-pick="ko">한</button>
+    <button type="button" class="seg seg-en" data-lang-pick="en">EN</button>
+  </div>
   <div class="theme-seg" role="group" aria-label="테마 선택">
-    <button type="button" class="seg seg-light" data-theme-pick="light">라이트</button>
-    <button type="button" class="seg seg-dark" data-theme-pick="dark">다크</button>
+    <button type="button" class="seg seg-light" data-theme-pick="light"><span class="l-ko">라이트</span><span class="l-en">Light</span></button>
+    <button type="button" class="seg seg-dark" data-theme-pick="dark"><span class="l-ko">다크</span><span class="l-en">Dark</span></button>
   </div>
 </div>

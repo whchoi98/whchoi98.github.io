@@ -11,14 +11,20 @@
 <script>
 /* 첫 페인트 전에 테마 확정 - 깜빡임 방지 */
 (function () {
-  var q = null;
-  try { q = new URLSearchParams(location.search).get("theme"); } catch (e) {}
-  var saved = null;
+  var q = null, lq = null;
+  try {
+    var sp = new URLSearchParams(location.search);
+    q = sp.get("theme");
+    lq = sp.get("lang");
+  } catch (e) {}
+  var saved = null, lang = null;
   try { saved = localStorage.getItem("whchoi98-blog-theme"); } catch (e) {}
+  try { lang = localStorage.getItem("whchoi98-blog-lang"); } catch (e) {}
   var pick = q || saved;
   var dark = pick ? pick === "dark"
     : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
   if (dark) document.documentElement.classList.add("dark");
+  if ((lq || lang) === "en") document.documentElement.classList.add("lang-en");
 })();
 </script>
 </head>

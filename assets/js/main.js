@@ -11,7 +11,24 @@
     });
   });
 
+  /* ---------- 언어 (한/EN) ---------- */
+  document.querySelectorAll("[data-lang-pick]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var l = btn.getAttribute("data-lang-pick");
+      document.documentElement.classList.toggle("lang-en", l === "en");
+      try { localStorage.setItem("whchoi98-blog-lang", l); } catch (e) {}
+      var search = document.getElementById("home-search");
+      if (search) search.placeholder = l === "en" ? "Search - title, tags" : "검색 - 제목, 태그";
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: l } }));
+    });
+  });
+  if (document.documentElement.classList.contains("lang-en")) {
+    var s0 = document.getElementById("home-search");
+    if (s0) s0.placeholder = "Search - title, tags";
+  }
+
   /* ---------- 홈 검색 ---------- */
+  function isEn() { return document.documentElement.classList.contains("lang-en"); }
   var search = document.getElementById("home-search");
   var list = document.getElementById("post-list");
   if (search && list) {
@@ -19,7 +36,7 @@
     var label = document.getElementById("result-label");
     var empty = document.getElementById("no-results");
     var total = window.POST_COUNT || cards.length;
-    search.addEventListener("input", function () {
+    var applySearch = function () {
       var q = search.value.trim().toLowerCase();
       var shown = 0;
       cards.forEach(function (c) {
@@ -27,9 +44,16 @@
         c.hidden = !hit;
         if (hit) shown++;
       });
-      if (label) label.textContent = q ? shown + "편 검색됨" : "전체 " + total + "편 · 최신순";
+      if (label) {
+        label.textContent = isEn()
+          ? (q ? shown + " results" : "All " + total + " posts · newest first")
+          : (q ? shown + "편 검색됨" : "전체 " + total + "편 · 최신순");
+      }
       if (empty) empty.hidden = !(q && shown === 0);
-    });
+    };
+    search.addEventListener("input", applySearch);
+    document.addEventListener("langchange", applySearch);
+    applySearch();
   }
 
   /* ---------- 태그 필터 ---------- */
@@ -58,7 +82,12 @@
         c.hidden = !hit;
         if (hit) shown++;
       });
-      if (heading) heading.textContent = tag ? '"' + tag + '" 태그의 글 ' + shown + "편" : "전체 " + tagCards.length + "편 · " + names.length + "개 태그";
+      var en = document.documentElement.classList.contains("lang-en");
+      if (heading) {
+        heading.textContent = en
+          ? (tag ? shown + ' posts tagged "' + tag + '"' : "All " + tagCards.length + " posts · " + names.length + " tags")
+          : (tag ? '"' + tag + '" 태그의 글 ' + shown + "편" : "전체 " + tagCards.length + "편 · " + names.length + "개 태그");
+      }
       chipRow.querySelectorAll(".chip-lg").forEach(function (b) {
         b.classList.toggle("active", (b.getAttribute("data-tag") || null) === tag);
       });
@@ -87,6 +116,12 @@
 
     var q = new URLSearchParams(location.search).get("tag");
     apply(q && counts[q] ? q : null);
+
+    document.addEventListener("langchange", function () {
+      var first = chipRow.querySelector(".chip-lg");
+      if (first) first.textContent = (document.documentElement.classList.contains("lang-en") ? "All " : "전체 ") + tagCards.length;
+      apply(current);
+    });
   }
 
   /* ---------- 글 목차 (h2 스크롤 스파이) ---------- */

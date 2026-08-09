@@ -88,6 +88,18 @@ a:hover { text-decoration: underline; }
   font-family: inherit;
 }
 #home-search::placeholder { color: rgba(255,255,255,.5); }
+/* ---------- 한/영 토글 ---------- */
+.l-en { display: none; }
+html.lang-en .l-ko { display: none; }
+html.lang-en .l-en { display: inline; }
+.lang-seg { display: flex; background: rgba(255,255,255,.08); border-radius: 999px; padding: 3px; }
+.seg-ko { color: var(--segd-c); background: var(--segd-bg); }
+.seg-en { color: var(--segl-c); background: var(--segl-bg); }
+html:not(.lang-en) .seg-ko { color: var(--segl-c); background: var(--segl-bg); }
+html:not(.lang-en) .seg-en { color: var(--segd-c); background: transparent; }
+html.lang-en .seg-ko { color: var(--segd-c); background: transparent; }
+html.lang-en .seg-en { color: var(--segl-c); background: var(--segl-bg); }
+
 .theme-seg { display: flex; background: rgba(255,255,255,.08); border-radius: 999px; padding: 3px; }
 .seg {
   cursor: pointer;

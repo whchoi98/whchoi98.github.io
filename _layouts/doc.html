@@ -9,7 +9,7 @@ layout: default
     {% include topbar.html %}
     <div class="doc-hero">
       <div class="crumb">
-        <a href="/">홈</a> / <a href="/docs/workshop/">Workshop</a>{% if page.parent and page.parent != "Workshop" %} / <span>{{ page.parent }}</span>{% endif %}
+        <a href="/"><span class="l-ko">홈</span><span class="l-en">Home</span></a> / <a href="/docs/workshop/">Workshop</a>{% if page.parent and page.parent != "Workshop" %} / <span>{{ page.parent }}</span>{% endif %}
       </div>
       <h1 class="doc-hero-title">{{ page.title }}</h1>
     </div>
@@ -18,7 +18,7 @@ layout: default
 
 <main class="wrap doc-main">
   <aside class="doc-side" aria-label="Workshop 문서 목록">
-    <a href="/docs/workshop/" class="doc-side-root {% if page.url == '/docs/workshop/' %}active{% endif %}">Workshop 홈</a>
+    <a href="/docs/workshop/" class="doc-side-root {% if page.url == '/docs/workshop/' %}active{% endif %}">Workshop <span class="l-ko">홈</span><span class="l-en">Home</span></a>
     {% for root in roots %}
     <div class="doc-group">
       <a href="{{ root.url }}" class="doc-group-title {% if page.url == root.url %}active{% endif %}">{{ root.title }}</a>

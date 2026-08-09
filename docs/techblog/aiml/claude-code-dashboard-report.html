@@ -698,11 +698,11 @@ flowchart LR
 
   <div class="codeblock">
     <div class="code-caption">docs/metrics-catalog.md 4.5 - User Activity Score (0-100)</div>
-    <pre><code>score = 0.30 &middot;N(LOC_added_per_day / 200)
-      + 0.25 &middot;user_acceptance_rate
-      + 0.20 &middot;N(commits_per_day / 1.5)
-      + 0.15 &middot;N(active_day_share / 0.4)
-      + 0.10 &middot;N(sessions_per_day / 3)    <span class="cm"># N(x) = [0,1] 클램프</span></code></pre>
+    <pre><code>score = 0.30 * N(LOC_added_per_day / 200)
+      + 0.25 * user_acceptance_rate
+      + 0.20 * N(commits_per_day / 1.5)
+      + 0.15 * N(active_day_share / 0.4)
+      + 0.10 * N(sessions_per_day / 3)    <span class="cm"># N(x) = [0,1] 클램프</span></code></pre>
   </div>
 
   <h3>3.3 경제 생산성 점수 (Cost-Efficiency Score v3)</h3>
@@ -732,36 +732,133 @@ deliveryIdeal: 2.0   <span class="cm">// delivery = (commits+prs)/active_days / 
     <p>Analytics의 <span class="mono">lines_of_code.added_count</span>는 세션 안에서 같은 코드를 쓰고 지우기를 반복해도 계속 누적됩니다. 코드의 v3 점수가 <span class="mono">added - 0.5 * removed</span>로 churn을 할인하는 이유가 이것이며, LOC 단독 랭킹을 성과 평가에 그대로 쓰면 안 됩니다.</p>
   </div>
 
-  <!-- 다이어그램 선택 위계: 아키텍처는 Eraser 를 먼저 검토하고,
-       맞지 않을 때 Mermaid 로 내려온다. 기준은 references/diagrams.md 참고.
+</section>
 
-       Eraser 로 그린 경우 아래 형태로 SVG 를 인라인한다.
-       scripts/inline_svg.py 가 id 접두어와 반응형 처리를 해준다.
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>AI 질의 레이어와 프라이버시 처리</h2>
+  <p>
+    Analyze 페이지는 Amazon Bedrock의 Claude Sonnet 4.6(교차 리전 inference profile <span class="mono">global.anthropic.claude-sonnet-4-6</span>)에 자연어로 질문을 던지는 화면입니다. 서버가 <span class="mono">ConverseStream</span>으로 모델을 호출하고 SSE로 브라우저에 스트리밍하며, 두 가지 모드가 있습니다. Direct 모드는 현재 라이브 스냅샷(summaries + users + skills + connectors)을 분석하고, Athena SQL 모드는 <strong>모델이 스스로 SQL을 생성해 실행</strong>한 뒤 결과 행으로 리포트를 씁니다.
+  </p>
+  <p>
+    모델은 tool-use 챗봇으로 동작하며, 코드(server/chat-tools.js) 기준으로 도구 5종을 자율 호출합니다: <span class="mono">get_analytics_overview</span>, <span class="mono">run_athena_sql</span>, <span class="mono">get_cost_summary</span>, <span class="mono">search_users</span>, 그리고 v2.0.3에서 추가된 <span class="mono">get_user_usage</span>(오늘까지의 사용자별 라이브 사용량)입니다. docs/architecture.md는 아직 4종으로 서술하고 있어 코드가 문서보다 앞서 있습니다.
+  </p>
 
-       <figure class="diagram static">
-         <div class="diagram-frame">
-           <svg viewBox="0 0 900 420" role="img" aria-label="...">...</svg>
-         </div>
-         <figcaption>
-           그림 N. 설명. (<a href="https://app.eraser.io/workspace/xxxx">Eraser 원본</a>)
-         </figcaption>
-       </figure>
+  <h3>4.1 SQL sanitizer - LLM이 생성한 SQL도 예외 없이</h3>
+  <p>
+    Athena로 가는 SQL은 사용자가 직접 쓴 것이든 모델이 생성한 것이든 동일한 <span class="mono">sanitizeAthenaQuery()</span>를 통과해야 합니다. 검증 순서가 핵심입니다. 주석을 먼저 제거한 뒤 남은 세미콜론을 거부해 "주석 뒤에 숨긴 두 번째 문장" 공격을 잡고, SELECT/WITH로 시작하는지, 금지 키워드(INSERT, DROP, ALTER, CREATE, GRANT 등 23종 패턴 - metrics-catalog의 19종 목록에 코드가 EXEC, DESCRIBE, SHOW, EXPLAIN을 추가)가 없는지, 모든 FROM/JOIN 대상이 테이블 allowlist에 있는지를 차례로 확인합니다. allowlist는 기본 6개 테이블과 org2 쌍둥이 6개, 총 12개이며 CTE 별칭과 서브쿼리 내부 FROM까지 재귀 검증합니다. IAM은 워크그룹과 데이터베이스 범위를 한 번 더 제한하는 이중 방어선입니다.
+  </p>
 
-       아래 Mermaid figure 는 아키텍처가 아닌 흐름도에 쓴다.
-       다이어그램이 없으면 이 figure 와 문서 끝의 mermaid 모듈 스크립트를
-       함께 삭제한다. -->
-  <figure class="diagram">
-    <div class="mermaid">
-flowchart LR
-  C["클라이언트"] --> LB["Network Load Balancer"]
-  LB --> ENI["Elastic Network Interface"]
-  ENI --> APP["Application"]
-  APP --> DB[("Database")]
-    </div>
-    <figcaption>
-      그림 2. 커넥션 경로. 각 계층이 어디서 커넥션을 끊는지가 이 문서의 핵심입니다.
-    </figcaption>
-  </figure>
+  <div class="codeblock">
+    <div class="code-caption">server/aws.js - sanitizeAthenaQuery() 검증 단계</div>
+    <pre><code>1. 주석 제거 후 세미콜론 잔존 시 거부   <span class="cm">// "SELECT 1 -- ; DROP" 차단</span>
+2. SELECT 또는 WITH 시작만 허용
+3. 금지 키워드 본문 전체 검사
+4. FROM/JOIN 대상 = allowlist 12개 테이블 (CTE 별칭 자동 허용)</code></pre>
+  </div>
+
+  <h3>4.2 이메일 마스킹 - 기본값이 비식별</h3>
+  <p>
+    UI에 표시되는 모든 이메일은 <span class="mono">maskEmail()</span>(src/lib/format.ts)을 거칩니다. 로컬 파트 앞 2자만 남기고 나머지를 최소 3개의 별표로 바꾸며 도메인은 유지합니다(<span class="mono">alice.kim@acme.com &rarr; al*******@acme.com</span>). 서버의 LLM 시스템 프롬프트도 응답에서 같은 마스킹을 강제합니다. v2.0.3 릴리스 노트에 따르면 새 챗 도구가 초기 구현에서 마스킹된 이메일 옆에 실명을 함께 반환했는데, 배포 전 리뷰에서 재식별 위험으로 판정되어 <strong>실명 필드를 도구 결과에서 제거</strong>했습니다. 마스킹이 UI 장식이 아니라 데이터 계약으로 다뤄진다는 사례입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 감사 피드의 IP와 UA는 PII입니다</span>
+    <p>Compliance API 이벤트에는 행위자 IP 주소와 User-Agent가 포함됩니다. 대시보드는 이를 UI에 표시하되, metrics-catalog는 LLM 프롬프트로 전달할 때 마스킹을 권고합니다. 이 대시보드를 변형해 쓸 때 챗 도구에 감사 데이터를 새로 연결한다면 같은 기준을 적용해야 합니다.</p>
+  </div>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>화면 구성 개관</h2>
+  <p>
+    페이지는 v2.0.3 기준 19개(<span class="mono">src/pages/</span>의 라우트 수)입니다. 개별 페이지를 나열하는 대신 데이터 소스 기준으로 묶으면 구조가 명확해집니다. 같은 그룹의 페이지는 같은 서버 라우트를 다른 각도로 보여주는 관계입니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 19개 페이지의 영역별 분류 (src/pages/ 및 metrics-catalog 5절 기준)</caption>
+      <thead>
+        <tr><th scope="col">영역</th><th scope="col">페이지</th><th scope="col">1차 소스</th><th scope="col">대표 지표</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">참여도</th><td>Overview, Trends, Adoption, Users, User Search</td><td><span class="mono">/summaries</span>, <span class="mono">/users</span>, skills/connectors/projects</td><td>DAU/WAU/MAU, 도입률, 사용자별 활동, 스킬/커넥터 사용</td></tr>
+        <tr><th scope="row">생산성</th><td>Claude Code, Productivity, User Productivity, Agentic</td><td><span class="mono">/users/range</span> (S3 우선)</td><td>LOC, 커밋/PR, 수락률, 활동 점수, 프롬프트당 작업 수</td></tr>
+        <tr><th scope="row">제품별 사용</th><td>Claude Chat, Cowork, Office, Design</td><td><span class="mono">/users/range</span>의 표면별 메트릭</td><td>대화/메시지/아티팩트, 표면별 세션</td></tr>
+        <tr><th scope="row">비용</th><td>Cost, Executive</td><td>cost 계열 4종, Spend Limits API, CSV 폴백</td><td>총지출, 모델/제품/그룹별 점유, 경제 생산성 점수, 경영 스냅샷</td></tr>
+        <tr><th scope="row">감사</th><td>Audit (Compliance)</td><td><span class="mono">/v1/compliance/activities</span></td><td>이벤트 피드, 고위험 분류, 행위자 Top</td></tr>
+        <tr><th scope="row">해석 / 이력</th><td>Analyze, Archive, Changelog</td><td>Bedrock + Athena, 번들 CHANGELOG.md</td><td>자연어 분석, 아카이브 SQL, 릴리스 이력</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    반복되는 UI 패턴도 페이지 수보다 적습니다. KPI 카드 행, Recharts 차트 카드, 정렬 가능한 사용자 테이블, 날짜 범위 컨트롤(7d / 14d / 30d 프리셋 + 커스텀, URL 쿼리로 공유), 그리고 행 클릭 드릴다운 패널이 거의 모든 페이지에서 재사용됩니다. Executive 페이지는 이 구성 요소들을 한 화면으로 압축한 CFO/CTO용 스냅샷으로, 12개의 기간 연동 KPI와 PDF 내보내기를 제공합니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>실제 운영 흐름 - 배포와 수집 주기</h2>
+
+  <h3>6.1 배포</h3>
+  <p>
+    인프라는 AWS CDK(TypeScript) 4개 스택(network / storage / compute / collector)으로 정의됩니다. 런타임은 ECS Fargate ARM64 태스크 2개(각 0.5 vCPU, 1 GB)이고, 배포는 <span class="mono">npx cdk deploy --all</span> 한 번으로 끝납니다. 배포 후 Secrets Manager에 API 키를 주입하면 대시보드가 라이브 데이터로 전환됩니다. 인증은 Cognito Hosted UI와 <strong>Lambda@Edge 함수 4종</strong>(check-auth, parse-auth, refresh-auth, sign-out)이 담당하며, 미인증 트래픽은 WAF / ALB / ECS에 도달하기 전에 CloudFront 엣지에서 차단됩니다.
+  </p>
+  <p>
+    README의 비용 추정(ap-northeast-2, 기존 VPC 재사용 기준)은 고정 인프라 월 약 $66에서 $70이고, Bedrock 분석 질의량에 따라 경량 사용 월 약 $80, 중간 약 $130, 대량 약 $250입니다. 새 VPC를 만들면 NAT Gateway 비용 약 $43이 추가됩니다.
+  </p>
+
+  <h3>6.2 수집 주기</h3>
+  <p>
+    수집은 하루 두 번, 목적이 다른 스케줄로 나뉩니다. 시각 선택에 이유가 있습니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. collector 실행 스케줄 (infra/lib/collector-stack.ts)</caption>
+      <thead>
+        <tr><th scope="col">시각 (UTC)</th><th scope="col">대상</th><th scope="col">시각을 그렇게 정한 이유</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><span class="num">14:00</span></td><td>Analytics 5개 엔드포인트</td><td>Analytics API의 10:00 UTC 데이터 발행 이후에 스냅샷</td></tr>
+        <tr><td><span class="num">00:30</span></td><td>Compliance 감사 피드 (최근 완결 2일)</td><td>자정 직후에는 당일 피드가 몇 분치뿐이라 역방향 커서 walk가 1-2페이지 만에 어제에 도달</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    라이브 경로에도 주기가 있습니다. 서버는 5분마다 감사 캐시와 engagement 프리셋 창을, 8분마다 비용 캐시를 미리 데워서 첫 접속자가 12초에서 30초까지 걸리는 upstream 그룹 질의를 기다리지 않게 합니다. cost 계열 데이터 자체는 약 4시간 주기의 watermark(<span class="mono">data_refreshed_at</span>)로 갱신되고 사용일로부터 약 30일까지 보정될 수 있어, 당일 수치는 부분 데이터로 표시됩니다.
+  </p>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>한계</h2>
+  <p>
+    이 대시보드의 한계는 대부분 원천 API의 한계입니다. 도입 판단 전에 알아야 할 것을 추립니다.
+  </p>
+  <ul class="plain">
+    <li><strong>Bedrock / Vertex 경유 사용은 0으로 집계됩니다.</strong> Analytics API와 Spend Report CSV 모두 Anthropic 1st-party 경로만 반영하므로, Bedrock으로 Claude Code를 쓰는 조직은 실제 사용량과 대시보드 수치가 다릅니다.</li>
+    <li>engagement 데이터는 3일 버퍼 뒤에 확정됩니다. "오늘"을 조회할 수 있는 것은 cost 계열뿐이고 그것도 약 4시간 watermark의 부분 데이터입니다.</li>
+    <li>사용자와 스킬을 잇는 차원이 API에 없습니다. 사용자 상세 패널의 스킬 카드는 조직 전체 기준이며 화면에도 그렇게 명시됩니다.</li>
+    <li>Spend Report CSV는 기간 누계만 있고 일자별 breakdown이 없으며, Console이 export API를 제공하지 않아 업로드가 수동입니다.</li>
+    <li>지출과 산출의 조인 키가 이메일이라 대소문자 변이가 있으면 미스매치가 생기고, 조직이 10명 수준이면 이상치 한 명이 점수 분포를 지배하므로 절대값이 아닌 조직 내 상대 순위로 읽어야 합니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8">
+  <h2><span class="no">08</span>결론</h2>
+  <p>
+    claude-code-dashboard는 Anthropic의 흩어진 관측 API들을 하나의 운영 도구로 묶는 프로젝트입니다. 기술적으로 주목할 부분은 화면이 아니라 그 아래의 결정들입니다. 90일 조회창을 S3 아카이브로 넘어서는 S3 우선 전략, 31일 상한을 청크 병합으로 흡수해 최대 186일 창을 정확히 합산하는 서버, LLM이 생성한 SQL에도 예외 없이 적용되는 SELECT 전용 sanitizer, 그리고 마스킹을 데이터 계약으로 다루는 프라이버시 처리입니다.
+  </p>
+  <p>
+    도입 관점의 권고는 단계적입니다. 1순위는 Analytics 키 하나로 배포해 참여도와 생산성 페이지를 확보하는 것입니다. 이것만으로 DAU/WAU/MAU, 수락률, 활동 점수가 동작합니다. 비용 축이 필요해지면 같은 키의 cost 계열이 이미 커버하므로 Cost 페이지를 열고, 감사 요건이 있으면 Compliance 접근을 추가합니다. 점수 산식(활동 점수, 경제 생산성 v3)은 코드에 순수 함수로 분리되어 있어 조직의 정의에 맞게 가중치를 조정하기 쉽습니다.
+  </p>
+  <p class="lead-def">
+    <b>결론:</b> 이 프로젝트의 가치는 차트가 아니라, 제약이 많은 관측 API를 보존 가능하고 조인 가능하며 질의 가능한 데이터 계층으로 바꾸는 파이프라인 설계에 있습니다.
+  </p>
 </section>
 
 <!-- ===================== References ===================== -->
@@ -771,17 +868,42 @@ flowchart LR
   <h3>핵심 출처</h3>
   <ul>
     <li>
-      <a href="https://example.com/post">문서 제목</a>
-      - 저자, 발행처 (YYYY-MM-DD)
-      <span class="url">https://example.com/post</span>
+      <a href="https://github.com/whchoi98/claude-code-dashboard">whchoi98/claude-code-dashboard</a>
+      - GitHub 저장소, v2.0.3 (2026-07-28)
+      <span class="url">https://github.com/whchoi98/claude-code-dashboard</span>
+    </li>
+    <li>
+      <a href="https://github.com/whchoi98/claude-code-dashboard/blob/main/docs/metrics-catalog.md">Metrics Catalog - 전체 지표와 산식 문서</a>
+      - 저장소 docs/metrics-catalog.md
+      <span class="url">https://github.com/whchoi98/claude-code-dashboard/blob/main/docs/metrics-catalog.md</span>
     </li>
   </ul>
 
   <h3>공식 문서</h3>
   <ul>
     <li>
-      <a href="https://docs.example.com/page">API Reference 제목</a>
-      <span class="url">https://docs.example.com/page</span>
+      <a href="https://docs.claude.com/en/docs/claude-code/analytics">Claude Code Analytics API</a>
+      - Anthropic 공식 문서
+      <span class="url">https://docs.claude.com/en/docs/claude-code/analytics</span>
+    </li>
+    <li>
+      <a href="https://docs.claude.com/en/api/administration-api">Administration API</a>
+      - Anthropic 공식 문서
+      <span class="url">https://docs.claude.com/en/api/administration-api</span>
+    </li>
+    <li>
+      <a href="https://docs.claude.com/en/api/usage-cost-api">Usage and Cost API</a>
+      - Anthropic 공식 문서
+      <span class="url">https://docs.claude.com/en/api/usage-cost-api</span>
+    </li>
+  </ul>
+
+  <h3>관련 자료</h3>
+  <ul>
+    <li>
+      <a href="https://whchoi98.github.io/claude-code-dashboard/">claude-code-dashboard 브로셔 페이지</a>
+      - GitHub Pages 랜딩
+      <span class="url">https://whchoi98.github.io/claude-code-dashboard/</span>
     </li>
   </ul>
 </section>
@@ -790,9 +912,10 @@ flowchart LR
 
 <footer class="doc-footer">
   <p>
-    작성 기준일: YYYY-MM-DD.
-    본 문서는 (주 출처)를 기반으로 작성한 기술 분석 자료입니다.
-    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+    작성 기준일: 2026-08-09.
+    본 문서는 claude-code-dashboard 저장소(v2.0.3)의 코드와 문서를 기반으로 작성한 기술 분석 자료입니다.
+    문서와 코드가 어긋나는 항목은 코드를 기준으로 서술했습니다.
+    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 저장소와 공식 문서에서 확인하세요.
   </p>
 </footer>
 
