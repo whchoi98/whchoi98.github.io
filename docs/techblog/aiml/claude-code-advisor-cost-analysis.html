@@ -647,8 +647,8 @@ html:not(.mermaid-ready) .diagram .mermaid {
 
   <div class="meta">
     <p>작성 기준일은 2026-08-08입니다.</p>
-    <p>적용 대상은 Claude Code에서 실행 모델과 자문 모델 구성을 고민하는 엔지니어입니다.</p>
-    <p>측정 지표는 <span class="mono">claude -p --output-format json</span>이 반환하는 <span class="mono">modelUsage</span>입니다.</p>
+    <p>적용 대상은 Claude Code에서 실행 모델(executor)과 자문 모델(advisor) 구성을 고민하는 엔지니어입니다.</p>
+    <p>측정 지표는 <code>claude -p --output-format json</code>이 반환하는 <span class="mono">modelUsage</span>입니다.</p>
     <p>주 출처는 직접 수행한 실험(Claude Code v2.1.226, 2026-08-08)과 Anthropic 공식 문서입니다.</p>
   </div>
 </header>
@@ -692,8 +692,8 @@ html:not(.mermaid-ready) .diagram .mermaid {
   <p>
     Claude Code는 실제 작업을 수행하는 실행 모델(executor)과 별도로 자문 모델(advisor)을 지정할 수 있습니다.
     advisor는 실행 모델이 어려운 판단을 만났을 때 의견을 구하는 더 강한 모델입니다.
-    <span class="mono">--advisor claude-opus-5</span> 플래그, <span class="mono">/advisor</span> 명령,
-    <span class="mono">advisorModel</span> 설정으로 켭니다.
+    <code>--advisor claude-opus-5</code> 플래그, <code>/advisor</code> 명령,
+    <code>advisorModel</code> 설정으로 켭니다.
   </p>
   <p>
     호출 여부는 실행 모델이 스스로 판단합니다.
@@ -750,7 +750,7 @@ html:not(.mermaid-ready) .diagram .mermaid {
   <h2><span class="no">02</span>동작 원리 - advisor 호출의 비용 구조</h2>
   <p>
     이 절에서는 advisor를 한 번 부를 때 비용이 정확히 어디서 나가는지 봅니다.
-    결론부터 말하면 조언을 쓰는 비용이 아니라 대화를 읽는 비용입니다.
+    결론부터 말하면 조언을 생성하는(출력) 비용이 아니라 대화를 읽는(입력) 비용입니다.
   </p>
   <p>
     advisor가 호출되면 그 시점까지의 전체 대화 트랜스크립트(지시, 응답, 도구 결과를 모두 담은 대화 기록)가
@@ -1104,8 +1104,8 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   <ul>
     <li>
       <a href="https://code.claude.com/docs/en/advisor">Claude Code Docs - Advisor</a>
-      - Anthropic (2026). <span class="mono">/advisor</span>, <span class="mono">--advisor</span>,
-      <span class="mono">advisorModel</span>, <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL</span>의 근거 문서
+      - Anthropic (2026). <code>/advisor</code>, <span class="mono">--advisor</span>,
+      <code>advisorModel</code>, <code>CLAUDE_CODE_DISABLE_ADVISOR_TOOL</code>의 근거 문서
       <span class="url">https://code.claude.com/docs/en/advisor</span>
     </li>
   </ul>
@@ -1190,7 +1190,7 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   <div class="meta">
     <p>Written as of 2026-08-08.</p>
     <p>Intended for engineers deciding on executor and advisor model configurations in Claude Code.</p>
-    <p>The measured metric is <span class="mono">modelUsage</span> as returned by <span class="mono">claude -p --output-format json</span>.</p>
+    <p>The measured metric is <span class="mono">modelUsage</span> as returned by <code>claude -p --output-format json</code>.</p>
     <p>Primary sources are first-hand experiments (Claude Code v2.1.226, 2026-08-08) and official Anthropic documentation.</p>
   </div>
 </header>
@@ -1234,8 +1234,8 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   <p>
     Claude Code lets you designate an advisor model separate from the executor (the model that does
     the actual work). The advisor is a stronger model the executor consults when it hits a hard
-    decision. You enable it with the <span class="mono">--advisor claude-opus-5</span> flag, the
-    <span class="mono">/advisor</span> command, or the <span class="mono">advisorModel</span> setting.
+    decision. You enable it with the <code>--advisor claude-opus-5</code> flag, the
+    <code>/advisor</code> command, or the <code>advisorModel</code> setting.
   </p>
   <p>
     Whether a call happens is up to the executor's own judgment.
@@ -1294,7 +1294,7 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   <h2><span class="no">02</span>How it works - the cost structure of an advisor call</h2>
   <p>
     This section looks at where the money actually goes when the advisor is called once.
-    The short answer: it is the cost of reading the conversation, not the cost of writing the advice.
+    The short answer: it is the cost of reading the conversation (input), not the cost of generating the advice (output).
   </p>
   <p>
     When the advisor is called, the entire conversation transcript up to that point (the full record
@@ -1672,8 +1672,8 @@ CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1 claude -p --model claude-opus-5 \
   <ul>
     <li>
       <a href="https://code.claude.com/docs/en/advisor">Claude Code Docs - Advisor</a>
-      - Anthropic (2026). Source for <span class="mono">/advisor</span>, <span class="mono">--advisor</span>,
-      <span class="mono">advisorModel</span>, and <span class="mono">CLAUDE_CODE_DISABLE_ADVISOR_TOOL</span>
+      - Anthropic (2026). Source for <code>/advisor</code>, <span class="mono">--advisor</span>,
+      <code>advisorModel</code>, and <code>CLAUDE_CODE_DISABLE_ADVISOR_TOOL</code>
       <span class="url">https://code.claude.com/docs/en/advisor</span>
     </li>
   </ul>
