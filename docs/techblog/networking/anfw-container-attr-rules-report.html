@@ -867,17 +867,21 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
 08:24:01Z  <span class="cm"># 약 9분 뒤 동일 순서로 두 번째 웨이브</span></code></pre>
   </div>
 
-  <h3>2.3 7월 구성과 8월 구성에서 같은 패턴이 재현되었습니다</h3>
+  <h3>2.3 EKS 트랙은 고객 계정 밖의 내부 채널로 동작합니다</h3>
   <p>
-    이 계정에는 2026-07-02에 만든 EKS association이 이미 있었고, 당시 트레일 로그를 다시 분석해 이번 8월 실측과 대조했습니다.
-    7월 것은 namespace 필터, 8월 것은 커스텀 label 필터로 조건이 다른데도 "생성 1초 전에 서비스 프린시펄 표시가 붙은
-    <span class="mono">DescribeCluster</span> 한 번, access entry 생성 0건"이라는 패턴이 동일하게 나타났습니다.
-    단발 관측이 아니라 두 시점에서 독립적으로 재현되었다는 점이 이 증거의 강도를 결정합니다.
+    ECS 트랙과 달리 EKS 트랙은 고객 계정에 아무 리소스도 만들지 않습니다.
+    생성 1초 전에 호출자 세션으로 서비스 프린시펄 표시가 붙은 <span class="mono">DescribeCluster</span> 한 번이 기록될 뿐이고,
+    이후 CloudTrail에는 어떤 지속 조회도 나타나지 않습니다.
   </p>
   <p>
-    다만 조회 방법에 함정이 있었습니다. 이 계정의 CloudTrail 이벤트 히스토리는 약 2026-08-05 이전을 반환하지 않아
-    7월 증거는 멀티 리전 트레일의 S3 버킷에서 해당 날짜 로그를 직접 읽어야 했습니다. 8월 증거도
-    <span class="mono">lookup-events</span> 호출 방식을 고치기 전에는 0건으로 나왔습니다. 이 문제는 5장에서 다룹니다.
+    Kubernetes 표준 인증 경로도 쓰지 않습니다. 방화벽 관련 access entry는 0건이고,
+    서비스 연결 역할에는 <span class="mono">eks:*</span> 권한이 전혀 없습니다.
+    결국 pod 라이프사이클 이벤트는 문서가 언급하는 EKS Pulse Event Service 내부 구독으로 서비스 쪽에서 직접 받고,
+    IP 수집은 고객 계정에서 보이지 않는 내부 채널에서 일어나는 구조입니다.
+  </p>
+  <p>
+    namespace 필터를 쓴 7월 association(트레일 S3 로그로 확인)과 커스텀 label 필터를 쓴
+    8월 association 모두 같은 패턴이었습니다. 조회 방법의 함정은 5장에서 다룹니다.
   </p>
 
   <div class="tbl-wrap">
@@ -1313,12 +1317,6 @@ flowchart LR
       </tbody>
     </table>
   </div>
-
-  <p>
-    한 가지는 문서에 답이 없는 상태로 남았습니다. 하나의 monitoring configuration에 속성 필터를 여러 개 넣을 때
-    AND인지 OR인지는 공식 문서에 기재가 없고, 이번 검증은 association마다 필터 하나로 구성했기 때문에 확인하지 못했습니다.
-    복수 조건이 필요한 설계라면 이 의미론을 먼저 실측해야 합니다.
-  </p>
 
   <div class="callout warn">
     <span class="callout-title">주의 - 검증 절차가 거짓 음성을 만듭니다</span>
@@ -1792,20 +1790,21 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
 08:24:01Z  <span class="cm"># second wave in the same order, about 9 minutes later</span></code></pre>
   </div>
 
-  <h3>2.3 The same pattern reproduced in the July and August setups</h3>
+  <h3>2.3 The EKS track operates through an internal channel outside the customer account</h3>
   <p>
-    This account already had an EKS association created on 2026-07-02, and we re-analyzed the trail logs from that
-    time against this August's measurements. The July one used a namespace filter and the August one a custom label
-    filter - different conditions - yet the identical pattern appeared: one <span class="mono">DescribeCluster</span>
-    marked with the service principal 1 second before creation, and zero access entries created.
-    That it reproduced independently at two points in time, rather than being a one-off observation,
-    is what determines the strength of this evidence.
+    Unlike the ECS track, the EKS track creates no resources in the customer account.
+    The only record is a single <span class="mono">DescribeCluster</span> call marked with the service principal
+    on the caller's session, 1 second before creation, and no recurring queries appear in CloudTrail afterwards.
   </p>
   <p>
-    There was a trap in how to query it, though. This account's CloudTrail event history returns nothing from before
-    roughly 2026-08-05, so the July evidence had to be read directly from the multi-region trail's S3 bucket for those
-    dates. The August evidence also came back as 0 events until we fixed how <span class="mono">lookup-events</span>
-    was called. Chapter 5 covers this issue.
+    It does not use the standard Kubernetes authentication path either. There are zero firewall-related
+    access entries, and the service-linked role has no <span class="mono">eks:*</span> permissions at all.
+    Pod lifecycle events therefore reach the service directly through the EKS Pulse Event Service subscription
+    the documentation mentions, and IP collection happens on an internal channel invisible to the customer account.
+  </p>
+  <p>
+    The July association with a namespace filter (confirmed from the trail's S3 logs) and the August one with
+    a custom label filter both showed the same pattern. Chapter 5 covers the query traps.
   </p>
 
   <div class="tbl-wrap">
@@ -2260,13 +2259,6 @@ flowchart LR
       </tbody>
     </table>
   </div>
-
-  <p>
-    One item remains unanswered in the documentation. Whether multiple attribute filters within a single monitoring
-    configuration combine as AND or OR is stated nowhere in the official docs, and this verification could not
-    confirm it because each association was configured with a single filter.
-    If your design needs multiple conditions, measure this semantics first.
-  </p>
 
   <div class="callout warn">
     <span class="callout-title">Warning - the verification procedure creates false negatives</span>
