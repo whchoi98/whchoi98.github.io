@@ -867,6 +867,14 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
 08:24:01Z  <span class="cm"># 약 9분 뒤 동일 순서로 두 번째 웨이브</span></code></pre>
   </div>
 
+  <p>
+    다만 이 웨이브 간격을 고정 폴링 주기로 읽는 것은 이릅니다. 관측 윈도우(생성 -2분에서 +15분) 안에서
+    간격은 8분 38초였지만 재발이 한 번뿐이어서 주기가 고정인지 확인할 수 없습니다.
+    실제 반영 속도를 결정하는 것도 폴링이 아니라 이벤트 경로입니다. 무필터 association의 반영이
+    <span class="num">1초</span>로 나온 것이 그 증거이고, 폴링은 이벤트를 놓쳤을 때를 보정하는
+    안전망으로 해석하는 편이 관측과 부합합니다.
+  </p>
+
   <h3>2.3 EKS 트랙은 고객 계정 밖의 내부 채널로 동작합니다</h3>
   <p>
     ECS 트랙과 달리 EKS 트랙은 고객 계정에 아무 리소스도 만들지 않습니다.
@@ -878,6 +886,10 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
     서비스 연결 역할에는 <span class="mono">eks:*</span> 권한이 전혀 없습니다.
     결국 pod 라이프사이클 이벤트는 문서가 언급하는 EKS Pulse Event Service 내부 구독으로 서비스 쪽에서 직접 받고,
     IP 수집은 고객 계정에서 보이지 않는 내부 채널에서 일어나는 구조입니다.
+  </p>
+  <p>
+    고객 계정 어디에도 주기적 폴링의 흔적이 없으므로, EKS 트랙은 폴링이 아니라 이벤트 구독 방식으로
+    보는 것이 관측과 부합합니다. 폴링 주기라는 개념 자체가 EKS 쪽에는 성립하지 않습니다.
   </p>
   <p>
     namespace 필터를 쓴 7월 association(트레일 S3 로그로 확인)과 커스텀 label 필터를 쓴
@@ -908,7 +920,7 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
         <tr>
           <th scope="row">이후 지속 조회</th>
           <td>없음, CloudTrail에 나타나지 않음</td>
-          <td>서비스 연결 역할 권한으로 주기적 폴링</td>
+          <td>서비스 연결 역할 권한으로 주기적 폴링, 관측 간격 약 9분</td>
         </tr>
         <tr>
           <th scope="row">Kubernetes 인증 경로</th>
@@ -1790,6 +1802,14 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
 08:24:01Z  <span class="cm"># second wave in the same order, about 9 minutes later</span></code></pre>
   </div>
 
+  <p>
+    Reading this wave gap as a fixed polling interval would be premature, though. Within the observation
+    window (creation -2 minutes to +15 minutes) the gap was 8 minutes 38 seconds, but it recurred only once,
+    so we cannot confirm the interval is fixed. What actually determines propagation speed is the event path,
+    not the polling: the filter-less association propagating in <span class="num">1 second</span> is the
+    evidence, and the polling is better read as a reconciliation safety net for missed events.
+  </p>
+
   <h3>2.3 The EKS track operates through an internal channel outside the customer account</h3>
   <p>
     Unlike the ECS track, the EKS track creates no resources in the customer account.
@@ -1801,6 +1821,11 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
     access entries, and the service-linked role has no <span class="mono">eks:*</span> permissions at all.
     Pod lifecycle events therefore reach the service directly through the EKS Pulse Event Service subscription
     the documentation mentions, and IP collection happens on an internal channel invisible to the customer account.
+  </p>
+  <p>
+    Since no trace of periodic polling exists anywhere in the customer account, the EKS track is best
+    understood as event subscription rather than polling. The very notion of a polling interval does not
+    apply on the EKS side.
   </p>
   <p>
     The July association with a namespace filter (confirmed from the trail's S3 logs) and the August one with
@@ -1831,7 +1856,7 @@ Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-
         <tr>
           <th scope="row">Ongoing queries afterwards</th>
           <td>None; does not appear in CloudTrail</td>
-          <td>Periodic polling with service-linked role permissions</td>
+          <td>Periodic polling with service-linked role permissions; observed gap of about 9 minutes</td>
         </tr>
         <tr>
           <th scope="row">Kubernetes auth path</th>
