@@ -1380,8 +1380,11 @@ flowchart LR
   </ol>
 
   <p class="lead-def">
-    <b>결론:</b> 이 기능은 컨테이너 IP를 따라가는 문제를 규칙에서 걷어내 줍니다.
-    대신 SNAT와 라우팅이라는 전제, 수십 초의 반영 지연, 얕은 로그 메타데이터라는 세 가지 비용을 운영 설계로 흡수해야 합니다.
+    <b>결론:</b> 컨테이너 IP가 바뀔 때마다 규칙을 고치던 일을 이 기능이 대신해 줍니다.
+    그 대가로 세 가지를 운영에서 감당해야 합니다.
+    SNAT를 끄고 방화벽을 지나도록 라우팅을 먼저 맞추는 사전 준비,
+    컨테이너 변화가 규칙에 반영되기까지 걸리는 수십 초의 지연,
+    그리고 로그에 그룹 이름만 남으므로 IP와 컨테이너를 잇는 기록을 따로 준비하는 일입니다.
   </p>
 </section>
 
@@ -2341,9 +2344,11 @@ flowchart LR
   </ol>
 
   <p class="lead-def">
-    <b>Bottom line:</b> this feature lifts the burden of chasing container IPs out of your rules.
-    In exchange, three costs must be absorbed by operational design: the SNAT and routing preconditions,
-    tens of seconds of propagation delay, and shallow log metadata.
+    <b>Bottom line:</b> this feature takes over the work of rewriting rules every time a container IP changes.
+    In exchange, operations must carry three costs:
+    the upfront work of disabling SNAT and routing traffic through the firewall,
+    the tens of seconds it takes for container changes to reach the rules,
+    and a separate record linking IPs to containers, because the logs keep only the group name.
   </p>
 </section>
 
