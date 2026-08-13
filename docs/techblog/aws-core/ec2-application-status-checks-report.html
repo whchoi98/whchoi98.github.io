@@ -938,7 +938,7 @@ aws ec2 associate-application-status-check \
   </p>
   <p>
     shim 자체를 세웠을 때는 ConnectionRefused로 실패 처리됐습니다. 감시자가 죽으면 장애로 판정되는 fail-safe 방향입니다.
-    장애인데 건강으로 판정되는 미탐 방향의 구멍은 이번 검증에서 관찰되지 않았습니다.
+    장애인데 Healthy로 판별되는 오류는 이번 검증에서 관찰되지 않았습니다.
   </p>
 
   <h3>3.4 suppression과 excluded의 실제 동작</h3>
