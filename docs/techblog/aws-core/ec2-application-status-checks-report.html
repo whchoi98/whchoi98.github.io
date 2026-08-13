@@ -802,7 +802,7 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     체크가 바라볼 대상으로는 Python 표준 라이브러리 HTTP 서버(0.0.0.0:8080)를 헬스 shim으로 세웠습니다.
     shim은 <span class="mono">/health</span> 요청을 받으면 더미 데몬(<span class="mono">demo-daemon.service</span>)의
     systemd 상태를 조회해 active면 200, 아니면 503을 반환합니다.
-    systemd 상태를 HTTP 응답 코드로 바꿔주는 얇은 변환 계층이고, ASG 노드에는 user data로 부팅 시 자동 배치됩니다.
+    systemd 상태를 HTTP 응답 코드로 바꿔주는 간단한 변환 레이어이고, ASG 노드에는 user data로 부팅 시 자동 배치됩니다.
   </p>
 
   <p>
