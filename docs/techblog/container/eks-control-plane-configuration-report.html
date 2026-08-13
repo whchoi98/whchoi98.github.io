@@ -765,7 +765,7 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     EKS가 컨트롤 플레인의 가용성을 책임지는 대신 컴포넌트 설정도 EKS가 정하는 구조였습니다.
   </p>
   <p>
-    이 경계가 실제로 아팠던 지점이 스케줄러 점수 전략입니다. 노드를 채워서 쓰는
+    노드를 채워서 쓰는
     <span class="mono">MostAllocated</span> 방식으로 컴퓨트 비용을 줄이고 싶어도
     관리형 컨트롤 플레인의 스케줄러 설정에는 손댈 방법이 없었습니다.
     이번 기능은 그 요구를 관리형 서비스의 API 안으로 가져왔습니다.
@@ -784,13 +784,13 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     <span class="mono">RequestedToCapacityRatio</span>는 지원하지 않고,
     <span class="mono">LeastAllocated</span>와 <span class="mono">MostAllocated</span> 두 가지만 받습니다.
     검증된 범위 안에서만 값을 받는 이 구조는 컨트롤 플레인의 안정성 책임을 EKS가 계속 지겠다는
-    설계로 읽힙니다. 이 문장은 공식 문서의 표현이 아니라 허용 범위의 모양에서 끌어낸 해석입니다.
+    설계로 읽힙니다.
   </p>
 
   <h3>2.3 버전별 기본값은 DescribeClusterVersions가 기준입니다</h3>
   <p>
     표 1의 기본값과 허용 범위는 발행 시점의 Kubernetes 버전(EKS 1.31 이상) 기준이고,
-    이후 버전에서 바뀔 수 있습니다. AWS 문서가 지정한 버전별 source of truth는
+    이후 버전에서 바뀔 수 있습니다. AWS 문서가 지정한 버전별 SOT (source of truth)는
     <span class="mono">DescribeClusterVersions</span> API입니다.
     버전마다 <span class="mono">defaultValue</span>와 <span class="mono">constraints</span>를 반환하므로,
     IaC나 자동화에 기본값을 하드코딩하지 말고 이 API를 조회하는 편이 안전합니다.
@@ -1352,7 +1352,7 @@ aws eks describe-cluster-versions --cluster-versions 1.35 \
     the component configuration.
   </p>
   <p>
-    The point where this boundary actually hurt was the scheduler scoring strategy. Even if you wanted to
+    Even if you wanted to
     cut compute costs with the node-packing <span class="mono">MostAllocated</span> approach,
     there was no way to touch the scheduler configuration of the managed control plane.
     This feature brings that demand inside the managed service's API.
