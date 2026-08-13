@@ -1,0 +1,1925 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>EC2 Application Status Checks 실측 검증</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aws-core/ec2-application-status-checks/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+/* 첫 페인트 전에 언어를 확정한다. localStorage 와 ?lang= 파라미터를 읽고 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") saved = q;
+  } catch (e) {}
+  /* TODO(EN): EN 페이지 본문 완성 후 아래를 saved === "en" ? "en" : "ko" 로 복원한다. */
+  void saved;
+  document.documentElement.setAttribute("data-lang", "ko");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+/* techblogs-codecopy: 맥 터미널 스타일 코드블록 + 복사 버튼 */
+.codeblock { position: relative; }
+.code-caption { position: relative; padding-left: 60px; padding-right: 46px; }
+.code-caption::before {
+  content: ""; position: absolute; left: 14px; top: 50%; margin-top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff5f56; box-shadow: 18px 0 0 #febc2e, 36px 0 0 #28c840;
+}
+.code-copy {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 24px; padding: 0; cursor: pointer;
+  color: var(--ink-2); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px;
+  -webkit-appearance: none; appearance: none;
+}
+.code-copy:hover { color: var(--ink); border-color: var(--line-strong); }
+.code-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-copy svg { width: 15px; height: 15px; display: block; }
+.code-copy.copied { color: #28a35b; border-color: #28a35b; }
+@media print { .theme-bar { display: none; } .code-copy { display: none; } }
+
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+
+/* ---------- KO/EN page visibility ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<div class="page" data-lang="ko">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+  <!-- TODO(EN): EN 페이지 본문 완성 후 아래 토글 버튼을 복원한다.
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
+  -->
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AMAZON EC2 / FEATURE VERIFICATION</p>
+  <h1>EC2에 애플리케이션 계층 상태 검사가 생겼다 - Application Status Checks 실측 검증</h1>
+  <p class="subtitle">
+    2026-08-10 출시된 Amazon EC2 Application Status Checks를 처음 접하는 독자 기준으로 소개합니다.
+    테스트 ASG에 장애를 주입해 감지부터 자동 교체까지의 타임라인을 실측하고, 문서와 다르거나 문서에 없는 지점 6건을 함께 기록했습니다.
+  </p>
+
+  <div class="stat" role="img" aria-label="장애 주입부터 ASG 종료 개시까지 5분 10초, 교체 노드 ok로 완전 복구까지 약 8.5분">
+    <div class="stat-item old">
+      <span class="stat-num">5<span class="unit">분</span> 10<span class="unit">초</span></span>
+      <span class="stat-sub">장애 주입 &rarr; ASG 종료 개시</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num"><span class="unit">약</span> 8.5<span class="unit">분</span></span>
+      <span class="stat-sub">교체 노드 ok, 완전 복구</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>작성 기준일은 2026-08-13입니다.</p>
+    <p>적용 대상은 EC2 인스턴스 위에서 HTTP/HTTPS 응답을 내는 애플리케이션을 운영하는 워크로드입니다.</p>
+    <p>검증 환경은 ap-northeast-2 리전의 t4g.micro 테스트 ASG 2대와 로컬 인스턴스입니다.</p>
+    <p>주 출처는 EC2 공식 문서, AWS What's New(2026-08-10), 그리고 2026-08-13 실측 데이터입니다.</p>
+    <p>요금은 관리형 ENI당 시간당 $0.01(AZ별)에 CloudWatch 표준 요금이 더해지는 구조입니다.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>
+      EC2 상태 검사에 애플리케이션 계층이 추가됐습니다. 2026-08-10 출시된 Application Status Checks는
+      <strong>60초마다</strong> 지정한 포트와 경로로 HTTP/HTTPS 요청을 보내고, 연속 2회 실패하면 인스턴스를 impaired로 판정합니다.
+    </li>
+    <li>
+      체크는 VPC 안에 만들어지는 관리형 ENI에서 같은 AZ의 AWS 내부망으로 발신됩니다. 전체 상태가 impaired가 되면
+      ASG가 추가 설정 없이 해당 인스턴스를 종료하고 교체합니다. 실측에서는 장애 주입부터 종료 개시까지
+      <strong>5분 10초</strong>, 교체 노드 ok까지 약 8.5분이 걸렸습니다.
+    </li>
+    <li>
+      가장 큰 함정은 SG입니다. 체크 트래픽 인바운드를 허용하지 않은 채 included로 ASG에 연결하면
+      신규 인스턴스까지 연속으로 교체되는 루프에 빠집니다(실측 14분간 3세대 5대).
+      suppression도 활성화 후 전파에 약 3.2분이 걸립니다.
+    </li>
+    <li>
+      도입 순서는 SG 인바운드 선확인 &rarr; excluded로 생성해 관찰 &rarr; included 승격입니다.
+      배포 훅의 suppression은 배포 3분 이상 전에 걸어야 안전합니다.
+    </li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">기능 소개</a></li>
+    <li><span class="no">02</span><a href="#s2">테스트 방법</a></li>
+    <li><span class="no">03</span><a href="#s3">실측 결과</a></li>
+    <li><span class="no">04</span><a href="#s4">문서와 실측의 간극</a></li>
+    <li><span class="no">05</span><a href="#s5">운영 가이드</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>기능 소개</h2>
+  <p>
+    EC2 인스턴스의 상태 검사(status check)는 지금까지 system과 instance 2종이었습니다.
+    이 둘은 인스턴스 자체가 살아 있는지까지만 확인하고, 그 위에서 도는 애플리케이션이 실제로 응답하는지는 보지 못했습니다.
+    2026-08-10 출시된 Application Status Checks는 이 빈자리를 채우는 세 번째, 애플리케이션 계층의 상태 검사입니다.
+  </p>
+  <p>
+    동작 원리는 단순합니다. AWS가 <strong>60초마다</strong> 지정한 포트와 경로로 HTTP 또는 HTTPS 요청을 보내고,
+    응답 코드를 <span class="mono">status code matcher</span>와 비교합니다.
+    연속 2회 실패하면 impaired(장애), 실패 후 연속 2회 성공하면 회복으로 판정합니다(임계값은 설정 가능, 주기 60초는 고정입니다).
+  </p>
+  <p>
+    AWS What's New(2026-08-10)가 드는 대표 용례는 웹 서버 무응답과 Docker 데몬 미실행 감지입니다.
+    모든 상용 리전과 GovCloud(US)에서 사용할 수 있습니다.
+  </p>
+
+  <h3>1.1 기본 설정값</h3>
+  <p>
+    파라미터를 지정하지 않으면 어떤 값으로 동작할까요? 아래 표는 공식 문서 Default settings의 기본값입니다.
+    이 검증에서는 파라미터 9종을 생략하고 만든 체크가 실제로 이 값들로 동작하는지도 뒤에서 확인합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. Application Status Checks 기본 설정값 (공식 문서 Default settings)</caption>
+      <thead>
+        <tr><th scope="col">항목</th><th scope="col">기본값</th><th scope="col">비고</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">체크 주기</th><td><span class="num">60초</span></td><td>고정, 변경 불가</td></tr>
+        <tr><th scope="row">실패 임계값</th><td><span class="num">연속 2회</span></td><td>설정 가능</td></tr>
+        <tr><th scope="row">성공 임계값</th><td><span class="num">연속 2회</span></td><td>설정 가능</td></tr>
+        <tr><th scope="row">Timeout</th><td><span class="num">6초</span></td><td>범위 1~30초, 강제 타임아웃</td></tr>
+        <tr><th scope="row">status code matcher</th><td><span class="num">200</span></td><td>기대 응답 코드</td></tr>
+        <tr><th scope="row">HTTP 경로</th><td><span class="num">/</span></td><td></td></tr>
+        <tr><th scope="row">IP 버전</th><td><span class="num">ipv4</span></td><td>체크당 1개, IPv4/IPv6 둘 다 보려면 체크 2개</td></tr>
+        <tr><th scope="row">IP scope</th><td><span class="num">private</span></td><td></td></tr>
+        <tr><th scope="row">Device index</th><td><span class="num">0</span></td><td></td></tr>
+        <tr><th scope="row">초기화 grace</th><td><span class="num">300초</span></td><td>범위 1~600초</td></tr>
+        <tr><th scope="row">aggregation</th><td><span class="num">included</span></td><td>1.3에서 설명</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    이 중 운영에서 특히 주의할 값은 초기화 grace입니다.
+    공식 문서는 grace가 짧으면 애플리케이션이 준비되기 전에 ASG가 신규 인스턴스를 교체할 수 있다고 경고합니다.
+  </p>
+
+  <h3>1.2 체크는 어디서 오나 - 관리형 ENI</h3>
+  <p>
+    체크 요청의 발신지는 어디일까요? EC2 application status checks 서비스가 대상 VPC 안에
+    <strong>관리형 ENI</strong>(AWS가 만들고 관리하는 네트워크 인터페이스)를 생성하고 여기서 요청을 보냅니다.
+    트래픽은 대상 인스턴스와 같은 AZ의 AWS 관리 인스턴스에서 출발해 AWS 내부 네트워크로만 이동합니다(퍼블릭 인터넷 미경유).
+  </p>
+  <ul class="plain">
+    <li>ENI는 소스 서브넷과 SG 조합당 1개씩 만들어집니다. 조합이 처음 필요할 때 생성되고, 더 이상 필요 없으면 제거됩니다.</li>
+    <li>관리형 ENI는 인스턴스의 ENI 한도에는 계산되지 않지만, 계정의 리전당 네트워크 인터페이스 쿼터(AZ별 집행)에는 계산됩니다.</li>
+    <li>요금은 관리형 ENI당 시간당 $0.01(AZ별)이고, CloudWatch 표준 요금이 별도로 붙습니다.</li>
+    <li>ENI 생성은 서비스 연결 역할(<span class="mono">EC2ApplicationStatusChecksServiceRolePolicy</span>)이 수행하므로 IAM 설정이 따로 필요 없습니다.</li>
+  </ul>
+  <p>
+    온보딩 방식은 2가지입니다. 기본은 AWS 관리형 네트워크 경로로, <span class="mono">--health-check-paths</span>를 생략하면
+    AWS가 소스/대상 서브넷과 SG를 알아서 고릅니다.
+    엄격한 세그멘테이션이나 컴플라이언스 요건이 있으면 customer-managed 모드로 경로를 직접 지정할 수 있습니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - HTTPS 인증서, 재부팅, Local Zones</span>
+    <p>
+      HTTPS 체크는 서버 인증서를 검증하지 않습니다. 재부팅 중에는 체크가 실패로 보고됩니다.
+      Local Zones에서는 ENI가 부모 리전에 위치하고 서비스 링크를 경유하므로 추가 데이터 전송 요금이 발생할 수 있습니다.
+    </p>
+  </div>
+
+  <h3>1.3 상태 값 체계와 aggregation</h3>
+  <p>
+    체크 결과는 두 층위로 보고됩니다. 개별 체크의 상태와, 인스턴스 전체(overall)의 상태입니다.
+  </p>
+  <ul class="plain">
+    <li>개별 체크 5종: <span class="mono">passed</span>, <span class="mono">failed</span>, <span class="mono">initializing</span>,
+      <span class="mono">insufficient-data</span>, <span class="mono">not-applicable</span></li>
+    <li>인스턴스 전체 6종: <span class="mono">ok</span>, <span class="mono">impaired</span>, <span class="mono">initializing</span>,
+      <span class="mono">insufficient-data</span>, <span class="mono">not-applicable</span>(모든 체크가 excluded일 때),
+      <span class="mono">suppressed</span></li>
+  </ul>
+  <p>
+    개별 체크가 전체 상태에 반영될지는 aggregation 설정이 정합니다.
+    <span class="mono">included</span>(기본)는 전체 상태에 기여하고 ASG가 사용합니다.
+    <span class="mono">excluded</span>는 개별 평가와 보고는 지속하되 전체 상태에 기여하지 않아, 프로덕션에서 신규 체크를 검증할 때 씁니다.
+  </p>
+  <p>
+    suppression은 인스턴스 단위의 일시 억제 수단입니다. duration을 지정하거나 무기한으로 걸 수 있고,
+    억제 중 전체 상태는 suppressed가 되며 ASG는 조치하지 않습니다.
+    공식 문서는 배포 전 훅에서 걸고 배포 후 훅에서 푸는 패턴을 안내합니다.
+  </p>
+
+  <h3>1.4 ASG 통합</h3>
+  <p>
+    이 기능의 실질 가치는 Auto Scaling Group(ASG) 통합에서 나옵니다.
+    included 체크 기준으로 전체 상태가 impaired가 되면 ASG가 해당 인스턴스를 자동으로 종료하고 교체합니다.
+    ASG 쪽 추가 설정은 필요 없고, 체크를 그룹 인스턴스에 연결하기만 하면 됩니다.
+  </p>
+  <p>
+    그룹 전체 연결은 시스템 태그로 합니다. <span class="mono">aws:autoscaling:groupName</span> 태그를 연결 대상으로 지정합니다.
+    실측에서는 이후 만들어지는 교체 인스턴스도 추가 API 호출 없이 체크에 편입되는 것을 확인했습니다(3.2 참조).
+    ASG는 전체 상태만 사용하므로 excluded 체크와 suppressed 상태는 조치 대상이 아닙니다.
+  </p>
+
+  <h3>1.5 쿼터</h3>
+  <p>
+    얼마나 많이 만들 수 있을까요? 공식 문서 기준 쿼터는 다음과 같습니다.
+  </p>
+  <ul class="plain">
+    <li>계정당 체크 50개, 체크당 연결 50개, 계정당 연결 200개(자동 승인 조정)입니다.</li>
+    <li>계정당 타깃 5,000개(수동 승인)입니다. 타깃은 인스턴스와 체크의 페어를 뜻합니다.</li>
+    <li>쿼터를 초과한 타깃은 모니터링되지 않고 상태도 보고되지 않습니다. 문서는 쿼터 사용량에 CloudWatch 알람 설정을 권장합니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>테스트 방법</h2>
+  <p>
+    문서를 읽는 것과 동작을 직접 보는 것은 다릅니다.
+    이 검증은 ap-northeast-2 리전에 테스트 전용 ASG(t4g.micro, AL2023 arm64, 2대)를 프라이빗 서브넷 2개에 걸쳐 만들고,
+    기본값 확인용 로컬 인스턴스 1대를 더해 진행했습니다(aws-cli 2.36.22).
+  </p>
+  <p>
+    체크는 2개를 만들었습니다. 로컬용 체크는 설정 파라미터 9종을 일부러 생략해, 서버가 실제로 적용하는 값이
+    표 1의 문서 기본값과 일치하는지 확인하는 용도입니다.
+    ASG용 체크는 초기화 grace를 90초로 줄이고 <span class="mono">aws:autoscaling:groupName</span> 태그로 그룹 전체에 연결했습니다.
+  </p>
+
+  <h3>2.1 헬스 shim - systemd 상태를 HTTP로 변환</h3>
+  <p>
+    체크가 바라볼 대상으로는 Python 표준 라이브러리 HTTP 서버(0.0.0.0:8080)를 헬스 shim으로 세웠습니다.
+    shim은 <span class="mono">/health</span> 요청을 받으면 더미 데몬(<span class="mono">demo-daemon.service</span>)의
+    systemd 상태를 조회해 active면 200, 아니면 503을 반환합니다.
+    systemd 상태를 HTTP 응답 코드로 바꿔주는 얇은 변환 계층이고, ASG 노드에는 user data로 부팅 시 자동 배치됩니다.
+  </p>
+
+  <p>
+    더미 데몬에는 <span class="mono">Restart=always</span>를 걸었습니다. 의도적인 설계입니다.
+    크래시성 장애는 systemd가 초 단위로 되살리고, 재시작으로 복구되지 않는 지속 장애만 shim이 503으로 노출합니다.
+    이렇게 하면 장애 대응이 <strong>세 계층으로 분리</strong>되는지를 그대로 관찰할 수 있습니다.
+  </p>
+  <p>
+    장애 주입은 원격 엔드포인트 2개로 합니다.
+    <span class="mono">/break</span>는 <span class="mono">systemctl stop</span>으로 데몬을 세우는데,
+    명시적 정지에는 Restart=always가 발동하지 않으므로 지속 장애가 재현됩니다.
+    <span class="mono">/fix</span>는 데몬을 되살리며, 두 엔드포인트는 SG로 제어 인스턴스에서만 접근을 허용했습니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  F["장애 발생"] --> L1["1계층: systemd Restart=always, 초 단위 자가 복구"]
+  L1 -- "재시작으로 복구 안 되는 지속 장애" --> L2["2계층: Application Status Check, 연속 2회 실패 시 impaired"]
+  L2 -- "overall impaired" --> L3["3계층: ASG 인스턴스 종료 후 교체"]
+    </div>
+    <figcaption>
+      그림 1. 검증 환경의 3계층 복구 구조. 크래시는 1계층에서 초 단위로 흡수되고,
+      재시작으로 복구되지 않는 지속 장애만 체크의 impaired 판정을 거쳐 ASG 교체까지 올라가도록 설계했습니다.
+    </figcaption>
+  </figure>
+
+  <h3>2.2 체크 생성과 연결</h3>
+  <p>
+    체크 생성과 연결은 CLI 두 번이면 끝납니다.
+    <span class="mono">--health-check-paths</span>를 생략해 AWS 관리형 네트워크 경로를 쓰고,
+    ASG 연결은 1.4에서 설명한 시스템 태그 방식을 사용했습니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">코드 1. 체크 생성과 ASG 태그 연결</div>
+    <pre><code><span class="cm"># 생성 - AWS 관리형 경로 (--health-check-paths 생략)</span>
+aws ec2 create-application-status-check \
+  --protocol http --port 8080 --path "/health" \
+  --status-code-matcher "200" \
+  --initialization-grace-period-seconds 90
+
+<span class="cm"># 연결 - ASG 시스템 태그로 그룹 전체를 한 번에</span>
+aws ec2 associate-application-status-check \
+  --application-status-check-id asc-xxxx \
+  --target-tag-associations Key=aws:autoscaling:groupName,Value=my-asg</code></pre>
+  </div>
+
+  <h3>2.3 검증 수단</h3>
+  <p>
+    판정 근거는 한 층에 의존하지 않고 네 층으로 교차 확인했습니다.
+  </p>
+  <ul class="plain">
+    <li>20초 간격 상태 폴러 로그 380건 - 체크와 인스턴스 상태의 전이 시각을 기록합니다.</li>
+    <li>tcpdump 캡처 - 체크 트래픽의 실제 프로토콜과 발신 IP를 패킷 수준에서 확인합니다.</li>
+    <li>CloudTrail - 관리형 ENI 생성 등 서비스 측 API 호출을 추적합니다.</li>
+    <li>ASG 활동 이력 - 종료와 교체의 시각, Cause 문자열을 확보합니다.</li>
+  </ul>
+  <p>
+    작성 전에 보고서의 주장 15건을 독립 재검증 절차로 다시 확인해 9건은 확증, 6건은 부분 확증으로 정정했습니다.
+    본문에는 정정을 반영한 값을 실었습니다.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>실측 결과</h2>
+  <p>
+    결과는 네 갈래로 정리합니다. 임계값 2회의 실제 모습, 장애 주입부터 교체까지의 타임라인,
+    체크에 잡히지 않는 장애, 그리고 suppression과 excluded의 동작입니다.
+  </p>
+
+  <h3>3.1 임계값 2회는 이렇게 움직입니다</h3>
+  <p>
+    연속 2회 실패라는 규칙은 API 응답에서 어떻게 보일까요?
+    1회째 실패에서는 <span class="mono">Reason</span>만 503 응답을 담은 값으로 바뀌고
+    <span class="mono">Status</span>는 passed로 유지됩니다.
+    2회째 실패에서 비로소 failed와 impaired로 전이합니다.
+  </p>
+  <p>
+    회복도 대칭입니다. 연속 2회 성공의 2회째에 passed와 ok로 돌아오며, 회복 소요는 실측
+    <strong>2분 24초</strong>였습니다. 이 패턴은 에피소드 3개에서 동일하게 재현됐습니다.
+  </p>
+  <p>
+    1.1에서 예고한 기본값 검증 결과도 여기에 둡니다.
+    파라미터 9종을 생략하고 만든 체크의 서버 적용값은 표 1의 문서 기본값과 전 항목 일치했습니다.
+    다만 status code matcher 200은 생성 시 명시적으로 전달한 값이라, 생략 시 기본 200이라는 항목만은 문서 근거로 남습니다.
+  </p>
+
+  <h3>3.2 핵심 타임라인 - 주입부터 완전 복구까지 약 8.5분</h3>
+  <p>
+    이 검증의 중심 질문입니다. 장애가 나면 얼마 만에 새 인스턴스로 교체될까요?
+    ASG 노드 1대에 <span class="mono">/break</span>를 주입하고 폴러 로그와 ASG 활동 이력의 시각을 맞춰본 결과가 아래 표입니다(시각은 UTC).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 장애 주입 &rarr; 자동 교체 실측 타임라인 (초기화 grace 90초 설정)</caption>
+      <thead>
+        <tr>
+          <th scope="col">이벤트</th>
+          <th scope="col">시각</th>
+          <th scope="col">주입 후 경과</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row"><span class="mono">/break</span> 주입 (systemctl stop)</th><td><span class="num">12:13:49</span></td><td><span class="num">0초</span></td></tr>
+        <tr><th scope="row">overall impaired 판정 (연속 2회 실패)</th><td>-</td><td><span class="num">약 2분</span></td></tr>
+        <tr><th scope="row">ASG 종료 개시</th><td><span class="num">12:18:59</span></td><td><span class="num">5분 10초</span></td></tr>
+        <tr><th scope="row">교체 노드 Pending &rarr; initializing</th><td>-</td><td>-</td></tr>
+        <tr><th scope="row">교체 노드 ok, 완전 복구</th><td><span class="num">12:22:13</span></td><td><span class="num">약 8.5분</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    impaired 확정과 종료 개시 사이의 약 3분은 ASG가 상태를 확인하고 조치하는 구간입니다.
+    교체 노드는 시스템 태그 연결 덕에 추가 API 호출 없이 자동으로 체크에 편입됐습니다.
+    ASG 활동 이력에 남은 종료 사유는 아래 원문 그대로입니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">ASG 활동 이력 - 종료 Cause 원문</div>
+    <pre><code>At 2026-08-13T12:18:59Z an instance was taken out of service in response to an EC2 Application Status check failure.</code></pre>
+  </div>
+
+  <h3>3.3 체크에 잡히지 않는 장애 - kill -9</h3>
+  <p>
+    반대로 체크에 아예 보이지 않는 장애도 있습니다.
+    <span class="mono">kill -9</span>로 데몬 프로세스를 죽이자 systemd가 <strong>7초 안에</strong> 재기동했고,
+    60초 주기 체크의 어떤 평가에도 흔적이 남지 않았습니다(이후 3분간 전부 passed).
+    그림 1의 계층 분리가 의도대로 동작해, 크래시성 장애는 1계층에서 끝나고 체크까지 올라가지 않습니다.
+  </p>
+  <p>
+    shim 자체를 세웠을 때는 ConnectionRefused로 실패 처리됐습니다. 감시자가 죽으면 장애로 판정되는 fail-safe 방향입니다.
+    장애인데 건강으로 판정되는 미탐 방향의 구멍은 이번 검증에서 관찰되지 않았습니다.
+  </p>
+
+  <h3>3.4 suppression과 excluded의 실제 동작</h3>
+  <p>
+    suppression은 활성화가 즉시 반영되지 않았습니다.
+    API 호출 후 overall이 suppressed로 바뀌기까지 <strong>약 3.2분</strong>이 걸렸고,
+    그동안은 실시간 평가 상태가 그대로 보였습니다. 해제도 약 2분 이상 지연됐습니다.
+  </p>
+  <p>
+    억제 중에 장애를 넣어도 개별 체크는 정상적으로 failed로 전이했습니다.
+    overall만 suppressed로 마스킹을 유지해, 억제 중에는 ASG가 조치하지 않는다는 문서 설명과 부합합니다.
+  </p>
+  <p>
+    excluded 전환에서는 개별 체크가 계속 평가되어 passed(200)로 보고됐습니다.
+    overall은 not-applicable로 바뀌었고, 체크별 CloudWatch 지표도 계속 발행됐습니다.
+    1.3에서 설명한 프로덕션 신규 체크 검증 용도가 실제로 성립하는 동작입니다.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>문서와 실측의 간극</h2>
+  <p>
+    출시 첫 주의 기능답게, 문서와 실제 동작이 다르거나 운영에 필요한 정보가 문서에 없는 지점이 6건 나왔습니다.
+    기능 결함이라기보다는 문서가 아직 따라가지 못한 영역입니다.
+    자동화 스크립트나 알람을 짤 때 걸리는 부분이므로, 각 항목의 문서 서술과 실측 결과를 표로 대조합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 문서 서술과 실측 결과의 간극 6건 (2026-08-13 ap-northeast-2 실측)</caption>
+      <thead>
+        <tr>
+          <th scope="col">항목</th>
+          <th scope="col">문서 서술</th>
+          <th scope="col">실측 결과</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">1. 연결 오류의 StatusCode</th>
+          <td>ConnectionTimeout 등 연결 오류에는 <span class="mono">StatusCode</span>와 <span class="mono">Protocol</span> 필드가 "not present"</td>
+          <td><span class="mono">"StatusCode": 0</span> 필드가 존재(연결 오류 278건 전수 확인). <span class="mono">Protocol</span> 생략만 문서대로</td>
+        </tr>
+        <tr>
+          <th scope="row">2. "HTTP/2 전송"의 실체</th>
+          <td>헬스체크 요청은 HTTP/2로 전송</td>
+          <td>HTTP/1.1 요청에 <span class="mono">Upgrade: h2c</span>로 HTTP/2 업그레이드를 제안(pcap 6건 전수 동일). HTTP/1.0으로만 응답하는 서버도 정상 평가</td>
+        </tr>
+        <tr>
+          <th scope="row">3. suppression 전파 지연</th>
+          <td>지연 언급 없음. 실패 시 suppressed로 표시된다는 뉘앙스</td>
+          <td>활성화 후 약 3.2분간 실시간 평가 상태가 그대로 노출. 앱이 건강해도 suppressed로 전환되고, 해제도 약 2분 이상 지연</td>
+        </tr>
+        <tr>
+          <th scope="row">4. 억제 중 CW 지표</th>
+          <td>미기재</td>
+          <td>집계 지표 <span class="mono">StatusCheckFailed_Application</span>은 발행 중단(알람이 INSUFFICIENT_DATA로 전이), 체크별 지표는 계속 발행</td>
+        </tr>
+        <tr>
+          <th scope="row">5. 관리형 ENI 조회</th>
+          <td>조회 방법 미기재</td>
+          <td><span class="mono">Operator.HiddenByDefault</span>로 목록/필터 조회에서 숨김. CloudTrail의 <span class="mono">CreateNetworkInterface</span> 이벤트로 ID 확보 후 직접 지정 조회는 가능</td>
+        </tr>
+        <tr>
+          <th scope="row">6. 삭제 후 ENI 잔존</th>
+          <td>조합이 더 이상 필요 없으면 제거</td>
+          <td>체크 삭제 후 20분 이상 in-use로 잔존. 해당 SG 삭제가 DependencyViolation으로 차단됨</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    2번을 조금 더 풀면, 문서의 "HTTP/2로 전송"은 HTTP/2 강제가 아니라 업그레이드 제안이었습니다.
+    캡처된 요청의 User-Agent는 <span class="mono">Java-http-client/25.0.4</span>였고,
+    서버가 업그레이드를 무시하고 HTTP/1.0으로 응답해도 정상 평가됐습니다.
+    <strong>구형 앱 서버도 HTTP/2 지원 없이 그대로 쓸 수 있다</strong>는 뜻입니다.
+  </p>
+  <p>
+    5번에는 덧붙일 관찰이 하나 있습니다. 실제 체크 트래픽의 소스 IP(10.254.2.187)는
+    CloudTrail로 확보한 관리형 ENI의 IP(10.254.2.162)와도 달랐습니다.
+    60초마다 0.73초 간격으로 요청 2발이 오는 패턴으로 미루어 이중화된 체커로 추정합니다. 이 부분은 추론입니다.
+  </p>
+  <p>
+    1번, 4번, 6번은 자동화 코드에 직접 영향을 줍니다. 어떻게 대응할지는 다음 섹션에서 우선순위를 붙여 정리합니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>운영 가이드</h2>
+  <p>
+    실측에서 확인한 동작을 기준으로 도입 절차와 운영 설계를 정리합니다.
+    1순위는 도입 절차입니다. 아래 경고의 루프는 절차만 지키면 피할 수 있고, 나머지 항목은 그 위에 얹는 보완 설계입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - SG를 확인하지 않으면 연쇄 교체 루프에 빠집니다</span>
+    <p>
+      체크 트래픽의 SG 인바운드를 허용하지 않은 채 기존 ASG에 included로 연결하면,
+      신규 인스턴스가 부팅 &rarr; grace &rarr; 연속 2회 실패 &rarr; 종료를 반복합니다.
+      실측에서는 <strong>14분 동안 3세대에 걸쳐 총 5대</strong>가 교체됐습니다.
+      애플리케이션이 건강한데도 인스턴스가 계속 죽어 나가는 상황입니다.
+    </p>
+    <p>
+      도입 순서는 SG 인바운드 선확인 &rarr; excluded로 생성해 일부 인스턴스에서 2주기(약 2분) 이상 관찰 &rarr;
+      <span class="mono">describe-application-status</span>로 기대 상태 확인 후 included 승격입니다.
+      이미 루프에 빠졌다면 체크를 excluded로 전환해 교체를 멈추고 SG부터 고칩니다.
+    </p>
+  </div>
+
+  <h3>5.1 운영 설계 체크리스트</h3>
+  <p>
+    도입 절차 다음은 운영 설계입니다. 네 가지 모두 4장의 간극에서 나온 항목입니다.
+  </p>
+  <ol class="plain">
+    <li>
+      <strong>배포 훅의 suppression은 배포 3분 이상 전에 겁니다.</strong>
+      활성화 후 전파까지 약 3.2분이 걸리고, 그동안 실시간 평가 상태가 그대로 보입니다.
+      미전파 구간에서 ASG가 impaired에 반응하는지는 이번에 검증하지 못했으므로, 안전하게 3분 대기를 권장합니다.
+    </li>
+    <li>
+      <strong>CloudWatch 알람은 이원으로 설계합니다.</strong>
+      집계 지표 <span class="mono">StatusCheckFailed_Application</span>은 억제 중 발행이 중단되므로,
+      missing data 처리를 notBreaching으로 볼지 missing으로 둘지 의도적으로 선택해야 합니다.
+      억제와 무관한 관측이 필요하면 체크별 지표(<span class="mono">StatusCheckFailed_Application_{asc-id}</span>)에 알람을 겁니다.
+      describe API 표시는 서비스 타임스탬프보다 약 40~60초 늦게 관측됐으므로, 자동화는 지표 기반이 빠릅니다.
+    </li>
+    <li>
+      <strong>Reason 파서는 Code 값으로 분기합니다.</strong>
+      연결 오류에도 <span class="mono">"StatusCode": 0</span> 필드가 존재하므로, 필드 부재를 전제로 짠 파서는 깨집니다.
+      ConnectionTimeout, ConnectionRefused 등 Code 값으로 분기하는 쪽이 안전합니다.
+    </li>
+    <li>
+      <strong>IaC 삭제 자동화에는 재시도 로직을 넣습니다.</strong>
+      체크 삭제 후에도 관리형 ENI가 20분 이상 in-use로 남아, 해당 SG 삭제를 DependencyViolation으로 차단합니다.
+    </li>
+  </ol>
+
+  <p class="lead-def">
+    <b>결론:</b> 한 문장으로 요약하면, Application Status Checks는 상태 검사의 빈자리였던 애플리케이션 계층을 채우고
+    ASG 자동 교체까지 이어 주는 기능이며, 실측 기준 장애 감지에 약 2분, 완전 복구까지 약 8.5분이 걸립니다.
+    SG 선확인과 excluded 관찰을 거쳐 included로 승격하고, suppression은 3분 이상 선행하고,
+    알람을 집계와 체크별 지표로 이원화하면 이번 실측에서 드러난 함정은 모두 설계 단계에서 피할 수 있습니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="ec2-application-status-checks-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="ec2-application-status-checks-archmap.png" alt="인터랙티브 아키텍처 맵 전체 이미지 - 관리형 ENI를 통한 60초 헬스체크 경로와 ASG 자동 교체 흐름"></a>
+    <figcaption>그림 2. 인터랙티브 아키텍처 맵 전체 보기. 이미지를 클릭하면 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 <a href="ec2-application-status-checks-archmap.html" target="_blank" rel="noopener">인터랙티브 버전 ↗</a>이 열립니다.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/application-status-checks.html">Application status checks for your EC2 instances</a>
+      - Amazon EC2 User Guide
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/application-status-checks.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/amazon-ec2-application-status-checks/">What&#39;s New - Amazon EC2 Application Status Checks</a>
+      - 출시 공지 (2026-08-10)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/amazon-ec2-application-status-checks/</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-health-checks.html">Health checks for instances in an Auto Scaling group</a>
+      - Amazon EC2 Auto Scaling User Guide
+      <span class="url">https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-health-checks.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ApplicationStatusReason.html">API Reference - ApplicationStatusReason</a>
+      - Reason 구조와 Code 값
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ApplicationStatusReason.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html">Amazon VPC quotas</a>
+      - 네트워크 인터페이스 쿼터
+      <span class="url">https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-13.
+    본 문서는 Amazon EC2 공식 문서와 AWS What&#39;s New(2026-08-10), 그리고 ap-northeast-2 리전의
+    실측 데이터를 기반으로 작성한 기술 분석 자료입니다.
+    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<div class="page" data-lang="en">
+<!-- ===================== Theme toggle ===================== -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AMAZON EC2 / FEATURE VERIFICATION</p>
+  <h1>EC2 Now Checks the Application Layer - Application Status Checks, Verified Hands-On</h1>
+  <p class="subtitle">
+    An introduction to Amazon EC2 Application Status Checks, released on 2026-08-10, written for readers
+    encountering it for the first time. We injected failures into a test ASG to measure the timeline from
+    detection to automatic replacement, and recorded 6 points that differ from or are missing in the documentation.
+  </p>
+
+  <div class="stat" role="img" aria-label="5 minutes 10 seconds from failure injection to ASG termination start, about 8.5 minutes until the replacement node reports ok and recovery completes">
+    <div class="stat-item old">
+      <span class="stat-num">5<span class="unit">min</span> 10<span class="unit">sec</span></span>
+      <span class="stat-sub">Failure injection &rarr; ASG termination start</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num"><span class="unit">approx.</span> 8.5<span class="unit">min</span></span>
+      <span class="stat-sub">Replacement node ok, full recovery</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>Written as of 2026-08-13.</p>
+    <p>This applies to workloads running applications that serve HTTP/HTTPS responses on EC2 instances.</p>
+    <p>The verification environment is a 2-instance t4g.micro test ASG in ap-northeast-2, plus a local instance.</p>
+    <p>Primary sources are the official EC2 documentation, AWS What&#39;s New (2026-08-10), and measured data from 2026-08-13.</p>
+    <p>Pricing is $0.01 per managed ENI per hour (per AZ), plus standard CloudWatch charges.</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>
+      EC2 status checks gained an application layer. Application Status Checks, released on 2026-08-10,
+      sends HTTP/HTTPS requests to the port and path you specify <strong>every 60 seconds</strong> and
+      marks the instance impaired after 2 consecutive failures.
+    </li>
+    <li>
+      Checks originate from managed ENIs created inside the VPC and travel over the AWS internal network
+      within the same AZ. Once the overall status becomes impaired, the ASG terminates and replaces the
+      instance with no extra configuration. In our measurements, it took <strong>5 minutes 10 seconds</strong>
+      from failure injection to termination start, and about 8.5 minutes until the replacement node reported ok.
+    </li>
+    <li>
+      The biggest trap is the SG. If you attach a check to an ASG as included without allowing the check
+      traffic inbound, you fall into a loop where even new instances are replaced back-to-back
+      (measured: 5 instances across 3 generations in 14 minutes).
+      Suppression also takes about 3.2 minutes to propagate after activation.
+    </li>
+    <li>
+      The adoption order is: verify SG inbound first &rarr; create as excluded and observe &rarr; promote to included.
+      Suppression in deployment hooks must be applied at least 3 minutes before the deployment to be safe.
+    </li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Feature overview</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Test method</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Measured results</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Gaps between docs and measurements</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Operations guide</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Feature overview</h2>
+  <p>
+    Until now, EC2 instance status checks came in 2 kinds: system and instance.
+    These only verify that the instance itself is alive; they cannot see whether the application running
+    on top of it actually responds. Application Status Checks, released on 2026-08-10, fills this gap as
+    the third, application-layer status check.
+  </p>
+  <p>
+    The mechanism is simple. AWS sends an HTTP or HTTPS request to the port and path you specify
+    <strong>every 60 seconds</strong> and compares the response code against the
+    <span class="mono">status code matcher</span>.
+    2 consecutive failures mean impaired; after a failure, 2 consecutive successes mean recovered
+    (the thresholds are configurable; the 60-second interval is fixed).
+  </p>
+  <p>
+    The representative use cases cited by AWS What&#39;s New (2026-08-10) are detecting an unresponsive
+    web server and a Docker daemon that is not running.
+    It is available in all commercial regions and GovCloud (US).
+  </p>
+
+  <h3>1.1 Default settings</h3>
+  <p>
+    What values apply when you specify no parameters? The table below lists the defaults from the official
+    documentation&#39;s Default settings. Later in this verification we also confirm whether a check created
+    with 9 parameters omitted actually runs with these values.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. Application Status Checks default settings (official docs, Default settings)</caption>
+      <thead>
+        <tr><th scope="col">Item</th><th scope="col">Default</th><th scope="col">Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Check interval</th><td><span class="num">60s</span></td><td>Fixed, not configurable</td></tr>
+        <tr><th scope="row">Failure threshold</th><td><span class="num">2 consecutive</span></td><td>Configurable</td></tr>
+        <tr><th scope="row">Success threshold</th><td><span class="num">2 consecutive</span></td><td>Configurable</td></tr>
+        <tr><th scope="row">Timeout</th><td><span class="num">6s</span></td><td>Range 1-30s, hard timeout</td></tr>
+        <tr><th scope="row">status code matcher</th><td><span class="num">200</span></td><td>Expected response code</td></tr>
+        <tr><th scope="row">HTTP path</th><td><span class="num">/</span></td><td></td></tr>
+        <tr><th scope="row">IP version</th><td><span class="num">ipv4</span></td><td>1 per check; use 2 checks to cover both IPv4/IPv6</td></tr>
+        <tr><th scope="row">IP scope</th><td><span class="num">private</span></td><td></td></tr>
+        <tr><th scope="row">Device index</th><td><span class="num">0</span></td><td></td></tr>
+        <tr><th scope="row">Initialization grace</th><td><span class="num">300s</span></td><td>Range 1-600s</td></tr>
+        <tr><th scope="row">aggregation</th><td><span class="num">included</span></td><td>Explained in 1.3</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    Of these, the value to watch most carefully in operations is the initialization grace.
+    The official documentation warns that if the grace is too short, the ASG may replace new instances
+    before the application is ready.
+  </p>
+
+  <h3>1.2 Where checks come from - managed ENIs</h3>
+  <p>
+    Where do check requests originate? The EC2 application status checks service creates
+    <strong>managed ENIs</strong> (network interfaces created and managed by AWS) inside the target VPC
+    and sends requests from them. Traffic departs from an AWS-managed instance in the same AZ as the target
+    instance and travels only over the AWS internal network (never traversing the public internet).
+  </p>
+  <ul class="plain">
+    <li>One ENI is created per combination of source subnet and SG. It is created when the combination is first needed and removed when no longer needed.</li>
+    <li>Managed ENIs do not count against the instance&#39;s ENI limit, but they do count against the account&#39;s per-region network interface quota (enforced per AZ).</li>
+    <li>Pricing is $0.01 per managed ENI per hour (per AZ), with standard CloudWatch charges billed separately.</li>
+    <li>ENI creation is performed by a service-linked role (<span class="mono">EC2ApplicationStatusChecksServiceRolePolicy</span>), so no separate IAM setup is required.</li>
+  </ul>
+  <p>
+    There are 2 onboarding modes. The default is the AWS-managed network path: omit
+    <span class="mono">--health-check-paths</span> and AWS picks the source/target subnets and SGs for you.
+    If you have strict segmentation or compliance requirements, customer-managed mode lets you specify the paths yourself.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - HTTPS certificates, reboots, Local Zones</span>
+    <p>
+      HTTPS checks do not validate the server certificate. During a reboot, checks are reported as failing.
+      In Local Zones, the ENI resides in the parent region and traffic traverses the service link, which can
+      incur additional data transfer charges.
+    </p>
+  </div>
+
+  <h3>1.3 Status values and aggregation</h3>
+  <p>
+    Check results are reported at two levels: the status of each individual check, and the overall status of the instance.
+  </p>
+  <ul class="plain">
+    <li>5 individual check states: <span class="mono">passed</span>, <span class="mono">failed</span>, <span class="mono">initializing</span>,
+      <span class="mono">insufficient-data</span>, <span class="mono">not-applicable</span></li>
+    <li>6 instance overall states: <span class="mono">ok</span>, <span class="mono">impaired</span>, <span class="mono">initializing</span>,
+      <span class="mono">insufficient-data</span>, <span class="mono">not-applicable</span> (when every check is excluded),
+      <span class="mono">suppressed</span></li>
+  </ul>
+  <p>
+    Whether an individual check feeds into the overall status is decided by the aggregation setting.
+    <span class="mono">included</span> (the default) contributes to the overall status and is what the ASG uses.
+    <span class="mono">excluded</span> keeps evaluating and reporting individually but does not contribute to
+    the overall status, which is what you use to validate a new check in production.
+  </p>
+  <p>
+    Suppression is a per-instance, temporary mute. You can set a duration or make it indefinite;
+    while suppressed, the overall status becomes suppressed and the ASG takes no action.
+    The official documentation describes the pattern of enabling it in a pre-deployment hook and releasing it in a post-deployment hook.
+  </p>
+
+  <h3>1.4 ASG integration</h3>
+  <p>
+    The practical value of this feature comes from the Auto Scaling Group (ASG) integration.
+    When the overall status becomes impaired based on included checks, the ASG automatically terminates
+    and replaces the instance. No extra configuration is needed on the ASG side; you only attach the check
+    to the group&#39;s instances.
+  </p>
+  <p>
+    Group-wide attachment is done with a system tag: specify the <span class="mono">aws:autoscaling:groupName</span>
+    tag as the association target. In our measurements, replacement instances created afterwards were enrolled
+    into the check without any additional API calls (see 3.2).
+    The ASG uses only the overall status, so excluded checks and the suppressed state are not acted upon.
+  </p>
+
+  <h3>1.5 Quotas</h3>
+  <p>
+    How many can you create? Per the official documentation, the quotas are as follows.
+  </p>
+  <ul class="plain">
+    <li>50 checks per account, 50 associations per check, and 200 associations per account (auto-approved adjustment).</li>
+    <li>5,000 targets per account (manual approval). A target means an instance-check pair.</li>
+    <li>Targets beyond the quota are not monitored and report no status. The docs recommend setting a CloudWatch alarm on quota usage.</li>
+  </ul>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Test method</h2>
+  <p>
+    Reading the documentation and watching the behavior firsthand are different things.
+    For this verification we built a dedicated test ASG (t4g.micro, AL2023 arm64, 2 instances) across
+    2 private subnets in ap-northeast-2, plus 1 local instance for default-value verification (aws-cli 2.36.22).
+  </p>
+  <p>
+    We created 2 checks. The check for the local instance deliberately omitted 9 configuration parameters,
+    to confirm whether the values the server actually applies match the documented defaults in Table 1.
+    The check for the ASG reduced the initialization grace to 90 seconds and was attached to the whole group
+    via the <span class="mono">aws:autoscaling:groupName</span> tag.
+  </p>
+
+  <h3>2.1 Health shim - turning systemd state into HTTP</h3>
+  <p>
+    As the check&#39;s target we stood up a Python standard-library HTTP server (0.0.0.0:8080) as a health shim.
+    When the shim receives a <span class="mono">/health</span> request, it queries the systemd state of a dummy
+    daemon (<span class="mono">demo-daemon.service</span>) and returns 200 if active, 503 otherwise.
+    It is a thin translation layer that converts systemd state into HTTP response codes, and it is deployed
+    automatically at boot on the ASG nodes via user data.
+  </p>
+
+  <p>
+    The dummy daemon runs with <span class="mono">Restart=always</span>. This is a deliberate design.
+    Crash-type failures are revived by systemd within seconds, and only persistent failures that a restart
+    cannot fix are exposed as 503 by the shim.
+    This lets us observe directly whether failure handling is <strong>separated into three layers</strong>.
+  </p>
+  <p>
+    Failure injection is done through 2 remote endpoints.
+    <span class="mono">/break</span> stops the daemon with <span class="mono">systemctl stop</span>;
+    since Restart=always does not trigger on an explicit stop, this reproduces a persistent failure.
+    <span class="mono">/fix</span> revives the daemon, and both endpoints were restricted by SG to the control instance only.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  F["Failure occurs"] --> L1["Layer 1: systemd Restart=always, self-heals in seconds"]
+  L1 -- "Persistent failure a restart cannot fix" --> L2["Layer 2: Application Status Check, impaired after 2 consecutive failures"]
+  L2 -- "overall impaired" --> L3["Layer 3: ASG terminates and replaces the instance"]
+    </div>
+    <figcaption>
+      Figure 1. The three-layer recovery structure of the verification environment. Crashes are absorbed
+      within seconds at layer 1, and only persistent failures that a restart cannot fix escalate through
+      the check&#39;s impaired verdict up to ASG replacement.
+    </figcaption>
+  </figure>
+
+  <h3>2.2 Creating and attaching the check</h3>
+  <p>
+    Creating and attaching a check takes just two CLI calls.
+    We omitted <span class="mono">--health-check-paths</span> to use the AWS-managed network path,
+    and attached to the ASG with the system tag method described in 1.4.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Code 1. Creating the check and attaching via the ASG tag</div>
+    <pre><code><span class="cm"># Create - AWS-managed path (omit --health-check-paths)</span>
+aws ec2 create-application-status-check \
+  --protocol http --port 8080 --path "/health" \
+  --status-code-matcher "200" \
+  --initialization-grace-period-seconds 90
+
+<span class="cm"># Attach - the whole group at once via the ASG system tag</span>
+aws ec2 associate-application-status-check \
+  --application-status-check-id asc-xxxx \
+  --target-tag-associations Key=aws:autoscaling:groupName,Value=my-asg</code></pre>
+  </div>
+
+  <h3>2.3 Verification instruments</h3>
+  <p>
+    We did not rely on a single layer for our verdicts; we cross-checked across four layers.
+  </p>
+  <ul class="plain">
+    <li>380 entries of a 20-second-interval status poller log - records the transition times of check and instance states.</li>
+    <li>tcpdump captures - confirm the check traffic&#39;s actual protocol and source IP at the packet level.</li>
+    <li>CloudTrail - traces service-side API calls such as managed ENI creation.</li>
+    <li>ASG activity history - captures termination/replacement timestamps and the Cause strings.</li>
+  </ul>
+  <p>
+    Before writing, we re-examined 15 of the report&#39;s claims through an independent re-verification pass:
+    9 were confirmed and 6 were corrected to partially confirmed. The values in this document reflect those corrections.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Measured results</h2>
+  <p>
+    We organize the results into four strands: what the 2-consecutive threshold actually looks like,
+    the timeline from failure injection to replacement, failures the check cannot see,
+    and the behavior of suppression and excluded.
+  </p>
+
+  <h3>3.1 How the 2-consecutive threshold behaves</h3>
+  <p>
+    How does the 2-consecutive-failures rule appear in API responses?
+    On the 1st failure, only <span class="mono">Reason</span> changes to a value carrying the 503 response,
+    while <span class="mono">Status</span> stays passed.
+    Only on the 2nd failure does it transition to failed and impaired.
+  </p>
+  <p>
+    Recovery is symmetric. On the 2nd of 2 consecutive successes it returns to passed and ok,
+    and the measured recovery time was <strong>2 minutes 24 seconds</strong>.
+    This pattern reproduced identically across 3 episodes.
+  </p>
+  <p>
+    The default-value verification promised in 1.1 also belongs here.
+    The server-applied values of the check created with 9 parameters omitted matched the documented
+    defaults in Table 1 on every item. However, the status code matcher 200 was a value we passed
+    explicitly at creation, so the claim that it defaults to 200 when omitted rests on the documentation alone.
+  </p>
+
+  <h3>3.2 Core timeline - about 8.5 minutes from injection to full recovery</h3>
+  <p>
+    This is the central question of this verification. When a failure occurs, how long until the instance
+    is replaced with a new one? We injected <span class="mono">/break</span> into 1 ASG node and aligned
+    the timestamps of the poller log with the ASG activity history; the result is the table below (times in UTC).
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Measured timeline from failure injection to automatic replacement (initialization grace set to 90s)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Event</th>
+          <th scope="col">Time</th>
+          <th scope="col">Elapsed since injection</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row"><span class="mono">/break</span> injected (systemctl stop)</th><td><span class="num">12:13:49</span></td><td><span class="num">0s</span></td></tr>
+        <tr><th scope="row">overall impaired verdict (2 consecutive failures)</th><td>-</td><td><span class="num">approx. 2min</span></td></tr>
+        <tr><th scope="row">ASG termination start</th><td><span class="num">12:18:59</span></td><td><span class="num">5min 10s</span></td></tr>
+        <tr><th scope="row">Replacement node Pending &rarr; initializing</th><td>-</td><td>-</td></tr>
+        <tr><th scope="row">Replacement node ok, full recovery</th><td><span class="num">12:22:13</span></td><td><span class="num">approx. 8.5min</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The roughly 3 minutes between the impaired verdict and termination start is the window in which the
+    ASG confirms the status and takes action. Thanks to the system-tag association, the replacement node
+    was enrolled into the check automatically, with no additional API calls.
+    The termination cause recorded in the ASG activity history reads verbatim as follows.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">ASG activity history - termination Cause, verbatim</div>
+    <pre><code>At 2026-08-13T12:18:59Z an instance was taken out of service in response to an EC2 Application Status check failure.</code></pre>
+  </div>
+
+  <h3>3.3 Failures the check cannot see - kill -9</h3>
+  <p>
+    Conversely, some failures are entirely invisible to the check.
+    When we killed the daemon process with <span class="mono">kill -9</span>, systemd restarted it
+    <strong>within 7 seconds</strong>, and no trace appeared in any evaluation of the 60-second-interval
+    check (all passed for the following 3 minutes).
+    The layer separation of Figure 1 worked as intended: crash-type failures end at layer 1 and never
+    climb up to the check.
+  </p>
+  <p>
+    When we stopped the shim itself, it was treated as a failure with ConnectionRefused.
+    That is the fail-safe direction: if the watcher dies, it is judged a failure.
+    No hole in the false-negative direction (a failure judged healthy) was observed in this verification.
+  </p>
+
+  <h3>3.4 How suppression and excluded actually behave</h3>
+  <p>
+    Suppression activation was not reflected immediately.
+    It took <strong>about 3.2 minutes</strong> after the API call for the overall status to change to
+    suppressed, and in the meantime the live evaluation state remained visible.
+    Release was also delayed by about 2 minutes or more.
+  </p>
+  <p>
+    Even when we injected a failure while suppressed, the individual check transitioned to failed normally.
+    Only the overall status kept the suppressed mask, consistent with the documentation&#39;s statement
+    that the ASG takes no action while suppressed.
+  </p>
+  <p>
+    After switching to excluded, the individual check kept being evaluated and reported passed (200).
+    The overall status changed to not-applicable, and per-check CloudWatch metrics continued to be published.
+    This confirms in practice the production new-check validation use described in 1.3.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Gaps between docs and measurements</h2>
+  <p>
+    As you might expect from a feature in its first week, we found 6 points where the documentation
+    differs from actual behavior or is missing information needed for operations.
+    These are less feature defects than areas the documentation has not yet caught up with.
+    They matter when writing automation scripts or alarms, so the table below contrasts each item&#39;s
+    documented statement with the measured result.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. 6 gaps between documented statements and measured results (measured 2026-08-13, ap-northeast-2)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Item</th>
+          <th scope="col">Documented statement</th>
+          <th scope="col">Measured result</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">1. StatusCode on connection errors</th>
+          <td>For connection errors such as ConnectionTimeout, the <span class="mono">StatusCode</span> and <span class="mono">Protocol</span> fields are "not present"</td>
+          <td>The <span class="mono">"StatusCode": 0</span> field is present (confirmed across all 278 connection errors). Only the <span class="mono">Protocol</span> omission matches the docs</td>
+        </tr>
+        <tr>
+          <th scope="row">2. What "sent over HTTP/2" really is</th>
+          <td>Health check requests are sent over HTTP/2</td>
+          <td>An HTTP/1.1 request proposing an HTTP/2 upgrade via <span class="mono">Upgrade: h2c</span> (identical across all 6 pcaps). A server responding only with HTTP/1.0 is still evaluated normally</td>
+        </tr>
+        <tr>
+          <th scope="row">3. Suppression propagation delay</th>
+          <td>No delay mentioned. The nuance is that the status shows suppressed upon failure</td>
+          <td>For about 3.2 minutes after activation, the live evaluation state stays exposed. It switches to suppressed even while the app is healthy, and release is also delayed by about 2+ minutes</td>
+        </tr>
+        <tr>
+          <th scope="row">4. CW metrics while suppressed</th>
+          <td>Not documented</td>
+          <td>The aggregate metric <span class="mono">StatusCheckFailed_Application</span> stops publishing (alarms transition to INSUFFICIENT_DATA); per-check metrics keep publishing</td>
+        </tr>
+        <tr>
+          <th scope="row">5. Looking up managed ENIs</th>
+          <td>Lookup method not documented</td>
+          <td>Hidden from list/filter queries via <span class="mono">Operator.HiddenByDefault</span>. After obtaining the ID from the CloudTrail <span class="mono">CreateNetworkInterface</span> event, direct lookup by ID is possible</td>
+        </tr>
+        <tr>
+          <th scope="row">6. ENI lingering after deletion</th>
+          <td>Removed when the combination is no longer needed</td>
+          <td>Remains in-use for 20+ minutes after check deletion. Deleting the associated SG is blocked with DependencyViolation</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    To unpack item 2 a little: the docs&#39; "sent over HTTP/2" turned out to be an upgrade proposal,
+    not forced HTTP/2. The captured requests&#39; User-Agent was <span class="mono">Java-http-client/25.0.4</span>,
+    and a server that ignored the upgrade and answered with HTTP/1.0 was still evaluated normally.
+    This means <strong>legacy app servers can be used as-is, without HTTP/2 support</strong>.
+  </p>
+  <p>
+    Item 5 carries one additional observation. The source IP of the actual check traffic (10.254.2.187)
+    also differed from the managed ENI&#39;s IP obtained via CloudTrail (10.254.2.162).
+    Judging from the pattern of 2 requests arriving 0.73 seconds apart every 60 seconds,
+    we presume a redundant pair of checkers. This part is inference.
+  </p>
+  <p>
+    Items 1, 4, and 6 directly affect automation code. How to respond is organized with priorities
+    in the next section.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Operations guide</h2>
+  <p>
+    Based on the behavior confirmed in our measurements, this section organizes the adoption procedure
+    and the operational design. Priority 1 is the adoption procedure. The loop in the warning below can
+    be avoided simply by following the procedure; the remaining items are complementary design layered on top.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Warning - Skipping the SG check drops you into a cascading replacement loop</span>
+    <p>
+      If you attach a check to an existing ASG as included without allowing the check traffic in the SG
+      inbound rules, new instances repeat boot &rarr; grace &rarr; 2 consecutive failures &rarr; termination.
+      In our measurements, <strong>a total of 5 instances across 3 generations were replaced in 14 minutes</strong>.
+      Instances keep dying even though the application is healthy.
+    </p>
+    <p>
+      The adoption order is: verify SG inbound first &rarr; create as excluded and observe on some
+      instances for at least 2 cycles (about 2 minutes) &rarr; confirm the expected state with
+      <span class="mono">describe-application-status</span>, then promote to included.
+      If you are already in the loop, switch the check to excluded to stop the replacements, then fix the SG first.
+    </p>
+  </div>
+
+  <h3>5.1 Operational design checklist</h3>
+  <p>
+    After the adoption procedure comes operational design. All four items come from the gaps in section 04.
+  </p>
+  <ol class="plain">
+    <li>
+      <strong>Apply suppression in deployment hooks at least 3 minutes before the deployment.</strong>
+      Propagation takes about 3.2 minutes after activation, and the live evaluation state stays visible
+      in the meantime. We could not verify this time whether the ASG reacts to impaired during the
+      un-propagated window, so we recommend a safe 3-minute wait.
+    </li>
+    <li>
+      <strong>Design CloudWatch alarms on two tracks.</strong>
+      The aggregate metric <span class="mono">StatusCheckFailed_Application</span> stops publishing while
+      suppressed, so you must deliberately choose whether to treat missing data as notBreaching or leave
+      it as missing. If you need observation independent of suppression, set alarms on the per-check
+      metric (<span class="mono">StatusCheckFailed_Application_{asc-id}</span>).
+      The describe API display was observed about 40-60 seconds behind the service timestamps,
+      so metric-based automation is faster.
+    </li>
+    <li>
+      <strong>Branch Reason parsers on the Code value.</strong>
+      The <span class="mono">"StatusCode": 0</span> field is present even for connection errors,
+      so a parser written on the premise that the field is absent will break.
+      Branching on Code values such as ConnectionTimeout and ConnectionRefused is safer.
+    </li>
+    <li>
+      <strong>Add retry logic to IaC deletion automation.</strong>
+      Even after the check is deleted, the managed ENI remains in-use for 20+ minutes,
+      blocking deletion of the associated SG with DependencyViolation.
+    </li>
+  </ol>
+
+  <p class="lead-def">
+    <b>Conclusion:</b> Summed up in one sentence, Application Status Checks fills the application layer
+    that was the missing piece of status checks and connects it through to automatic ASG replacement;
+    by our measurements, failure detection takes about 2 minutes and full recovery about 8.5 minutes.
+    Verify the SG first, observe as excluded, then promote to included; apply suppression at least
+    3 minutes in advance; and split alarms into aggregate and per-check metrics - then every trap
+    revealed in this verification can be avoided at the design stage.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="ec2-application-status-checks-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="ec2-application-status-checks-archmap.png" alt="Full interactive architecture map - the 60-second health check path through the managed ENI and the ASG replacement flow"></a>
+    <figcaption>Figure 2. Full view of the interactive architecture map. Click the image to open the <a href="ec2-application-status-checks-archmap.html" target="_blank" rel="noopener">interactive version ↗</a> with node exploration, path tracing, and dark/light themes.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/application-status-checks.html">Application status checks for your EC2 instances</a>
+      - Amazon EC2 User Guide
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/application-status-checks.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/amazon-ec2-application-status-checks/">What&#39;s New - Amazon EC2 Application Status Checks</a>
+      - Launch announcement (2026-08-10)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/amazon-ec2-application-status-checks/</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-health-checks.html">Health checks for instances in an Auto Scaling group</a>
+      - Amazon EC2 Auto Scaling User Guide
+      <span class="url">https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-health-checks.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ApplicationStatusReason.html">API Reference - ApplicationStatusReason</a>
+      - Reason structure and Code values
+      <span class="url">https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_ApplicationStatusReason.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html">Amazon VPC quotas</a>
+      - Network interface quotas
+      <span class="url">https://docs.aws.amazon.com/vpc/latest/userguide/amazon-vpc-limits.html</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-13.
+    This document is a technical analysis based on the official Amazon EC2 documentation,
+    AWS What&#39;s New (2026-08-10), and measured data from the ap-northeast-2 region.
+    Figures and defaults are as of the time of writing; check the official documentation above for the latest values.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO / EN 두 페이지에 버튼이 하나씩 있으므로 전부 바인딩한다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
+  }
+  sync();
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 도 함께 보내 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+
+<!-- techblogs-codecopy: 코드블록 복사 버튼 (아이콘 전용, execCommand 폴백 포함) -->
+<script>
+(function () {
+  var CLIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+  function fallback(txt, cb) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = txt; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta); cb(ok);
+    } catch (e) { cb(false); }
+  }
+  function copyText(txt, cb) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { cb(true); },
+                                              function () { fallback(txt, cb); });
+    } else { fallback(txt, cb); }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".codeblock"), function (block) {
+    var pre = block.querySelector("pre");
+    if (!pre || block.querySelector(".code-copy")) return;
+    block.style.position = block.style.position || "relative";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy";
+    btn.setAttribute("aria-label", "코드 복사");
+    btn.innerHTML = CLIP;
+    block.appendChild(btn);
+    var t;
+    btn.addEventListener("click", function () {
+      copyText(pre.innerText, function (ok) {
+        btn.innerHTML = ok ? OK : CLIP;
+        btn.classList.toggle("copied", ok);
+        btn.setAttribute("aria-label", ok ? "복사됨" : "코드 복사");
+        clearTimeout(t);
+        t = setTimeout(function () {
+          btn.innerHTML = CLIP;
+          btn.classList.remove("copied");
+          btn.setAttribute("aria-label", "코드 복사");
+        }, 1600);
+      });
+    });
+  });
+})();
+</script>
+
+
+</body>
+</html>
