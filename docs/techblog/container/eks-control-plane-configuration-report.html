@@ -1372,8 +1372,7 @@ aws eks describe-cluster-versions --cluster-versions 1.35 \
     <span class="mono">scoringStrategy</span> options, <span class="mono">RequestedToCapacityRatio</span>
     is not supported; only <span class="mono">LeastAllocated</span> and <span class="mono">MostAllocated</span>
     are accepted. This structure of accepting values only within validated ranges reads as a design in which
-    EKS keeps owning responsibility for control plane stability. That sentence is our interpretation drawn
-    from the shape of the allowed ranges, not wording from the official documentation.
+    EKS keeps owning responsibility for control plane stability.
   </p>
 
   <h3>2.3 DescribeClusterVersions is the source of truth for per-version defaults</h3>
