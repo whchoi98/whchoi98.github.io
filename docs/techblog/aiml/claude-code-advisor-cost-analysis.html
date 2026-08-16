@@ -940,7 +940,7 @@ sequenceDiagram
   </p>
   <p>
     총비용 대비 오버헤드 비율은 두 실험 모두 27~28%로 일정했습니다.
-    즉 역전은 비율의 희석이 아니라 절대액의 경주에서 나왔습니다.
+    즉 역전은 비율이 희석되어서가 아니라, 절약분과 오버헤드 두 금액 중 어느 쪽이 더 큰가가 바뀌면서 나왔습니다.
   </p>
 
   <figure class="flow">
@@ -1054,7 +1054,8 @@ sequenceDiagram
     짧은 과제에서는 호출 1회로 Opus 고정보다 25% 비싸질 수 있고, 큰 과제에서는 호출 2회에도 15% 저렴했습니다.
   </p>
   <p>
-    갈림길은 <strong>advisor의 uncached input 오버헤드와 Sonnet 단가 절약분의 절대액 경주</strong>입니다.
+    결국 손익은 <strong>Sonnet 단가 절약분과 advisor의 uncached input 오버헤드,
+    두 금액 중 어느 쪽이 더 큰가</strong>에서 갈립니다.
     이번 실측에서는 과제가 커지자 절약분이 오버헤드를 추월했습니다.
   </p>
   <p>
@@ -1501,7 +1502,7 @@ sequenceDiagram
   </p>
   <p>
     Overhead as a share of total cost held steady at 27-28% in both experiments.
-    So the reversal came not from dilution of the ratio but from a race between absolute amounts.
+    So the reversal came not from dilution of the ratio but from which of the two amounts - the savings or the overhead - was larger.
   </p>
 
   <figure class="flow">
@@ -1620,8 +1621,8 @@ sequenceDiagram
     it was 15% cheaper even with two calls.
   </p>
   <p>
-    The pivot is <strong>a race between the advisor's uncached-input overhead and the absolute
-    savings from Sonnet rates</strong>.
+    In the end, the outcome hinges on <strong>which of the two amounts is larger:
+    the savings from Sonnet rates or the advisor's uncached-input overhead</strong>.
     In this measurement, the savings overtook the overhead as the task grew.
   </p>
   <p>
