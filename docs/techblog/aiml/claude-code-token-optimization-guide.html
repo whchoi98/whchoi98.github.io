@@ -1000,10 +1000,9 @@ export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
   </p>
 
   <p>
-    지연 로딩이 안 되는 경우가 문제입니다. <strong>custom <span class="mono">ANTHROPIC_BASE_URL</span>
-    게이트웨이, Agent Platform의 Claude 4.5 이전 세대 모델, Azure 호스팅 Foundry 배포에서는
-    tool search가 동작하지 않아</strong> 도구 정의 전체가 Prefix에 로딩됩니다. 게이트웨이는
-    <span class="mono">ENABLE_TOOL_SEARCH=true</span>로 재정의할 수 있지만 나머지 둘은 재정의되지
+    지연 로딩이 안 되는 경우가 문제입니다. <strong>custom <span class="mono">ANTHROPIC_BASE_URL</span> 게이트웨이와
+    Agent Platform의 Claude 4.5 이전 세대 모델에서는 tool search가 동작하지 않아</strong> 도구 정의 전체가 Prefix에 로딩됩니다. 게이트웨이는
+    <span class="mono">ENABLE_TOOL_SEARCH=true</span>로 재정의할 수 있지만 Agent Platform 쪽은 재정의되지
     않고, Agent Platform의 4.5 세대 이상 모델에서는 Anthropic API와 동일하게 기본 동작합니다.
     <span class="mono">alwaysLoad</span>로 지정한 서버나 도구, threshold 기반 선로딩도 같은 결과를
     만듭니다. 이때는 서버 하나가 연결되거나 끊기는 것만으로 캐시 전체가 무효화됩니다.
@@ -1090,7 +1089,7 @@ fi</code></pre>
     구독에서는 Claude Code가 <strong>1시간 TTL</strong>을 자동으로 요청해서 한 시간 안쪽의 공백은
     버팁니다. 플랜 한도를 넘겨 usage credits 과금으로 넘어가면 쓰기 단가가 싼 5분으로 자동
     하락하는데, 유지하고 싶으면 <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span>을 둡니다.
-    API 키, Amazon Bedrock, Google Cloud의 Agent Platform, Microsoft Foundry에서는 기본 5분이고,
+    API 키, Amazon Bedrock, Google Cloud의 Agent Platform에서는 기본 5분이고,
     같은 변수로 1시간에 opt-in합니다.
   </p>
 
@@ -1280,8 +1279,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
   </div>
 
   <p>
-    tool search가 동작하지 않는 환경은 게이트웨이 외에 두 가지가 더 있습니다. Agent Platform의
-    Claude 4.5 이전 세대 모델과 Azure 호스팅 Foundry 배포입니다. Agent Platform의 4.5 세대 이상
+    tool search가 동작하지 않는 환경은 게이트웨이 외에 Agent Platform의 Claude 4.5 이전 세대 모델이 더 있습니다. Agent Platform의 4.5 세대 이상
     모델과 Bedrock에서는 Anthropic API와 동일하게 기본 동작합니다. tool search가 동작하지 않는
     환경에서는 MCP 도구 정의가 Prefix에 전부 로딩되므로, 연결 서버 수를 줄이는 것이 곧 캐시할
     Prefix를 줄이는 일입니다.
@@ -1894,10 +1892,10 @@ export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
 
   <p>
     The problem is where deferred loading is unavailable. <strong>With a custom
-    <span class="mono">ANTHROPIC_BASE_URL</span> gateway, pre-4.5-generation Claude models on the
-    Agent Platform, and Azure-hosted Foundry deployments, tool search does not work</strong> and the full
+    <span class="mono">ANTHROPIC_BASE_URL</span> gateway and pre-4.5-generation Claude models on the
+    Agent Platform, tool search does not work</strong> and the full
     tool definitions are loaded into the prefix. A gateway can be overridden with
-    <span class="mono">ENABLE_TOOL_SEARCH=true</span>, but the other two cannot, and 4.5-generation-and-later
+    <span class="mono">ENABLE_TOOL_SEARCH=true</span>, but the Agent Platform case cannot, and 4.5-generation-and-later
     models on the Agent Platform behave the same as the Anthropic API by default. Servers or tools
     designated with <span class="mono">alwaysLoad</span>, and threshold-based preloading, produce the same
     result. In that state, a single server connecting or disconnecting invalidates the entire cache.
@@ -1984,8 +1982,8 @@ fi</code></pre>
     On subscriptions, Claude Code automatically requests a <strong>1-hour TTL</strong>, so gaps
     shorter than an hour survive. Once you exceed the plan limit and roll over to usage-credits
     billing, it automatically drops to the cheaper-to-write 5 minutes; to keep 1 hour, set
-    <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span>. With API keys, Amazon Bedrock, the
-    Agent Platform on Google Cloud, and Microsoft Foundry the default is 5 minutes, and the same
+    <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span>. With API keys, Amazon Bedrock, and the
+    Agent Platform on Google Cloud the default is 5 minutes, and the same
     variable opts in to 1 hour.
   </p>
 
@@ -2184,8 +2182,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># stop goal check-in
   </div>
 
   <p>
-    Beyond gateways, there are two more environments where tool search does not work: pre-4.5-generation
-    Claude models on the Agent Platform, and Azure-hosted Foundry deployments. On 4.5-generation-and-later
+    Beyond gateways, tool search also does not work with pre-4.5-generation Claude models on the Agent Platform. On 4.5-generation-and-later
     models on the Agent Platform, and on Bedrock, it works by default just like the Anthropic API. Where
     tool search does not work, all MCP tool definitions are loaded into the prefix, so reducing the number
     of connected servers directly reduces the prefix you have to cache.
