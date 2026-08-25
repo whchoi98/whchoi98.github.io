@@ -677,7 +677,7 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     <li><span class="no">03</span><a href="#s3">컨텍스트 정리: /clear, /compact, /rewind</a></li>
     <li><span class="no">04</span><a href="#s4">모델 선택과 사고 깊이</a></li>
     <li><span class="no">05</span><a href="#s5">도구 오버헤드: MCP와 CLI</a></li>
-    <li><span class="no">06</span><a href="#s6">구조적 절약: 서브에이전트, 훅, 스킬</a></li>
+    <li><span class="no">06</span><a href="#s6">구조적 절약: 서브에이전트, Hook, 스킬</a></li>
     <li><span class="no">07</span><a href="#s7">캐시 경제학</a></li>
     <li><span class="no">08</span><a href="#s8">조직 비용 관리: 구독, Console, Bedrock</a></li>
     <li><span class="no">09</span><a href="#s9">상황별 요약과 결론</a></li>
@@ -1023,7 +1023,7 @@ export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
 
 <!-- ===================== 06 ===================== -->
 <section class="sec" id="s6">
-  <h2><span class="no">06</span>구조적 절약: 서브에이전트, 훅, 스킬</h2>
+  <h2><span class="no">06</span>구조적 절약: 서브에이전트, Hook, 스킬</h2>
   <p>
     장황한 출력은 서브에이전트로 격리합니다. 테스트 실행, 로그 처리, 문서 fetch를 위임하면
     장황한 출력은 서브에이전트의 컨텍스트에 남고 <strong>요약만</strong> 본 대화로 돌아옵니다.
@@ -1032,13 +1032,13 @@ export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
   </p>
 
   <p>
-    훅은 Claude가 보기 전에 데이터를 전처리합니다. 10,000줄 로그를 통째로 읽히는 대신 훅이
+    Hook은 Claude가 보기 전에 데이터를 전처리합니다. 10,000줄 로그를 통째로 읽히는 대신 Hook이
     ERROR 줄만 추려서 넘기면 수만 토큰이 수백 토큰이 됩니다. 테스트 출력에서 실패만 남기는
-    PreToolUse 훅 예시입니다.
+    PreToolUse Hook 예시입니다.
   </p>
 
   <div class="codeblock">
-    <div class="code-caption">~/.claude/hooks/filter-test-output.sh - PreToolUse 훅</div>
+    <div class="code-caption">~/.claude/hooks/filter-test-output.sh - PreToolUse Hook</div>
     <pre><code>#!/bin/bash
 input=$(cat)
 cmd=$(echo "$input" | jq -r '.tool_input.command')
@@ -1398,7 +1398,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
   <p>
     2순위는 컨텍스트 정리 습관입니다. 작업 전환마다 <span class="mono">/clear</span>, CLAUDE.md 200줄 유지만으로
     가장 큰 낭비 경로가 닫힙니다. 3순위는 모델과 effort를 작업에 맞추는 것, 4순위는 세션 중
-    구성 변경을 멈춰 캐시를 지키는 것입니다. 서브에이전트, 훅, 스킬로 구조를 바꾸는 5순위는
+    구성 변경을 멈춰 캐시를 지키는 것입니다. 서브에이전트, Hook, 스킬로 구조를 바꾸는 5순위는
     앞의 습관이 잡힌 뒤에 하는 고정 투자이고, 1~4순위 없이 먼저 하면 효과가 측정되지 않습니다.
   </p>
 
