@@ -1,0 +1,2550 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Claude Code 토큰 절약 가이드</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-token-optimization-guide/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+/* 첫 페인트 전에 언어를 확정한다. localStorage 와 ?lang= 파라미터를 읽고 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") saved = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", saved === "en" ? "en" : "ko");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-item.key .stat-num { color: var(--navy); }
+.stat-div { width: 1px; height: 38px; background: var(--line-strong); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks (macOS terminal style) ---------- */
+.codeblock {
+  margin-top: 18px;
+  border: 1px solid #3a3f47;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1e2127;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
+}
+.code-caption {
+  position: relative;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: #9da5b0;
+  background: linear-gradient(#343941, #2b3036);
+  border-bottom: 1px solid #15181c;
+  padding: 9px 64px;
+  text-align: center;
+}
+/* macOS 신호등 버튼. 마크업 없이 그림자 하나로 세 개를 그린다. */
+.code-caption::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: 20px 0 0 #febc2e, 40px 0 0 #28c840;
+}
+.codeblock pre {
+  background: #1e2127;
+  color: #d8dee9;
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; color: inherit; }
+.codeblock .cm { color: #848f9c; }
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+
+/* techblogs-codecopy: 맥 터미널 스타일 코드블록 + 복사 버튼 */
+.codeblock { position: relative; }
+.code-caption { position: relative; padding-left: 60px; padding-right: 46px; }
+.code-caption::before {
+  content: ""; position: absolute; left: 14px; top: 50%; margin-top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff5f56; box-shadow: 18px 0 0 #febc2e, 36px 0 0 #28c840;
+}
+.code-copy {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 24px; padding: 0; cursor: pointer;
+  color: var(--ink-2); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px;
+  -webkit-appearance: none; appearance: none;
+}
+.code-copy:hover { color: var(--ink); border-color: var(--line-strong); }
+.code-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-copy svg { width: 15px; height: 15px; display: block; }
+.code-copy.copied { color: #28a35b; border-color: #28a35b; }
+
+/* ---------- KO/EN page visibility ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<div class="page" data-lang="ko">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">CLAUDE CODE / COST OPTIMIZATION GUIDE</p>
+  <h1>Claude Code 토큰 절약 가이드</h1>
+  <p class="subtitle">
+    Claude Code는 매 턴 전체 컨텍스트를 다시 보내고, 비용은 그 크기에 비례합니다.
+    개인 세션 습관부터 캐시 경제학, 조직과 Bedrock 단위의 비용 관리까지 토큰 소모를 줄이는 방법을 정리합니다.
+  </p>
+
+  <div class="stat" role="img" aria-label="핵심 수치: 입력 단가는 캐시 미적중 1.0배에서 적중 시 약 0.1배, 캐시 수명은 구독 1시간과 API, Bedrock 5분, 캐시 최소 프리픽스는 모델별 512에서 4,096토큰으로 전 플랫폼 공통, CLAUDE.md 권장 200줄 이하">
+    <div class="stat-item old">
+      <span class="stat-num">1.0<span class="unit">배</span></span>
+      <span class="stat-sub">캐시 미적중 입력 단가</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">약 0.1<span class="unit">배</span></span>
+      <span class="stat-sub">캐시 적중 시 재읽기 단가</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">1시간 / 5분</span>
+      <span class="stat-sub">캐시 수명(구독 / API, Bedrock)</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">512~4,096<span class="unit">토큰</span></span>
+      <span class="stat-sub">캐시 최소 프리픽스(모델별, 전 플랫폼 공통)</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">200<span class="unit">줄</span></span>
+      <span class="stat-sub">CLAUDE.md 권장 상한</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>01. 작성 기준일 - 2026-08-25</p>
+    <p>02. 적용 대상 - Claude Code 사용자(구독 플랜, Console API, Amazon Bedrock 등 클라우드 프로바이더)</p>
+    <p>03. 핵심 점검 명령 - <span class="mono">/usage</span>, <span class="mono">/context</span>, <span class="mono">/insights</span></p>
+    <p>04. 주 출처 - Claude Code 공식 문서(code.claude.com, 2026-08 확인)와 Amazon Bedrock 사용자 가이드</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>Claude Code는 매 턴 시스템 프롬프트, 프로젝트 컨텍스트, 전체 대화 이력을 다시 전송합니다. 비용은 컨텍스트 크기에 비례하고, 캐시에 적중한 재읽기는 표준 입력 단가의 <strong>약 10%</strong>로 과금됩니다.</li>
+    <li>캐시는 요청 Prefix의 정확한 일치로만 동작합니다. 모델 전환, effort 변경, 도구 정의 변화, 컴팩션이 캐시를 무효화하고, 캐시 수명(구독 1시간, API와 Bedrock 기본 5분)을 넘긴 공백 뒤 첫 요청은 전체를 재처리합니다.</li>
+    <li>오래 열어둔 긴 세션, Opus 고정 사용, LLM 게이트웨이 경유, 유휴 중에도 도는 scheduled task와 cross-session 메시지가 비용 급증의 주요 경로입니다.</li>
+    <li><span class="mono">/usage</span>와 <span class="mono">/context</span>로 먼저 측정하고, 작업 전환마다 <span class="mono">/clear</span>, 모델과 effort는 세션 초반에 고정, 장황한 작업은 서브에이전트로 격리합니다. 조직은 OpenTelemetry나 게이트웨이로 사용자별 어트리뷰션부터 세웁니다.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">비용 구조: 토큰은 어디서 쓰이는가</a></li>
+    <li><span class="no">02</span><a href="#s2">측정: /usage와 /context</a></li>
+    <li><span class="no">03</span><a href="#s3">컨텍스트 정리: /clear, /compact, /rewind</a></li>
+    <li><span class="no">04</span><a href="#s4">모델 선택과 사고 깊이</a></li>
+    <li><span class="no">05</span><a href="#s5">도구 오버헤드: MCP와 CLI</a></li>
+    <li><span class="no">06</span><a href="#s6">구조적 절약: 서브에이전트, 훅, 스킬</a></li>
+    <li><span class="no">07</span><a href="#s7">캐시 경제학</a></li>
+    <li><span class="no">08</span><a href="#s8">조직 비용 관리: 구독, Console, Bedrock</a></li>
+    <li><span class="no">09</span><a href="#s9">상황별 요약과 결론</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>비용 구조: 토큰은 어디서 쓰이는가</h2>
+  <p>
+    모델은 요청 사이에 아무것도 기억하지 않습니다. 그래서 Claude Code는 메시지를 보낼 때마다
+    시스템 프롬프트, 프로젝트 컨텍스트, 지금까지의 모든 대화와 도구 결과를 통째로 다시 전송합니다.
+    한 턴 안에서 Claude가 도구를 여러 번 쓰면 그때마다 또 한 번의 요청이 나갑니다.
+    토큰 비용이 질문의 길이가 아니라 <strong>세션의 크기</strong>에 비례하는 이유입니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. 요청을 구성하는 세 계층. 변하지 않는 내용일수록 앞에 배치됩니다</caption>
+      <thead>
+        <tr><th scope="col">계층</th><th scope="col">내용</th><th scope="col">바뀌는 시점</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>시스템 프롬프트</td>
+          <td>코어 지시, 도구 정의, 출력 스타일</td>
+          <td>도구 정의 집합이 바뀌거나 Claude Code 업그레이드 시</td>
+        </tr>
+        <tr>
+          <td>프로젝트 컨텍스트</td>
+          <td>CLAUDE.md, 자동 메모리, 미스코프 규칙</td>
+          <td>세션 시작, <span class="mono">/clear</span>, <span class="mono">/compact</span> 이후</td>
+        </tr>
+        <tr>
+          <td>대화</td>
+          <td>사용자 메시지, 응답, 도구 결과</td>
+          <td>매 턴</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    이 구조를 감당 가능하게 만드는 것이 프롬프트 캐시입니다. 직전 요청과 동일한 Prefix는
+    재처리하는 대신 캐시에서 읽어오고, 표준 입력 단가의 약 10%로 과금됩니다.
+    캐시를 새로 쓰는 비용은 표준보다 비싸지만 한 번뿐이고, 이후 턴은 그 Prefix를 계속 싼 단가로 재사용합니다.
+  </p>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">캐시 쓰기(1시간 TTL)</span>
+        <span class="flow-val">2.0배</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">캐시 쓰기(5분 TTL)</span>
+        <span class="flow-val">1.25배</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">표준 입력</span>
+        <span class="flow-val">1.0배</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">캐시 읽기</span>
+        <span class="flow-val">약 0.1배</span>
+      </div>
+    </div>
+    <figcaption>
+      그림 1. 표준 입력 단가를 1.0배로 둔 상대 단가입니다. 같은 토큰도 캐시 읽기로 처리되면 단가가 10분의 1로 떨어지고,
+      쓰기 비용은 그 할인을 얻기 위한 1회성 투자입니다.
+    </figcaption>
+  </figure>
+
+  <p>
+    과금 방식은 접속 방법에 따라 다릅니다. 구독 플랜(Pro, Max, Team, Enterprise)은 달러가 아니라
+    5시간 롤링 윈도우와 주간 윈도우로 관리되는 사용량 한도를 소모합니다. Console API와
+    Amazon Bedrock 같은 클라우드 프로바이더는 토큰 단위로 과금됩니다.
+  </p>
+
+  <p class="lead-def">
+    <b>원칙:</b> 비용은 컨텍스트 크기에 비례하고, 실제로 내는 토큰 단가는 캐시 적중률이 정합니다.
+    이 문서의 모든 전략은 이 두 변수를 줄이는 방법입니다.
+  </p>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>측정: /usage와 /context</h2>
+  <p>
+    최적화는 측정에서 시작합니다. <span class="mono">/usage</span>는 API 과금 사용자에게는
+    현재 세션의 토큰 통계와 추정 비용을 담은 Session 블록을, 구독자에게는 플랜 사용량 바와 함께
+    최근 사용량의 어트리뷰션을 보여줍니다. 스킬, 서브에이전트, 플러그인, 개별 MCP 서버가
+    각각 전체의 몇 %를 차지하는지, 그리고 긴 컨텍스트나 캐시 미스처럼 최근 사용량의
+    <strong>10% 이상</strong>을 차지하는 행동 플래그가 여기에 표시됩니다.
+  </p>
+
+  <p>
+    대표적인 출력 형태는 다음과 같습니다. 표기는 버전에 따라 조금씩 다르지만 담기는 정보는 같습니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">예시 - /usage 출력. 인증 방식에 따라 보이는 블록이 다릅니다</div>
+    <pre><code>&gt; /usage
+
+<span class="cm"># API 과금 사용자에게 표시되는 Session 블록</span>
+Session
+  Input      1,242,310 tokens (cache read 1,180,450 | cache write 38,220 | uncached 23,640)
+  Output     18,940 tokens
+  Est. cost  $4.87
+
+<span class="cm"># 구독 사용자에게 표시되는 플랜 사용량과 어트리뷰션</span>
+Plan usage
+  Session (5h)    ████████░░░░░░░░░░░░  41%   resets 18:00
+  Week (all)      ███░░░░░░░░░░░░░░░░░  16%   resets Mon 09:00
+  Week (Opus)     █░░░░░░░░░░░░░░░░░░░   4%
+
+Recent usage attribution
+  Subagents 28% | MCP: playwright 17% | Skills: pdf 6%
+
+Behavior flags
+  Long context sessions 14% | Cache misses after breaks 12%</code></pre>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - /usage의 달러 표시는 추정치입니다</span>
+    <p>
+      Claude Code는 이 금액을 표준 정가 기준으로 로컬에서 계산합니다. 프로모션이나 계약 할인 단가가
+      반영되지 않으므로 실제 청구액과 다를 수 있습니다. 청구 기준 수치는 Claude Console의 Usage 페이지에서 확인합니다.
+    </p>
+  </div>
+
+  <p>
+    <span class="mono">/context</span>는 지금 컨텍스트를 무엇이 차지하는지 보여줍니다.
+    MCP 도구 정의, CLAUDE.md, 대화 이력의 비중을 확인해서 어디를 줄일지 정합니다.
+    상태 표시줄(statusline)을 설정하면 컨텍스트 사용률과 함께 응답마다 돌아오는
+    <span class="mono">cache_creation_input_tokens</span>와 <span class="mono">cache_read_input_tokens</span>를
+    상시 표시할 수 있습니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">예시 - /context 출력</div>
+    <pre><code>&gt; /context
+
+claude-sonnet-5 | 96.0K / 1.0M tokens (10%)
+
+  System prompt      3.2K  ( 0.3%)
+  System tools      12.8K  ( 1.3%)
+  MCP tools         28.4K  ( 2.8%)   <span class="cm">playwright, github 도구 정의</span>
+  Memory files       4.1K  ( 0.4%)   <span class="cm">CLAUDE.md, 자동 메모리</span>
+  Messages          47.5K  ( 4.8%)   <span class="cm">대화 이력과 도구 결과</span>
+  Free space       904.0K  (90.4%)</code></pre>
+  </div>
+
+  <p>
+    이 예시에서는 선로딩된 MCP 도구 정의가 대화 이력의 절반을 넘는 크기입니다.
+    이런 비중이 보이면 도구 오버헤드가 점검 대상입니다.
+  </p>
+
+  <p>
+    두 캐시 지표를 읽는 법은 단순합니다. 읽기(read)가 쓰기(creation)보다 압도적으로 크면 캐시가
+    잘 동작하는 상태입니다. 반대로 creation이 턴마다 높게 유지되면 Prefix가 계속 바뀌고 있다는
+    신호이므로 표 2의 무효화 행동 목록을 점검합니다.
+  </p>
+
+  <p>
+    <span class="mono">/insights</span>는 토큰 수가 아니라 일하는 방식을 분석합니다.
+    이 머신의 최근 세션을 최대 200개까지 분석해 자주 하는 작업, 요청이 오해된 지점 같은 마찰 요소를
+    HTML 리포트(<span class="mono">~/.claude/usage-data/report.html</span>)로 만들어 줍니다.
+    분석 자체도 플랜이나 API 사용량을 소모하므로 주기적으로 한 번씩 돌리는 정도가 적당합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">예시 - /insights 실행. 결과는 브라우저로 여는 HTML 리포트입니다</div>
+    <pre><code>&gt; /insights
+
+Analyzing up to 200 recent sessions on this machine...
+Report saved: ~/.claude/usage-data/report.html</code></pre>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>컨텍스트 정리: /clear, /compact, /rewind</h2>
+  <p>
+    가장 값싼 최적화는 컨텍스트를 애초에 키우지 않는 것입니다. 무관한 작업으로 넘어갈 때는
+    <span class="mono">/clear</span>로 새로 시작합니다. 추가 비용이 없고, 이전 이력이 다음 요청에
+    실리지 않습니다. 세션을 나중에 찾아야 하면 <span class="mono">/rename</span>으로 이름을 붙인 뒤
+    비우고, 필요할 때 <span class="mono">/resume</span>으로 돌아옵니다.
+  </p>
+
+  <p>
+    같은 작업을 이어가면서 컨텍스트만 줄여야 하면 <span class="mono">/compact</span>가 이력을
+    요약으로 교체합니다. <span class="mono">/compact Focus on code samples and API usage</span>처럼
+    보존할 내용을 지시할 수 있고, 매번 같은 지시를 쓴다면 CLAUDE.md에 상시 규칙으로 둡니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">CLAUDE.md - 컴팩션 시 보존 우선순위 지시</div>
+    <pre><code># Compact instructions
+
+When you are using compact, please focus on test output and code changes</code></pre>
+  </div>
+
+  <p>
+    컴팩션 자체의 비용도 계산에 넣어야 합니다. 요약을 만드는 요청은 전체 대화를 프롬프트로 보내는
+    큰 요청입니다. 캐시가 따뜻할 때는 대부분 캐시 읽기로 처리되어 저렴하지만, 캐시 수명이 지난 뒤
+    (예를 들어 오래된 세션을 resume한 직후) 실행하면 전체를 재처리하는 가장 비싼 컴팩션이 됩니다.
+    auto-compact가 작업 한가운데서 터지기 전에, <strong>작업 사이의 휴지점</strong>에서 직접 실행하는 것이
+    시점을 통제하는 방법입니다.
+  </p>
+
+  <p>
+    방향이 틀렸을 때는 컴팩션이 아니라 <span class="mono">/rewind</span>입니다. 대화를 이전 턴으로
+    되돌리면 그 지점까지의 Prefix는 이미 캐시에 있으므로 다음 요청이 그대로 캐시에 적중합니다.
+    새 요약을 만들어 캐시를 다시 쌓는 컴팩션보다 되돌리기에는 훨씬 쌉니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Q["작업 전환 시점"] -->|"무관한 새 작업"| CLR["/clear"]
+  Q -->|"같은 작업 계속, 컨텍스트가 참"| CMP["/compact"]
+  Q -->|"잘못된 방향 복구"| RWD["/rewind"]
+  CLR --> R1["비용 없음, 캐시 재구축"]
+  CMP --> R2["요약 요청 1회, warm 캐시일 때 실행"]
+  RWD --> R3["기존 캐시 그대로 적중"]
+    </div>
+    <figcaption>
+      그림 2. 컨텍스트 전환 3종의 선택 기준입니다. 셋 중 <span class="mono">/rewind</span>만
+      기존 캐시를 그대로 적중합니다.
+    </figcaption>
+  </figure>
+
+  <p>
+    auto-compact 윈도우는 기본값이 모델에 맞춰 자동으로 정해집니다. <span class="mono">/autocompact</span>
+    명령으로 윈도우 값을 설정하고(<span class="mono">/autocompact auto</span>는 모델 기본값 복귀),
+    <span class="mono">CLAUDE_CODE_AUTO_COMPACT_WINDOW</span> 환경 변수로도 조정할 수 있습니다.
+    다만 윈도우를 낮추면 컴팩션이 잦아져서 요약 요청 비용이 누적되므로,
+    특별한 이유가 없으면 자동값을 둡니다. Sonnet 5는 기본값으로 약 967,000토큰에서
+    자동 컴팩션됩니다(다른 모델은 별도 문서화된 임계값이 없습니다).
+  </p>
+
+  <p>
+    CLAUDE.md는 세션 시작마다 로드되어 프로젝트 컨텍스트 계층에 상주합니다. 모든 턴이 이 비용을
+    지불하므로 200줄 이하로 유지하고, 특정 워크플로에만 필요한 상세 지시는 호출 시에만 로드되는
+    스킬로 옮깁니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - CLAUDE.md 수정은 세션 중에 적용되지 않습니다</span>
+    <p>
+      프로젝트 루트와 사용자 레벨 CLAUDE.md는 세션 시작 시 한 번 읽혀 메모리에 유지됩니다.
+      세션 중에 파일을 고쳐도 캐시는 깨지지 않지만 <strong>변경도 반영되지 않습니다.</strong>
+      새 내용은 다음 <span class="mono">/clear</span>, <span class="mono">/compact</span>, 재시작 때 로드됩니다.
+      지시가 안 먹힌다고 같은 세션에서 파일을 반복 수정하며 재시도하는 것은 토큰만 낭비합니다.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>모델 선택과 사고 깊이</h2>
+  <p>
+    모델 선택이 단가의 첫 결정입니다. 대부분의 코딩 작업은 Sonnet으로 충분하고, Opus는 복잡한
+    아키텍처 결정이나 다단계 추론에 아껴 씁니다. <span class="mono">/model</span>로 전환하고
+    <span class="mono">/config</span>에서 기본값을 정합니다. 조회나 포매팅처럼 단순한 서브에이전트
+    작업은 서브에이전트 설정에 <span class="mono">model: haiku</span>를 지정해 더 싼 단가로 돌립니다.
+  </p>
+
+  <p>
+    effort는 같은 모델 안에서 사고 깊이를 조절합니다. extended thinking의 토큰은 출력 토큰으로
+    과금되고, 기본값으로는 모델에 따라 요청당 수만 토큰까지 씁니다. 깊은 추론이 필요 없는
+    작업에서는 <span class="mono">/effort</span> 명령이나 <span class="mono">/model</span> 화면의
+    슬라이더로 수준을 낮추고, 고정해 두려면 <span class="mono">effortLevel</span> 설정이나
+    <span class="mono">CLAUDE_CODE_EFFORT_LEVEL</span> 환경 변수를 씁니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">예시 - effort 수준 고정. 값은 low, medium, high, xhigh 중 선택(환경 변수는 auto도 허용)</div>
+    <pre><code><span class="cm"># .claude/settings.json (프로젝트) 또는 ~/.claude/settings.json (사용자)</span>
+{
+  "effortLevel": "medium"
+}
+
+<span class="cm"># 또는 셸 환경 변수로 지정</span>
+export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
+  </div>
+
+  <p>
+    thinking 토큰에 고정 상한을 받는 모델은 <span class="mono">MAX_THINKING_TOKENS</span>로 제한합니다
+    (예: <span class="mono">MAX_THINKING_TOKENS=8000</span>). adaptive reasoning 모델은 0이 아닌
+    상한 값을 무시하므로 effort로만 조절합니다. Fable 5는 extended thinking을 끌 수 없어서
+    역시 effort 조절이 유일한 수단입니다.
+  </p>
+
+  <p>
+    캐시와의 관계를 알면 바꾸는 시점이 보입니다. 모델과 effort는 각각 <strong>별도의 캐시 키</strong>라서,
+    세션 중간에 바꾸면 다음 요청이 전체 이력을 캐시 미적중으로 재처리합니다.
+    <span class="mono">opusplan</span> 설정은 plan mode 진입과 이탈마다 Opus와 Sonnet 사이를 오가므로
+    토글할 때마다 새 캐시를 쌓습니다. 모델과 effort는 세션 초반에 정하고 작업 중에는 유지하는 것이
+    캐시 관점의 정답입니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>도구 오버헤드: MCP와 CLI</h2>
+  <p>
+    MCP 서버의 도구 정의는 지원 모델(Claude 4.5 세대 이상)에서 기본적으로
+    지연(deferred) 로딩됩니다. tool search가 동작하면
+    도구 이름과 서버 지시만 컨텍스트에 올라가고, 실제 정의는 Claude가 그 도구를 쓰는 시점에
+    붙습니다. 그래도 서버가 많으면 부담이 쌓이므로 <span class="mono">/context</span>로 실제 점유를
+    확인하고 <span class="mono">/mcp</span>에서 쓰지 않는 서버를 비활성화합니다.
+  </p>
+
+  <p>
+    지연 로딩이 안 되는 경우가 문제입니다. <strong>custom <span class="mono">ANTHROPIC_BASE_URL</span>
+    게이트웨이, Agent Platform의 Claude 4.5 이전 세대 모델, Azure 호스팅 Foundry 배포에서는
+    tool search가 동작하지 않아</strong> 도구 정의 전체가 Prefix에 로딩됩니다. 게이트웨이는
+    <span class="mono">ENABLE_TOOL_SEARCH=true</span>로 재정의할 수 있지만 나머지 둘은 재정의되지
+    않고, Agent Platform의 4.5 세대 이상 모델에서는 Anthropic API와 동일하게 기본 동작합니다.
+    <span class="mono">alwaysLoad</span>로 지정한 서버나 도구, threshold 기반 선로딩도 같은 결과를
+    만듭니다. 이때는 서버 하나가 연결되거나 끊기는 것만으로 캐시 전체가 무효화됩니다.
+  </p>
+
+  <p>
+    같은 일을 하는 CLI가 있으면 CLI를 우선합니다. <span class="mono">gh</span>,
+    <span class="mono">aws</span>, <span class="mono">gcloud</span>, <span class="mono">sentry-cli</span>
+    같은 도구는 도구 목록 비용 자체가 없고, Claude가 명령을 직접 실행하면 됩니다.
+  </p>
+
+  <p>
+    타입 언어를 쓴다면 코드 인텔리전스 플러그인이 탐색 비용을 줄입니다. LSP의 go to definition
+    한 번이 grep 한 번과 후보 파일 여러 개 읽기를 대체하고, 편집 직후 타입 에러를 자동 보고해
+    컴파일을 돌리지 않고도 실수를 잡습니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>구조적 절약: 서브에이전트, 훅, 스킬</h2>
+  <p>
+    장황한 출력은 서브에이전트로 격리합니다. 테스트 실행, 로그 처리, 문서 fetch를 위임하면
+    장황한 출력은 서브에이전트의 컨텍스트에 남고 <strong>요약만</strong> 본 대화로 돌아옵니다.
+    부모의 캐시도 손상되지 않습니다. 다만 서브에이전트는 자체 시스템 프롬프트와 자체 캐시로
+    시작하고, 구독에서도 5분 TTL을 쓴다는 점은 알아둡니다.
+  </p>
+
+  <p>
+    훅은 Claude가 보기 전에 데이터를 전처리합니다. 10,000줄 로그를 통째로 읽히는 대신 훅이
+    ERROR 줄만 추려서 넘기면 수만 토큰이 수백 토큰이 됩니다. 테스트 출력에서 실패만 남기는
+    PreToolUse 훅 예시입니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">~/.claude/hooks/filter-test-output.sh - PreToolUse 훅</div>
+    <pre><code>#!/bin/bash
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+<span class="cm"># 테스트 명령이면 실패 부분만 남기도록 명령을 재작성한다</span>
+if [[ "$cmd" =~ ^(npm test|pytest|go test) ]]; then
+  filtered="$cmd 2&gt;&amp;1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100"
+  echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"$filtered\"}}}"
+else
+  echo "{}"
+fi</code></pre>
+  </div>
+
+  <p>
+    이 스크립트를 settings.json의 <span class="mono">hooks.PreToolUse</span>에 Bash matcher로
+    연결하면 매 실행 전에 적용됩니다. 전체 설정 예시는 공식 비용 문서에 그대로 있습니다.
+  </p>
+
+  <p>
+    CLAUDE.md에 쌓인 워크플로 지시는 스킬로 옮깁니다. 스킬은 호출될 때만 로드되므로 기본
+    컨텍스트가 가벼워집니다. 프로젝트 아키텍처, 핵심 디렉토리, 네이밍 규칙을 담은
+    codebase-overview 스킬을 만들어 두면, Claude가 구조를 파악하려고 파일 여러 개를 읽는 대신
+    스킬 호출 한 번으로 같은 맥락을 얻습니다.
+  </p>
+
+  <p>
+    에이전트 팀은 실험 기능이며 비용 배수가 큽니다. 팀원마다 별도 인스턴스와 컨텍스트 윈도우를
+    유지해서, plan mode 기준 일반 세션의 약 7배 토큰을 씁니다. 쓴다면 팀을 작게, 팀원 모델은
+    Sonnet으로, 일이 끝난 팀원은 바로 종료합니다.
+  </p>
+
+  <p>
+    작업 습관도 토큰입니다. "이 코드베이스 개선해줘"처럼 모호한 요청은 광역 스캔을 유발하고,
+    "auth.ts의 login 함수에 입력 검증 추가"는 최소한의 파일만 읽게 합니다. 복잡한 작업은
+    plan mode(Shift+Tab)로 방향을 합의한 뒤 실행하고, 잘못 가면 Escape로 즉시 멈춰
+    <span class="mono">/rewind</span>합니다. 테스트 케이스나 기대 출력 같은 검증 목표를 주면
+    재작업 요청 자체가 줄어듭니다.
+  </p>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7">
+  <h2><span class="no">07</span>캐시 경제학</h2>
+
+  <h3>7.1 캐시 수명(TTL)</h3>
+  <p>
+    캐시는 적중할 때마다 타이머가 리셋되므로 계속 작업하는 동안은 따뜻하게 유지됩니다.
+    구독에서는 Claude Code가 <strong>1시간 TTL</strong>을 자동으로 요청해서 한 시간 안쪽의 공백은
+    버팁니다. 플랜 한도를 넘겨 usage credits 과금으로 넘어가면 쓰기 단가가 싼 5분으로 자동
+    하락하는데, 유지하고 싶으면 <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span>을 둡니다.
+    API 키, Amazon Bedrock, Google Cloud의 Agent Platform, Microsoft Foundry에서는 기본 5분이고,
+    같은 변수로 1시간에 opt-in합니다.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">셸 환경 또는 settings.json의 env 블록</div>
+    <pre><code>export ENABLE_PROMPT_CACHING_1H=1          <span class="cm"># API, Bedrock 등에서 1시간 TTL opt-in</span>
+export FORCE_PROMPT_CACHING_5M=1           <span class="cm"># 디버깅용: 인증 방식과 무관하게 5분 강제</span>
+export MAX_THINKING_TOKENS=8000            <span class="cm"># 고정 상한 방식 모델의 thinking 토큰 제한</span>
+export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal 체크인 중지</span></code></pre>
+  </div>
+
+  <h3>7.2 캐시를 깨는 행동과 지키는 행동</h3>
+  <p>
+    캐시는 Prefix의 정확한 일치로 동작하므로, Prefix 어딘가를 바꾸는 행동은 그 뒤 전부를
+    재계산하게 만듭니다. 다음 행동들이 다음 요청을 부분 또는 전체 캐시 미적중으로 만듭니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. 캐시를 무효화하는 행동. 한 번의 느리고 비싼 턴 뒤에 새 Prefix가 캐시됩니다</caption>
+      <thead>
+        <tr><th scope="col">행동</th><th scope="col">무효화 이유</th><th scope="col">대응</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="mono">/model</span> 전환</td>
+          <td>모델마다 캐시가 분리됨</td>
+          <td>세션 초반에 결정하고 유지</td>
+        </tr>
+        <tr>
+          <td><span class="mono">/effort</span> 변경</td>
+          <td>effort 수준마다 캐시가 분리됨</td>
+          <td>세션 초반에 결정하고 유지</td>
+        </tr>
+        <tr>
+          <td>fast mode 첫 활성화</td>
+          <td>요청 헤더가 캐시 키에 포함됨</td>
+          <td>쓸 거면 세션 초반에. 이후 on/off 토글은 캐시 유지</td>
+        </tr>
+        <tr>
+          <td>MCP 서버 연결/해제</td>
+          <td>Prefix에 로딩된 도구 정의가 변경됨</td>
+          <td>tool search 지연 로딩이면 영향 없음</td>
+        </tr>
+        <tr>
+          <td>MCP 제공 플러그인 토글</td>
+          <td>위와 동일한 규칙 적용</td>
+          <td>전체 재읽기가 예상되면 <span class="mono">/reload-plugins</span>가 경고함</td>
+        </tr>
+        <tr>
+          <td>도구 전체 deny 규칙 추가</td>
+          <td>내장 도구 정의가 시스템 프롬프트에서 제거됨</td>
+          <td><span class="mono">Bash(rm *)</span> 같은 범위 규칙은 캐시에 무해</td>
+        </tr>
+        <tr>
+          <td><span class="mono">/compact</span></td>
+          <td>대화 이력이 요약으로 교체됨</td>
+          <td>휴지점에서, 캐시가 따뜻할 때 실행</td>
+        </tr>
+        <tr>
+          <td>Claude Code 업그레이드</td>
+          <td>시스템 프롬프트와 도구 정의가 갱신됨</td>
+          <td>재시작 후 첫 턴 1회 비용. 시점 통제는 <span class="mono">DISABLE_AUTOUPDATER=1</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    반대로 다음 행동들은 대화 끝에 내용을 덧붙이거나 요청 자체를 건드리지 않아서 캐시를 지킵니다.
+  </p>
+
+  <ul class="plain">
+    <li>저장소 파일 편집. 변경 알림이 대화 뒤에 붙고, 필요하면 Claude가 다시 읽습니다.</li>
+    <li>CLAUDE.md와 출력 스타일 수정. 캐시는 유지되지만 변경도 적용되지 않습니다.</li>
+    <li>permission mode 전환. 단 <span class="mono">opusplan</span>의 plan mode 토글은 모델 전환이라 예외입니다.</li>
+    <li>스킬과 커맨드 호출. 지시가 메시지로 덧붙습니다.</li>
+    <li><span class="mono">/recap</span>과 <span class="mono">/rewind</span>, 그리고 서브에이전트 생성.</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 업그레이드 직후의 긴 세션 resume이 가장 비쌉니다</span>
+    <p>
+      업그레이드 뒤에 세션을 resume하면 대화 이력 전체가 새 시스템 프롬프트 뒤에 놓여
+      캐시 적중 없이 재처리됩니다. 비용이 이력 길이에 비례하므로, 오래 굴린 큰 세션의 복귀
+      첫 턴이 그 세션에서 가장 비싼 요청이 될 수 있습니다. 큰 세션은 업그레이드 전에 정리하거나
+      요약에서 재개하는 쪽이 쌉니다.
+    </p>
+  </div>
+
+  <h3>7.3 캐시 범위와 유휴 세션</h3>
+  <p>
+    Claude Code의 캐시는 사실상 머신과 디렉토리 단위입니다. 시스템 프롬프트에 작업 디렉토리,
+    플랫폼, git 상태가 포함되므로 디렉토리가 다르면 Prefix가 달라 서로의 캐시를 못 씁니다.
+    같은 저장소의 worktree도 각자 캐시를 쌓습니다. 반대로 같은 디렉토리의 병렬 세션은
+    Prefix가 일치해 서로의 캐시를 읽습니다.
+  </p>
+
+  <p>
+    세션이 놀고 있어도 도는 것들이 있습니다. scheduled task는 정해진 간격마다 전체 컨텍스트를
+    실어 요청을 보내고, 다른 세션에서 온 cross-session 메시지 수신도 새 턴을 시작합니다
+    (<span class="mono">crossSessionInbound</span>를 <span class="mono">hold</span>로 두면 보류).
+    goal 체크인도 유휴 중에 턴을 시작할 수 있어 <span class="mono">CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0</span>으로
+    끌 수 있습니다. 그 외 resume용 요약 같은 백그라운드 작업은 세션당 0.04달러 미만 수준입니다.
+  </p>
+
+  <p class="lead-def">
+    <b>원칙:</b> 캐시 보호 규칙은 하나입니다. 세션 중에 Prefix를 흔들지 마세요.
+    모델, effort, 도구 구성은 시작할 때 정합니다.
+  </p>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8">
+  <h2><span class="no">08</span>조직 비용 관리: 구독, Console, Bedrock</h2>
+  <p>
+    조직의 통제 지점은 접속 방식이 정합니다. 지출을 어디서 보고, 어디서 한도를 걸고,
+    사용자별 수치를 어떻게 뽑는지가 세 가지 설정에서 각각 다릅니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 접속 방식별 비용 관리 지점</caption>
+      <thead>
+        <tr>
+          <th scope="col">설정</th>
+          <th scope="col">지출 확인</th>
+          <th scope="col">한도 설정</th>
+          <th scope="col">사용자별 리포팅</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Teams / Enterprise 플랜</th>
+          <td>조직 분석의 spend report(일 단위 갱신, CSV)</td>
+          <td>usage credits 한도(조직/그룹/개인)</td>
+          <td>spend report CSV, Enterprise는 Analytics API</td>
+        </tr>
+        <tr>
+          <th scope="row">Console(API)</th>
+          <td>Console Usage 페이지</td>
+          <td>Claude Code 워크스페이스 spend limit</td>
+          <td>Console 대시보드, Claude Code Analytics API</td>
+        </tr>
+        <tr>
+          <th scope="row">Bedrock 등 클라우드</th>
+          <td>클라우드 청구 콘솔</td>
+          <td>클라우드 예산 도구</td>
+          <td>OpenTelemetry 또는 게이트웨이</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>8.1 구독과 Console</h3>
+  <p>
+    Teams와 Enterprise에서는 각 멤버가 5시간 롤링 윈도우와 주간 윈도우로 리셋되는 좌석 허용량을
+    씁니다. 이 허용량은 Claude 챗, Cowork과 공유되므로, 코딩 좌석은 챗 좌석보다 예산을 크게
+    잡아야 합니다. 턴마다 파일 내용과 도구 호출이 실리는 특성상 디버깅 세션 하나가 챗 하루치보다
+    많이 소모할 수 있습니다. 허용량을 넘긴 사용을 허용하려면 usage credits를 켜고 조직, 그룹,
+    개인 단위로 한도를 겁니다.
+  </p>
+
+  <p>
+    Console 인증 조직은 최초 인증 시 자동 생성되는 Claude Code 전용 워크스페이스로 관리합니다.
+    여기에 spend limit을 걸어 총액을 제한하고, 워크스페이스 rate limit으로 Claude Code 트래픽이
+    프로덕션 API 워크로드의 한도를 잠식하지 않게 막습니다. 사용자별 수치는 Console 대시보드와
+    Claude Code Analytics API로 뽑고, 조직 규모별 TPM/RPM 권장값은 공식 비용 문서의 표를 따릅니다.
+  </p>
+
+  <h3>8.2 Bedrock 등 클라우드 프로바이더</h3>
+  <p>
+    클라우드 경유 사용은 Claude Code가 Anthropic으로 메트릭을 보내지 않으므로 Anthropic의
+    분석 대시보드에 잡히지 않습니다. 사용자별 어트리뷰션은 세 가지 중에서 고릅니다.
+    머신에서 직접 내보내는 OpenTelemetry는 사용자별 토큰과 비용을 근실시간으로 자체 관측 스택에
+    흘리는 유일한 방법입니다. 셀프호스팅 Claude apps gateway는 사용자별 어트리뷰션, OTLP 메트릭,
+    사용자별 spend limit을 함께 제공합니다. LiteLLM 같은 LLM 게이트웨이는 키별 지출을 추적하지만
+    Anthropic 비제휴 오픈소스이므로 보안 검토는 조직 몫입니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 게이트웨이 경유는 캐시 효율을 깎습니다</span>
+    <p>
+      custom <span class="mono">ANTHROPIC_BASE_URL</span>이나 LLM 게이트웨이를 거치면 Claude Code가
+      대화 중간에 덧붙이는 시스템 컨텍스트 블록이 캐시 마킹 없이 나가 <strong>매 요청 미캐시 입력</strong>으로
+      과금됩니다. 대화 자체의 캐시 breakpoint는 유지되므로, 게이트웨이가 이를 그대로 전달해야 대화
+      캐시가 삽니다. 게이트웨이 환경에서는 tool search도 동작하지 않아 MCP 도구 정의가 Prefix에
+      로딩됩니다. 어트리뷰션을 얻는 대신 캐시 효율을 얼마나 내주는지 계산에 넣으세요.
+    </p>
+  </div>
+
+  <p>
+    tool search가 동작하지 않는 환경은 게이트웨이 외에 두 가지가 더 있습니다. Agent Platform의
+    Claude 4.5 이전 세대 모델과 Azure 호스팅 Foundry 배포입니다. Agent Platform의 4.5 세대 이상
+    모델과 Bedrock에서는 Anthropic API와 동일하게 기본 동작합니다. tool search가 동작하지 않는
+    환경에서는 MCP 도구 정의가 Prefix에 전부 로딩되므로, 연결 서버 수를 줄이는 것이 곧 캐시할
+    Prefix를 줄이는 일입니다.
+  </p>
+
+  <p>
+    Bedrock의 프롬프트 캐시는 모델별로 체크포인트당 최소 토큰이 다릅니다. Prefix가 최소 토큰에
+    못 미치면 요청은 성공하지만 캐시는 만들어지지 않는 조용한 실패가 됩니다. 체크포인트는 요청당
+    최대 4개이고, <span class="mono">tools</span> &rarr; <span class="mono">system</span> &rarr;
+    <span class="mono">messages</span> 순서로 이어지므로 앞 섹션을 바꾸면 뒤 섹션 캐시까지 무효화됩니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. Bedrock의 Claude 모델별 캐시 체크포인트 최소 토큰(2026-08 기준)</caption>
+      <thead>
+        <tr><th scope="col">모델</th><th scope="col">최소 토큰</th><th scope="col">지원 TTL</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Claude Fable 5</td><td><span class="num">512</span></td><td>5분, 1시간</td></tr>
+        <tr><td>Claude Opus 5</td><td><span class="num">512</span></td><td>5분, 1시간</td></tr>
+        <tr><td>Claude Opus 4.8</td><td><span class="num">1,024</span></td><td>5분, 1시간</td></tr>
+        <tr><td>Claude Sonnet 5</td><td><span class="num">1,024</span></td><td>5분, 1시간</td></tr>
+        <tr><td>Claude Sonnet 4.6</td><td><span class="num">1,024</span></td><td>5분, 1시간</td></tr>
+        <tr><td>Claude Haiku 4.5</td><td><span class="num">4,096</span></td><td>5분, 1시간</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    같은 세대 안에서도 값이 다릅니다. Opus 4.5에서 4.7까지는 4,096토큰이었다가 Opus 4.8에서
+    1,024토큰으로, Opus 5와 Fable 5에서 512토큰으로 내려왔습니다. 1시간 TTL은 체크포인트에
+    <span class="mono">"ttl": "1h"</span>를 지정해 씁니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - Bedrock 사용량 집계와 rate limit 계산</span>
+    <p>
+      Bedrock 응답의 <span class="mono">inputTokens</span>는 비캐시 입력만 나타냅니다. 총 입력은
+      <span class="mono">inputTokens + cacheReadInputTokens + cacheWriteInputTokens</span>로 합산해야
+      하며, 비용 대시보드에서 이 합산을 빠뜨리면 사용량이 과소 집계됩니다. 한편 캐시 적중분은
+      rate limit에서 차감되지 않으므로, 캐시 효율이 곧 같은 TPM 쿼터 안에서의 처리량입니다.
+    </p>
+  </div>
+
+  <p>
+    개발자의 한도 문의는 상황 구분부터 합니다. "session limit" 또는 "weekly limit" 메시지는
+    좌석 윈도우라 <span class="mono">/model</span> 전환으로 회피되지 않고 리셋을 기다리거나
+    usage credits를 씁니다. "Opus limit"처럼 모델별 메시지는 다른 계열 모델로 전환하면 계속
+    작업할 수 있습니다. 게이트웨이가 보낸 spend limit 메시지는 관리자가 건 캡이고,
+    auto-compact 경고는 한도가 아니라 컨텍스트 관리 안내입니다.
+  </p>
+</section>
+
+<!-- ===================== 09 ===================== -->
+<section class="sec" id="s9">
+  <h2><span class="no">09</span>상황별 요약과 결론</h2>
+  <p>
+    자주 만나는 증상과 그 원인, 조치를 한 표로 정리합니다. 대부분은 앞 장에서 다룬 두 변수,
+    컨텍스트 크기와 캐시 적중률로 환원됩니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 5. 증상별 원인과 조치</caption>
+      <thead>
+        <tr><th scope="col">증상</th><th scope="col">원인</th><th scope="col">조치</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">한 줄 질문에도 사용량이 큼</th>
+          <td>하루 종일 열린 세션이 전체 이력을 매번 재전송</td>
+          <td>작업 전환마다 <span class="mono">/clear</span>, 오래된 큰 세션은 요약에서 재개</td>
+        </tr>
+        <tr>
+          <th scope="row">휴식 후 첫 턴이 느리고 비쌈</th>
+          <td>캐시 수명 초과로 전체 재처리</td>
+          <td>구독은 1시간 TTL 자동, API와 Bedrock은 <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span> 검토</td>
+        </tr>
+        <tr>
+          <th scope="row">creation 토큰이 턴마다 높음</th>
+          <td>Prefix 불안정(모델, effort, 도구 구성 변동)</td>
+          <td>세션 초반에 고정, <span class="mono">/usage</span> 행동 플래그 확인</td>
+        </tr>
+        <tr>
+          <th scope="row">MCP 서버 추가 후 비용 증가</th>
+          <td>서드파티 플랫폼, 게이트웨이 등 도구 정의가 선로딩되는 환경</td>
+          <td><span class="mono">/context</span>로 점유 확인, <span class="mono">/mcp</span>로 미사용 서버 비활성</td>
+        </tr>
+        <tr>
+          <th scope="row">Bedrock에서 캐시 토큰이 0</th>
+          <td>모델별 최소 체크포인트 토큰 미달 또는 미지원</td>
+          <td>표 4와 AWS 문서의 모델, 리전 지원 확인</td>
+        </tr>
+        <tr>
+          <th scope="row">유휴 세션에서 사용량 증가</th>
+          <td>scheduled task, cross-session 메시지, goal 체크인</td>
+          <td>보류/중지 설정, 쓰지 않는 세션 종료</td>
+        </tr>
+        <tr>
+          <th scope="row">API/클라우드 청구가 예상보다 큼</th>
+          <td>정리하지 않은 긴 세션, Opus 기본값 방치</td>
+          <td><span class="mono">/clear</span> 습관화, Sonnet 기본에 필요할 때만 상향</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    적용 순서에는 우선순위가 있습니다. 1순위는 측정 체계입니다. <span class="mono">/usage</span>,
+    <span class="mono">/context</span>, 상태 표시줄이 없으면 나머지 조치의 효과를 확인할 수 없고,
+    Bedrock 조직이라면 OpenTelemetry나 게이트웨이 어트리뷰션이 같은 역할을 합니다.
+    측정이 서면 나머지는 데이터로 검증되고, 없으면 전부 감으로 남습니다.
+  </p>
+
+  <p>
+    2순위는 컨텍스트 정리 습관입니다. 작업 전환마다 <span class="mono">/clear</span>, CLAUDE.md 200줄 유지만으로
+    가장 큰 낭비 경로가 닫힙니다. 3순위는 모델과 effort를 작업에 맞추는 것, 4순위는 세션 중
+    구성 변경을 멈춰 캐시를 지키는 것입니다. 서브에이전트, 훅, 스킬로 구조를 바꾸는 5순위는
+    앞의 습관이 잡힌 뒤에 하는 고정 투자이고, 1~4순위 없이 먼저 하면 효과가 측정되지 않습니다.
+  </p>
+
+  <p>
+    절약의 목표는 사용을 줄이는 것이 아닙니다. 같은 작업을 더 작은 컨텍스트와 더 높은
+    캐시 적중률로 하는 것이고, 그 결과는 낮은 청구액과 함께 더 빠른 응답으로 돌아옵니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="claude-code-token-optimization-guide-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="claude-code-token-optimization-guide-archmap.png" alt="인터랙티브 아키텍처 맵 전체 이미지 - 컨텍스트 윈도우를 채우는 요소와 토큰 절약 레버의 위치"></a>
+    <figcaption>그림 3. 인터랙티브 아키텍처 맵 전체 보기. 이미지를 클릭하면 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 <a href="claude-code-token-optimization-guide-archmap.html" target="_blank" rel="noopener">인터랙티브 버전 ↗</a>이 열립니다.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>핵심 출처</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/costs">Manage costs effectively</a>
+      - Anthropic, Claude Code Docs (2026-08-25 확인)
+      <span class="url">https://code.claude.com/docs/en/costs</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/prompt-caching">How Claude Code uses prompt caching</a>
+      - Anthropic, Claude Code Docs (2026-08-25 확인)
+      <span class="url">https://code.claude.com/docs/en/prompt-caching</span>
+    </li>
+  </ul>
+
+  <h3>공식 문서</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/model-config">Model configuration</a>
+      - Anthropic, Claude Code Docs
+      <span class="url">https://code.claude.com/docs/en/model-config</span>
+    </li>
+    <li>
+      <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Prompt caching</a>
+      - Anthropic, Claude Platform Docs(TTL별 캐시 쓰기/읽기 단가표 포함)
+      <span class="url">https://platform.claude.com/docs/en/build-with-claude/prompt-caching</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html">Prompt caching for faster model inference</a>
+      - AWS, Amazon Bedrock User Guide(모델별 최소 토큰과 TTL 표)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html</span>
+    </li>
+  </ul>
+
+  <h3>관련 블로그</h3>
+  <ul>
+    <li>
+      <a href="https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything">Lessons from building Claude Code: Prompt caching is everything</a>
+      - Anthropic(plan mode, 지연 도구 로딩, 컴팩션의 설계 배경)
+      <span class="url">https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-25.
+    본 문서는 Claude Code 공식 문서(code.claude.com)와 Amazon Bedrock 사용자 가이드를 기반으로 작성한 기술 분석 자료입니다.
+    수치, 기본값, 명령과 환경 변수는 작성 시점의 Claude Code v2.1.x 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<div class="page" data-lang="en">
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">CLAUDE CODE / COST OPTIMIZATION GUIDE</p>
+  <h1>Claude Code Token-Saving Guide</h1>
+  <p class="subtitle">
+    Claude Code re-sends the full context on every turn, and cost scales with its size.
+    This guide covers how to cut token consumption, from personal session habits to cache
+    economics and cost management at the organization and Bedrock level.
+  </p>
+
+  <div class="stat" role="img" aria-label="Key figures: input rate 1.0x on cache miss versus about 0.1x on hit, cache TTL 1 hour on subscription and 5 minutes on API and Bedrock, minimum cache prefix 512 to 4,096 tokens per model across all platforms, CLAUDE.md recommended at 200 lines or fewer">
+    <div class="stat-item old">
+      <span class="stat-num">1.0<span class="unit">x</span></span>
+      <span class="stat-sub">Input rate on cache miss</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">~0.1<span class="unit">x</span></span>
+      <span class="stat-sub">Re-read rate on cache hit</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">1 hr / 5 min</span>
+      <span class="stat-sub">Cache TTL (subscription / API, Bedrock)</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">512&ndash;4,096<span class="unit">tokens</span></span>
+      <span class="stat-sub">Minimum cache prefix (per model, all platforms)</span>
+    </div>
+    <div class="stat-div" aria-hidden="true"></div>
+    <div class="stat-item key">
+      <span class="stat-num">200<span class="unit">lines</span></span>
+      <span class="stat-sub">Recommended CLAUDE.md ceiling</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>01. Written as of - 2026-08-25</p>
+    <p>02. Audience - Claude Code users (subscription plans, Console API, and cloud providers such as Amazon Bedrock)</p>
+    <p>03. Key inspection commands - <span class="mono">/usage</span>, <span class="mono">/context</span>, <span class="mono">/insights</span></p>
+    <p>04. Primary sources - the official Claude Code docs (code.claude.com, checked 2026-08) and the Amazon Bedrock User Guide</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>Claude Code re-sends the system prompt, project context, and the entire conversation history on every turn. Cost scales with context size, and re-reads that hit the cache are billed at <strong>about 10%</strong> of the standard input rate.</li>
+    <li>The cache works only on an exact prefix match. Switching models, changing effort, altering tool definitions, and compaction all invalidate it, and the first request after a gap longer than the cache TTL (1 hour on subscriptions, 5 minutes by default on the API and Bedrock) reprocesses everything.</li>
+    <li>Long sessions left open, pinning Opus, going through an LLM gateway, and scheduled tasks and cross-session messages that run even while idle are the main paths to cost spikes.</li>
+    <li>Measure first with <span class="mono">/usage</span> and <span class="mono">/context</span>, run <span class="mono">/clear</span> on every task switch, pin model and effort early in the session, and isolate verbose work in subagents. Organizations should start with per-user attribution via OpenTelemetry or a gateway.</li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">Cost structure: where tokens are spent</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Measurement: /usage and /context</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Context hygiene: /clear, /compact, /rewind</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Model choice and thinking depth</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Tool overhead: MCP and CLI</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Structural savings: subagents, hooks, skills</a></li>
+    <li><span class="no">07</span><a href="#s7-en">Cache economics</a></li>
+    <li><span class="no">08</span><a href="#s8-en">Organizational cost management: subscription, Console, Bedrock</a></li>
+    <li><span class="no">09</span><a href="#s9-en">Symptom-based summary and conclusion</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>Cost structure: where tokens are spent</h2>
+  <p>
+    The model remembers nothing between requests. So every time you send a message, Claude Code
+    re-transmits the system prompt, the project context, and every prior exchange and tool result in full.
+    When Claude uses tools several times within one turn, each use fires another request.
+    That is why token cost scales with the <strong>size of the session</strong>, not the length of your question.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The three layers of a request. The less the content changes, the earlier it is placed</caption>
+      <thead>
+        <tr><th scope="col">Layer</th><th scope="col">Contents</th><th scope="col">When it changes</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>System prompt</td>
+          <td>Core instructions, tool definitions, output styles</td>
+          <td>When the tool definition set changes or Claude Code is upgraded</td>
+        </tr>
+        <tr>
+          <td>Project context</td>
+          <td>CLAUDE.md, auto memory, misscoped rules</td>
+          <td>Session start, after <span class="mono">/clear</span> or <span class="mono">/compact</span></td>
+        </tr>
+        <tr>
+          <td>Conversation</td>
+          <td>User messages, responses, tool results</td>
+          <td>Every turn</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    What makes this structure affordable is the prompt cache. A prefix identical to the previous request
+    is read from the cache instead of being reprocessed, billed at about 10% of the standard input rate.
+    Writing a new cache entry costs more than standard, but only once; subsequent turns keep reusing
+    that prefix at the cheap rate.
+  </p>
+
+  <figure class="flow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <span class="flow-label">Cache write (1-hour TTL)</span>
+        <span class="flow-val">2.0x</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">Cache write (5-min TTL)</span>
+        <span class="flow-val">1.25x</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box">
+        <span class="flow-label">Standard input</span>
+        <span class="flow-val">1.0x</span>
+      </div>
+      <div class="flow-sep" aria-hidden="true">&gt;</div>
+      <div class="flow-box emph">
+        <span class="flow-label">Cache read</span>
+        <span class="flow-val">~0.1x</span>
+      </div>
+    </div>
+    <figcaption>
+      Figure 1. Relative rates with standard input set at 1.0x. The same tokens cost one-tenth as much
+      when served as cache reads, and the write cost is a one-time investment to earn that discount.
+    </figcaption>
+  </figure>
+
+  <p>
+    How you are billed depends on how you connect. Subscription plans (Pro, Max, Team, Enterprise)
+    consume usage allowances managed as a 5-hour rolling window and a weekly window, not dollars.
+    The Console API and cloud providers such as Amazon Bedrock bill per token.
+  </p>
+
+  <p class="lead-def">
+    <b>Principle:</b> cost scales with context size, and the token rate you actually pay is set by your
+    cache hit ratio. Every strategy in this document is a way to reduce those two variables.
+  </p>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Measurement: /usage and /context</h2>
+  <p>
+    Optimization starts with measurement. For API-billed users, <span class="mono">/usage</span> shows a
+    Session block with the current session's token statistics and estimated cost; for subscribers it shows
+    plan usage bars along with an attribution of recent usage. It reports what share of the total each
+    skill, subagent, plugin, and individual MCP server accounts for, plus behavior flags — such as long
+    context or cache misses — responsible for <strong>10% or more</strong> of recent usage.
+  </p>
+
+  <p>
+    A representative output looks like this. The exact formatting varies slightly by version, but the information is the same.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Example - /usage output. Which blocks appear depends on the auth method</div>
+    <pre><code>&gt; /usage
+
+<span class="cm"># Session block shown to API-billed users</span>
+Session
+  Input      1,242,310 tokens (cache read 1,180,450 | cache write 38,220 | uncached 23,640)
+  Output     18,940 tokens
+  Est. cost  $4.87
+
+<span class="cm"># plan usage and attribution shown to subscribers</span>
+Plan usage
+  Session (5h)    ████████░░░░░░░░░░░░  41%   resets 18:00
+  Week (all)      ███░░░░░░░░░░░░░░░░░  16%   resets Mon 09:00
+  Week (Opus)     █░░░░░░░░░░░░░░░░░░░   4%
+
+Recent usage attribution
+  Subagents 28% | MCP: playwright 17% | Skills: pdf 6%
+
+Behavior flags
+  Long context sessions 14% | Cache misses after breaks 12%</code></pre>
+  </div>
+
+  <div class="callout note">
+    <span class="callout-title">Note - the dollar figure in /usage is an estimate</span>
+    <p>
+      Claude Code computes this amount locally at standard list prices. Promotional or contract-discounted
+      rates are not reflected, so it can differ from the actual bill. For billing-grade numbers, check the
+      Usage page in the Claude Console.
+    </p>
+  </div>
+
+  <p>
+    <span class="mono">/context</span> shows what is occupying the context right now.
+    Check the shares held by MCP tool definitions, CLAUDE.md, and conversation history to decide what to trim.
+    If you configure a statusline, you can keep context utilization on screen along with the
+    <span class="mono">cache_creation_input_tokens</span> and <span class="mono">cache_read_input_tokens</span>
+    returned with every response.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Example - /context output</div>
+    <pre><code>&gt; /context
+
+claude-sonnet-5 | 96.0K / 1.0M tokens (10%)
+
+  System prompt      3.2K  ( 0.3%)
+  System tools      12.8K  ( 1.3%)
+  MCP tools         28.4K  ( 2.8%)   <span class="cm">playwright, github tool definitions</span>
+  Memory files       4.1K  ( 0.4%)   <span class="cm">CLAUDE.md, auto memory</span>
+  Messages          47.5K  ( 4.8%)   <span class="cm">conversation history and tool results</span>
+  Free space       904.0K  (90.4%)</code></pre>
+  </div>
+
+  <p>
+    In this example, the preloaded MCP tool definitions are more than half the size of the conversation
+    history. When you see a share like that, tool overhead is what to inspect.
+  </p>
+
+  <p>
+    Reading the two cache metrics is simple. If reads overwhelmingly exceed writes (creation), the cache
+    is working well. If creation stays high turn after turn, it signals that the prefix keeps changing,
+    so check the list of invalidating actions in Table 2.
+  </p>
+
+  <p>
+    <span class="mono">/insights</span> analyzes how you work, not token counts.
+    It analyzes up to 200 recent sessions on this machine and builds an HTML report
+    (<span class="mono">~/.claude/usage-data/report.html</span>) of friction points such as frequent tasks
+    and where requests were misunderstood. The analysis itself consumes plan or API usage, so running it
+    periodically, once in a while, is about right.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Example - running /insights. The result is an HTML report opened in a browser</div>
+    <pre><code>&gt; /insights
+
+Analyzing up to 200 recent sessions on this machine...
+Report saved: ~/.claude/usage-data/report.html</code></pre>
+  </div>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Context hygiene: /clear, /compact, /rewind</h2>
+  <p>
+    The cheapest optimization is not growing the context in the first place. When you move to an
+    unrelated task, start fresh with <span class="mono">/clear</span>. It costs nothing extra, and the
+    previous history is not carried into the next request. If you will need the session later, name it
+    with <span class="mono">/rename</span> before clearing, and come back with <span class="mono">/resume</span>.
+  </p>
+
+  <p>
+    When you need to continue the same task with a smaller context, <span class="mono">/compact</span>
+    replaces the history with a summary. You can direct what to preserve, as in
+    <span class="mono">/compact Focus on code samples and API usage</span>, and if you give the same
+    instruction every time, make it a standing rule in CLAUDE.md.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">CLAUDE.md - preservation priorities for compaction</div>
+    <pre><code># Compact instructions
+
+When you are using compact, please focus on test output and code changes</code></pre>
+  </div>
+
+  <p>
+    Budget for the cost of compaction itself. The summarization request is a large request that sends the
+    entire conversation as the prompt. While the cache is warm it is mostly served as cache reads and stays
+    cheap, but run after the cache TTL has lapsed (for example, right after resuming an old session) it
+    becomes the most expensive compaction possible, reprocessing everything. Running it yourself at
+    <strong>a lull between tasks</strong>, before auto-compact fires in the middle of the work, is how you
+    control the timing.
+  </p>
+
+  <p>
+    When the direction is wrong, the answer is <span class="mono">/rewind</span>, not compaction. Rolling
+    the conversation back to an earlier turn means the prefix up to that point is already in the cache,
+    so the next request hits it as-is. For undoing, it is far cheaper than compaction, which builds a new
+    summary and re-warms the cache.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Q["Task switch point"] -->|"Unrelated new task"| CLR["/clear"]
+  Q -->|"Same task continues, context is full"| CMP["/compact"]
+  Q -->|"Recover from a wrong direction"| RWD["/rewind"]
+  CLR --> R1["No cost, cache rebuilt"]
+  CMP --> R2["One summary request, run while cache is warm"]
+  RWD --> R3["Existing cache hits as-is"]
+    </div>
+    <figcaption>
+      Figure 2. How to choose among the three context switches. Of the three, only
+      <span class="mono">/rewind</span> hits the existing cache as-is.
+    </figcaption>
+  </figure>
+
+  <p>
+    The auto-compact window defaults to a value set automatically per model. You can set the window with
+    the <span class="mono">/autocompact</span> command (<span class="mono">/autocompact auto</span> returns
+    to the model default) and also adjust it via the <span class="mono">CLAUDE_CODE_AUTO_COMPACT_WINDOW</span>
+    environment variable. Lowering the window makes compaction more frequent and its summary-request cost
+    accumulates, so leave the automatic value unless you have a specific reason. Sonnet 5 auto-compacts at
+    about 967,000 tokens by default (no separately documented threshold exists for other models).
+  </p>
+
+  <p>
+    CLAUDE.md is loaded at every session start and stays resident in the project context layer. Every turn
+    pays that cost, so keep it under 200 lines and move detailed instructions needed only by specific
+    workflows into skills, which load only when invoked.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - CLAUDE.md edits do not apply mid-session</span>
+    <p>
+      The project-root and user-level CLAUDE.md files are read once at session start and kept in memory.
+      Editing the file mid-session does not break the cache, but <strong>the change is not applied either.</strong>
+      New content loads on the next <span class="mono">/clear</span>, <span class="mono">/compact</span>, or restart.
+      Repeatedly editing the file and retrying within the same session because an instruction "is not working"
+      only wastes tokens.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Model choice and thinking depth</h2>
+  <p>
+    Model choice is the first pricing decision. Sonnet is enough for most coding work; save Opus for
+    complex architectural decisions and multi-step reasoning. Switch with <span class="mono">/model</span>
+    and set the default in <span class="mono">/config</span>. For simple subagent work like lookups or
+    formatting, specify <span class="mono">model: haiku</span> in the subagent configuration to run it
+    at a cheaper rate.
+  </p>
+
+  <p>
+    effort adjusts thinking depth within the same model. Extended thinking tokens are billed as output
+    tokens, and by default can consume up to tens of thousands of tokens per request depending on the
+    model. For work that does not need deep reasoning, lower the level with the
+    <span class="mono">/effort</span> command or the slider on the <span class="mono">/model</span> screen;
+    to pin it, use the <span class="mono">effortLevel</span> setting or the
+    <span class="mono">CLAUDE_CODE_EFFORT_LEVEL</span> environment variable.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Example - pinning the effort level. Valid values are low, medium, high, xhigh (the environment variable also accepts auto)</div>
+    <pre><code><span class="cm"># .claude/settings.json (project) or ~/.claude/settings.json (user)</span>
+{
+  "effortLevel": "medium"
+}
+
+<span class="cm"># or set as a shell environment variable</span>
+export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre>
+  </div>
+
+  <p>
+    For models that take a fixed thinking-token ceiling, cap it with <span class="mono">MAX_THINKING_TOKENS</span>
+    (e.g. <span class="mono">MAX_THINKING_TOKENS=8000</span>). Adaptive reasoning models ignore non-zero
+    ceiling values, so adjust only through effort. Fable 5 cannot turn extended thinking off, so effort
+    is likewise the only means of control.
+  </p>
+
+  <p>
+    Knowing the relationship to the cache tells you when to make changes. Model and effort are each a
+    <strong>separate cache key</strong>, so changing either mid-session makes the next request reprocess
+    the entire history as a cache miss. The <span class="mono">opusplan</span> setting alternates between
+    Opus and Sonnet on every plan-mode entry and exit, building a new cache on each toggle. Deciding model
+    and effort early in the session and holding them steady through the work is the cache-correct answer.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Tool overhead: MCP and CLI</h2>
+  <p>
+    MCP server tool definitions are deferred-loaded by default on supported models (the Claude 4.5
+    generation and later). With tool search active, only tool names and server instructions enter the
+    context, and the actual definitions attach at the moment Claude uses a tool. Overhead still
+    accumulates with many servers, so check actual occupancy with <span class="mono">/context</span>
+    and disable unused servers in <span class="mono">/mcp</span>.
+  </p>
+
+  <p>
+    The problem is where deferred loading is unavailable. <strong>With a custom
+    <span class="mono">ANTHROPIC_BASE_URL</span> gateway, pre-4.5-generation Claude models on the
+    Agent Platform, and Azure-hosted Foundry deployments, tool search does not work</strong> and the full
+    tool definitions are loaded into the prefix. A gateway can be overridden with
+    <span class="mono">ENABLE_TOOL_SEARCH=true</span>, but the other two cannot, and 4.5-generation-and-later
+    models on the Agent Platform behave the same as the Anthropic API by default. Servers or tools
+    designated with <span class="mono">alwaysLoad</span>, and threshold-based preloading, produce the same
+    result. In that state, a single server connecting or disconnecting invalidates the entire cache.
+  </p>
+
+  <p>
+    When a CLI does the same job, prefer the CLI. Tools like <span class="mono">gh</span>,
+    <span class="mono">aws</span>, <span class="mono">gcloud</span>, and <span class="mono">sentry-cli</span>
+    carry no tool-listing cost at all; Claude just runs the commands directly.
+  </p>
+
+  <p>
+    If you work in a typed language, a code-intelligence plugin cuts exploration cost. One LSP
+    go-to-definition replaces a grep plus reading several candidate files, and automatic type-error
+    reports right after an edit catch mistakes without running a compile.
+  </p>
+</section>
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Structural savings: subagents, hooks, skills</h2>
+  <p>
+    Isolate verbose output in subagents. Delegate test runs, log processing, and documentation
+    fetches, and the verbose output stays in the subagent's context while <strong>only a summary</strong>
+    returns to the main conversation. The parent's cache is not damaged either. Do note that a subagent
+    starts with its own system prompt and its own cache, and uses the 5-minute TTL even on subscriptions.
+  </p>
+
+  <p>
+    Hooks preprocess data before Claude sees it. Instead of having a 10,000-line log read in whole,
+    a hook that passes along only the ERROR lines turns tens of thousands of tokens into hundreds.
+    Here is a PreToolUse hook that keeps only the failures from test output.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">~/.claude/hooks/filter-test-output.sh - PreToolUse hook</div>
+    <pre><code>#!/bin/bash
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+<span class="cm"># For test commands, rewrite the command to keep only the failing parts</span>
+if [[ "$cmd" =~ ^(npm test|pytest|go test) ]]; then
+  filtered="$cmd 2&gt;&amp;1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100"
+  echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"$filtered\"}}}"
+else
+  echo "{}"
+fi</code></pre>
+  </div>
+
+  <p>
+    Wire this script to <span class="mono">hooks.PreToolUse</span> in settings.json with a Bash matcher
+    and it applies before every run. A full configuration example is in the official cost docs as-is.
+  </p>
+
+  <p>
+    Move workflow instructions that pile up in CLAUDE.md into skills. Skills load only when invoked,
+    which keeps the default context light. Build a codebase-overview skill holding the project
+    architecture, key directories, and naming conventions, and Claude gets the same context in one
+    skill invocation instead of reading several files to figure out the structure.
+  </p>
+
+  <p>
+    Agent teams are an experimental feature with a large cost multiplier. Each teammate keeps its own
+    instance and context window, consuming about 7x the tokens of a regular session in plan mode.
+    If you use them, keep the team small, run teammates on Sonnet, and shut teammates down as soon as
+    their work is done.
+  </p>
+
+  <p>
+    Work habits are tokens too. A vague request like "improve this codebase" triggers a wide scan,
+    while "add input validation to the login function in auth.ts" reads only the minimum files.
+    For complex work, agree on direction in plan mode (Shift+Tab) before executing, and when things go
+    wrong, stop immediately with Escape and <span class="mono">/rewind</span>. Giving verification
+    targets such as test cases or expected output reduces rework requests themselves.
+  </p>
+</section>
+
+<!-- ===================== 07 ===================== -->
+<section class="sec" id="s7-en">
+  <h2><span class="no">07</span>Cache economics</h2>
+
+  <h3>7.1 Cache lifetime (TTL)</h3>
+  <p>
+    The cache timer resets on every hit, so it stays warm as long as you keep working.
+    On subscriptions, Claude Code automatically requests a <strong>1-hour TTL</strong>, so gaps
+    shorter than an hour survive. Once you exceed the plan limit and roll over to usage-credits
+    billing, it automatically drops to the cheaper-to-write 5 minutes; to keep 1 hour, set
+    <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span>. With API keys, Amazon Bedrock, the
+    Agent Platform on Google Cloud, and Microsoft Foundry the default is 5 minutes, and the same
+    variable opts in to 1 hour.
+  </p>
+
+  <div class="codeblock">
+    <div class="code-caption">Shell environment or the env block of settings.json</div>
+    <pre><code>export ENABLE_PROMPT_CACHING_1H=1          <span class="cm"># opt in to the 1-hour TTL on the API, Bedrock, etc.</span>
+export FORCE_PROMPT_CACHING_5M=1           <span class="cm"># for debugging: force 5 minutes regardless of auth method</span>
+export MAX_THINKING_TOKENS=8000            <span class="cm"># cap thinking tokens on fixed-ceiling models</span>
+export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># stop goal check-ins while idle</span></code></pre>
+  </div>
+
+  <h3>7.2 Actions that break the cache and actions that keep it</h3>
+  <p>
+    The cache works on an exact prefix match, so any action that changes something inside the prefix
+    forces everything after it to be recomputed. The following actions make the next request a partial
+    or full cache miss.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Actions that invalidate the cache. After one slow, expensive turn, the new prefix is cached</caption>
+      <thead>
+        <tr><th scope="col">Action</th><th scope="col">Why it invalidates</th><th scope="col">Response</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="mono">/model</span> switch</td>
+          <td>Each model has a separate cache</td>
+          <td>Decide early in the session and hold</td>
+        </tr>
+        <tr>
+          <td><span class="mono">/effort</span> change</td>
+          <td>Each effort level has a separate cache</td>
+          <td>Decide early in the session and hold</td>
+        </tr>
+        <tr>
+          <td>First activation of fast mode</td>
+          <td>The request header is part of the cache key</td>
+          <td>If you will use it, do so early in the session. Later on/off toggles keep the cache</td>
+        </tr>
+        <tr>
+          <td>MCP server connect/disconnect</td>
+          <td>The tool definitions loaded into the prefix change</td>
+          <td>No effect with tool-search deferred loading</td>
+        </tr>
+        <tr>
+          <td>Toggling an MCP-providing plugin</td>
+          <td>Same rule as above applies</td>
+          <td><span class="mono">/reload-plugins</span> warns when a full re-read is expected</td>
+        </tr>
+        <tr>
+          <td>Adding a whole-tool deny rule</td>
+          <td>The built-in tool definition is removed from the system prompt</td>
+          <td>Scoped rules like <span class="mono">Bash(rm *)</span> are harmless to the cache</td>
+        </tr>
+        <tr>
+          <td><span class="mono">/compact</span></td>
+          <td>The conversation history is replaced by a summary</td>
+          <td>Run at a lull, while the cache is warm</td>
+        </tr>
+        <tr>
+          <td>Claude Code upgrade</td>
+          <td>The system prompt and tool definitions are refreshed</td>
+          <td>A one-time cost on the first turn after restart. Control the timing with <span class="mono">DISABLE_AUTOUPDATER=1</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Conversely, the following actions keep the cache, because they append to the end of the conversation
+    or do not touch the request at all.
+  </p>
+
+  <ul class="plain">
+    <li>Editing repository files. The change notice is appended after the conversation, and Claude re-reads when needed.</li>
+    <li>Modifying CLAUDE.md and output styles. The cache survives, but the change is not applied either.</li>
+    <li>Switching permission mode. The exception is <span class="mono">opusplan</span>'s plan-mode toggle, which is a model switch.</li>
+    <li>Invoking skills and commands. The instructions are appended as messages.</li>
+    <li><span class="mono">/recap</span> and <span class="mono">/rewind</span>, and spawning subagents.</li>
+  </ul>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - resuming a long session right after an upgrade is the most expensive</span>
+    <p>
+      Resume a session after an upgrade and the entire conversation history sits behind a new system
+      prompt, reprocessed with no cache hits. Cost is proportional to history length, so the first turn
+      back into a big, long-running session can be the most expensive request of that session. It is
+      cheaper to wrap up big sessions before upgrading, or to resume from a summary.
+    </p>
+  </div>
+
+  <h3>7.3 Cache scope and idle sessions</h3>
+  <p>
+    Claude Code's cache is effectively per machine and per directory. The system prompt includes the
+    working directory, platform, and git state, so a different directory means a different prefix, and
+    the caches cannot serve each other. Worktrees of the same repository each build their own cache too.
+    Conversely, parallel sessions in the same directory share a matching prefix and read each other's cache.
+  </p>
+
+  <p>
+    Some things run even while a session sits idle. Scheduled tasks send a request carrying the full
+    context at each interval, and receiving a cross-session message from another session also starts a
+    new turn (set <span class="mono">crossSessionInbound</span> to <span class="mono">hold</span> to defer).
+    Goal check-ins can also start turns while idle and can be turned off with
+    <span class="mono">CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0</span>. Other background work, such as
+    summaries for resume, stays under $0.04 per session.
+  </p>
+
+  <p class="lead-def">
+    <b>Principle:</b> there is one cache-protection rule. Do not shake the prefix mid-session.
+    Set the model, effort, and tool configuration at the start.
+  </p>
+</section>
+
+<!-- ===================== 08 ===================== -->
+<section class="sec" id="s8-en">
+  <h2><span class="no">08</span>Organizational cost management: subscription, Console, Bedrock</h2>
+  <p>
+    How you connect determines the organization's control points. Where you see spend, where you set
+    limits, and how you pull per-user numbers differ across the three setups.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. Cost-management points by connection method</caption>
+      <thead>
+        <tr>
+          <th scope="col">Setup</th>
+          <th scope="col">Spend visibility</th>
+          <th scope="col">Limit setting</th>
+          <th scope="col">Per-user reporting</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Teams / Enterprise plans</th>
+          <td>Spend report in org analytics (daily refresh, CSV)</td>
+          <td>Usage-credit limits (org/group/individual)</td>
+          <td>Spend report CSV; Analytics API on Enterprise</td>
+        </tr>
+        <tr>
+          <th scope="row">Console (API)</th>
+          <td>Console Usage page</td>
+          <td>Claude Code workspace spend limit</td>
+          <td>Console dashboard, Claude Code Analytics API</td>
+        </tr>
+        <tr>
+          <th scope="row">Bedrock and other clouds</th>
+          <td>Cloud billing console</td>
+          <td>Cloud budgeting tools</td>
+          <td>OpenTelemetry or a gateway</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>8.1 Subscriptions and the Console</h3>
+  <p>
+    On Teams and Enterprise, each member draws on a seat allowance that resets on a 5-hour rolling
+    window and a weekly window. This allowance is shared with Claude chat and Cowork, so budget coding
+    seats larger than chat seats. Because every turn carries file contents and tool calls, a single
+    debugging session can consume more than a full day of chat. To allow usage beyond the allowance,
+    enable usage credits and set limits at the organization, group, and individual level.
+  </p>
+
+  <p>
+    Console-authenticated organizations manage through the dedicated Claude Code workspace created
+    automatically on first authentication. Put a spend limit on it to cap the total, and use workspace
+    rate limits to keep Claude Code traffic from eating into the quotas of production API workloads.
+    Pull per-user numbers from the Console dashboard and the Claude Code Analytics API, and follow the
+    table in the official cost docs for TPM/RPM recommendations by organization size.
+  </p>
+
+  <h3>8.2 Bedrock and other cloud providers</h3>
+  <p>
+    Usage through a cloud provider does not appear in Anthropic's analytics dashboards, because Claude
+    Code sends no metrics to Anthropic. Pick per-user attribution from three options. OpenTelemetry
+    exported directly from the machine is the only way to stream per-user tokens and cost into your own
+    observability stack in near real time. The self-hosted Claude apps gateway provides per-user
+    attribution, OTLP metrics, and per-user spend limits together. An LLM gateway such as LiteLLM tracks
+    spend per key, but it is open source unaffiliated with Anthropic, so the security review is your
+    organization's responsibility.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - going through a gateway cuts cache efficiency</span>
+    <p>
+      Through a custom <span class="mono">ANTHROPIC_BASE_URL</span> or an LLM gateway, the system
+      context blocks Claude Code appends mid-conversation go out without cache markings and are billed
+      as <strong>uncached input on every request</strong>. The conversation's own cache breakpoints are
+      preserved, so the conversation cache survives only if the gateway passes them through as-is.
+      Tool search also does not work in gateway environments, so MCP tool definitions are loaded into
+      the prefix. Factor in how much cache efficiency you give up for the attribution you gain.
+    </p>
+  </div>
+
+  <p>
+    Beyond gateways, there are two more environments where tool search does not work: pre-4.5-generation
+    Claude models on the Agent Platform, and Azure-hosted Foundry deployments. On 4.5-generation-and-later
+    models on the Agent Platform, and on Bedrock, it works by default just like the Anthropic API. Where
+    tool search does not work, all MCP tool definitions are loaded into the prefix, so reducing the number
+    of connected servers directly reduces the prefix you have to cache.
+  </p>
+
+  <p>
+    Bedrock's prompt cache has a different minimum token count per checkpoint for each model. If the
+    prefix falls short of the minimum, the request succeeds but no cache is created — a silent failure.
+    Checkpoints number up to 4 per request and chain in the order <span class="mono">tools</span> &rarr;
+    <span class="mono">system</span> &rarr; <span class="mono">messages</span>, so changing an earlier
+    section invalidates the cache of the later sections too.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. Minimum cache checkpoint tokens per Claude model on Bedrock (as of 2026-08)</caption>
+      <thead>
+        <tr><th scope="col">Model</th><th scope="col">Minimum tokens</th><th scope="col">Supported TTL</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Claude Fable 5</td><td><span class="num">512</span></td><td>5 min, 1 hr</td></tr>
+        <tr><td>Claude Opus 5</td><td><span class="num">512</span></td><td>5 min, 1 hr</td></tr>
+        <tr><td>Claude Opus 4.8</td><td><span class="num">1,024</span></td><td>5 min, 1 hr</td></tr>
+        <tr><td>Claude Sonnet 5</td><td><span class="num">1,024</span></td><td>5 min, 1 hr</td></tr>
+        <tr><td>Claude Sonnet 4.6</td><td><span class="num">1,024</span></td><td>5 min, 1 hr</td></tr>
+        <tr><td>Claude Haiku 4.5</td><td><span class="num">4,096</span></td><td>5 min, 1 hr</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Values differ even within a generation. From Opus 4.5 through 4.7 it was 4,096 tokens, dropping to
+    1,024 tokens with Opus 4.8 and to 512 tokens with Opus 5 and Fable 5. Use the 1-hour TTL by
+    specifying <span class="mono">"ttl": "1h"</span> on the checkpoint.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - Bedrock usage aggregation and rate-limit accounting</span>
+    <p>
+      <span class="mono">inputTokens</span> in a Bedrock response reflects uncached input only. Total
+      input must be summed as <span class="mono">inputTokens + cacheReadInputTokens + cacheWriteInputTokens</span>;
+      omit that sum in a cost dashboard and usage is under-counted. Meanwhile, cache hits are not
+      deducted from the rate limit, so cache efficiency is throughput within the same TPM quota.
+    </p>
+  </div>
+
+  <p>
+    When developers ask about limits, start by classifying the situation. A "session limit" or
+    "weekly limit" message is the seat window: it cannot be dodged by switching with
+    <span class="mono">/model</span>; wait for the reset or use usage credits. A per-model message
+    such as "Opus limit" lets you keep working by switching to another model family. A spend-limit
+    message sent by the gateway is a cap set by the administrator, and an auto-compact warning is
+    context-management guidance, not a limit.
+  </p>
+</section>
+
+<!-- ===================== 09 ===================== -->
+<section class="sec" id="s9-en">
+  <h2><span class="no">09</span>Symptom-based summary and conclusion</h2>
+  <p>
+    One table of common symptoms with their causes and fixes. Most reduce to the two variables covered
+    in the earlier chapters: context size and cache hit ratio.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 5. Causes and fixes by symptom</caption>
+      <thead>
+        <tr><th scope="col">Symptom</th><th scope="col">Cause</th><th scope="col">Fix</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Heavy usage even on one-line questions</th>
+          <td>A session left open all day re-sends the full history every time</td>
+          <td><span class="mono">/clear</span> on every task switch; resume big old sessions from a summary</td>
+        </tr>
+        <tr>
+          <th scope="row">First turn after a break is slow and expensive</th>
+          <td>Cache lifetime exceeded, full reprocessing</td>
+          <td>Subscriptions get the 1-hour TTL automatically; on the API and Bedrock consider <span class="mono">ENABLE_PROMPT_CACHING_1H=1</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Creation tokens high every turn</th>
+          <td>Unstable prefix (model, effort, or tool configuration shifting)</td>
+          <td>Pin early in the session; check the <span class="mono">/usage</span> behavior flags</td>
+        </tr>
+        <tr>
+          <th scope="row">Cost up after adding MCP servers</th>
+          <td>Environments that preload tool definitions: third-party platforms, gateways</td>
+          <td>Check occupancy with <span class="mono">/context</span>; disable unused servers in <span class="mono">/mcp</span></td>
+        </tr>
+        <tr>
+          <th scope="row">Cache tokens are 0 on Bedrock</th>
+          <td>Below the model's minimum checkpoint tokens, or unsupported</td>
+          <td>Check Table 4 and model/region support in the AWS docs</td>
+        </tr>
+        <tr>
+          <th scope="row">Usage grows in idle sessions</th>
+          <td>Scheduled tasks, cross-session messages, goal check-ins</td>
+          <td>Hold/stop settings; close sessions you are not using</td>
+        </tr>
+        <tr>
+          <th scope="row">API/cloud bill larger than expected</th>
+          <td>Long uncleaned sessions, Opus left as the default</td>
+          <td>Make <span class="mono">/clear</span> a habit; default to Sonnet and step up only when needed</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Application order has priorities. Priority one is a measurement system. Without
+    <span class="mono">/usage</span>, <span class="mono">/context</span>, and a statusline, you cannot
+    verify the effect of any other action; for a Bedrock organization, OpenTelemetry or gateway
+    attribution plays the same role. Once measurement is in place, the rest is validated by data;
+    without it, everything stays guesswork.
+  </p>
+
+  <p>
+    Priority two is the context-hygiene habit. Just <span class="mono">/clear</span> on every task
+    switch and keeping CLAUDE.md at 200 lines closes the biggest waste paths. Priority three is
+    matching model and effort to the task, and priority four is protecting the cache by stopping
+    mid-session configuration changes. Restructuring with subagents, hooks, and skills is priority
+    five — a fixed investment to make after the earlier habits are in place; done before priorities
+    one through four, its effect cannot be measured.
+  </p>
+
+  <p>
+    The goal of saving is not to use less. It is to do the same work with a smaller context and a
+    higher cache hit ratio, and the result comes back as a lower bill together with faster responses.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="claude-code-token-optimization-guide-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="claude-code-token-optimization-guide-archmap.png" alt="Full interactive architecture map - what fills the context window and where the saving levers sit"></a>
+    <figcaption>Figure 3. Full view of the interactive architecture map. Click the image to open the <a href="claude-code-token-optimization-guide-archmap.html" target="_blank" rel="noopener">interactive version ↗</a> with node exploration, path tracing, and dark/light themes.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/costs">Manage costs effectively</a>
+      - Anthropic, Claude Code Docs (checked 2026-08-25)
+      <span class="url">https://code.claude.com/docs/en/costs</span>
+    </li>
+    <li>
+      <a href="https://code.claude.com/docs/en/prompt-caching">How Claude Code uses prompt caching</a>
+      - Anthropic, Claude Code Docs (checked 2026-08-25)
+      <span class="url">https://code.claude.com/docs/en/prompt-caching</span>
+    </li>
+  </ul>
+
+  <h3>Official documentation</h3>
+  <ul>
+    <li>
+      <a href="https://code.claude.com/docs/en/model-config">Model configuration</a>
+      - Anthropic, Claude Code Docs
+      <span class="url">https://code.claude.com/docs/en/model-config</span>
+    </li>
+    <li>
+      <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Prompt caching</a>
+      - Anthropic, Claude Platform Docs (includes the cache write/read rate table by TTL)
+      <span class="url">https://platform.claude.com/docs/en/build-with-claude/prompt-caching</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html">Prompt caching for faster model inference</a>
+      - AWS, Amazon Bedrock User Guide (per-model minimum token and TTL table)
+      <span class="url">https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html</span>
+    </li>
+  </ul>
+
+  <h3>Related blog</h3>
+  <ul>
+    <li>
+      <a href="https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything">Lessons from building Claude Code: Prompt caching is everything</a>
+      - Anthropic (design background of plan mode, deferred tool loading, and compaction)
+      <span class="url">https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-25.
+    This document is a technical analysis based on the official Claude Code documentation (code.claude.com) and the Amazon Bedrock User Guide.
+    Figures, defaults, commands, and environment variables reflect Claude Code v2.1.x at the time of writing; check the official docs above for the latest values.
+  </p>
+</footer>
+
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO / EN 두 페이지에 버튼이 하나씩 있으므로 전부 바인딩한다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
+  }
+  sync();
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 도 함께 보내 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
+  });
+})();
+</script>
+
+<!-- techblogs-codecopy: 코드블록 복사 버튼 (아이콘 전용, execCommand 폴백 포함) -->
+<script>
+(function () {
+  var CLIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+  function fallback(txt, cb) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = txt; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta); cb(ok);
+    } catch (e) { cb(false); }
+  }
+  function copyText(txt, cb) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { cb(true); },
+                                              function () { fallback(txt, cb); });
+    } else { fallback(txt, cb); }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".codeblock"), function (block) {
+    var pre = block.querySelector("pre");
+    if (!pre || block.querySelector(".code-copy")) return;
+    block.style.position = block.style.position || "relative";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy";
+    btn.setAttribute("aria-label", "코드 복사");
+    btn.innerHTML = CLIP;
+    block.appendChild(btn);
+    var t;
+    btn.addEventListener("click", function () {
+      copyText(pre.innerText, function (ok) {
+        btn.innerHTML = ok ? OK : CLIP;
+        btn.classList.toggle("copied", ok);
+        btn.setAttribute("aria-label", ok ? "복사됨" : "코드 복사");
+        clearTimeout(t);
+        t = setTimeout(function () {
+          btn.innerHTML = CLIP;
+          btn.classList.remove("copied");
+          btn.setAttribute("aria-label", "코드 복사");
+        }, 1600);
+      });
+    });
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+</body>
+</html>
