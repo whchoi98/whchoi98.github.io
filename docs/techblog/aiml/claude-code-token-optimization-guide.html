@@ -1264,8 +1264,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
   <p>
     클라우드 경유 사용은 Claude Code가 Anthropic으로 메트릭을 보내지 않으므로 Anthropic의
     분석 대시보드에 잡히지 않습니다. 사용자별 어트리뷰션은 세 가지 중에서 고릅니다.
-    머신에서 직접 내보내는 OpenTelemetry는 사용자별 토큰과 비용을 준실시간으로 자체 관측 스택에
-    흘리는 유일한 방법입니다. 셀프호스팅 Claude apps gateway는 사용자별 어트리뷰션, OTLP 메트릭,
+    머신에서 직접 내보내는 OpenTelemetry는 사용자별 토큰과 비용을 준실시간으로 자체 관측 스택에 보내는 유일한 방법입니다. 셀프호스팅 Claude apps gateway는 사용자별 어트리뷰션, OTLP 메트릭,
     사용자별 spend limit을 함께 제공합니다. LiteLLM 같은 LLM 게이트웨이는 키별 지출을 추적하지만
     Anthropic 비제휴 오픈소스이므로 보안 검토는 조직 역할입니다.
   </p>
@@ -1275,8 +1274,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
     <p>
       custom <span class="mono">ANTHROPIC_BASE_URL</span>이나 LLM 게이트웨이를 거치면 Claude Code가
       대화 중간에 덧붙이는 시스템 컨텍스트 블록이 캐시 마킹 없이 나가 <strong>매 요청 미캐시 입력</strong>으로
-      과금됩니다. 대화 자체의 캐시 breakpoint는 유지되므로, 게이트웨이가 이를 그대로 전달해야 대화
-      캐시가 삽니다. 게이트웨이 환경에서는 tool search도 동작하지 않아 MCP 도구 정의가 Prefix에
+      과금됩니다. 대화 자체의 캐시 breakpoint는 유지되므로, 게이트웨이가 이를 그대로 전달해야 대화 캐시를 사용할 수 있습니다. 게이트웨이 환경에서는 tool search도 동작하지 않아 MCP 도구 정의가 Prefix에
       로딩됩니다. 어트리뷰션을 얻는 대신 캐시 효율을 얼마나 내주는지 계산에 넣으세요.
     </p>
   </div>
