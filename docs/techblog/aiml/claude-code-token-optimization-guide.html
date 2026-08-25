@@ -889,9 +889,9 @@ When you are using compact, please focus on test output and code changes</code><
 
   <p>
     컴팩션 자체의 비용도 계산에 넣어야 합니다. 요약을 만드는 요청은 전체 대화를 프롬프트로 보내는
-    큰 요청입니다. 캐시가 따뜻할 때는 대부분 캐시 읽기로 처리되어 저렴하지만, 캐시 수명이 지난 뒤
+    큰 요청입니다. 캐시가 유지되는 동안은 대부분 캐시 읽기로 처리되어 저렴하지만, 캐시 수명이 지난 뒤
     (예를 들어 오래된 세션을 resume한 직후) 실행하면 전체를 재처리하는 가장 비싼 컴팩션이 됩니다.
-    auto-compact가 작업 한가운데서 터지기 전에, <strong>작업 사이의 휴지점</strong>에서 직접 실행하는 것이
+    auto-compact가 작업 한가운데서 터지기 전에, <strong>작업이 일단락된 지점</strong>에서 직접 실행하는 것이
     시점을 통제하는 방법입니다.
   </p>
 
@@ -1128,7 +1128,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
         <tr>
           <td>fast mode 첫 활성화</td>
           <td>요청 헤더가 캐시 키에 포함됨</td>
-          <td>쓸 거면 세션 초반에. 이후 on/off 토글은 캐시 유지</td>
+          <td>사용할 예정이면 세션 초반에. 이후 on/off 토글은 캐시 유지</td>
         </tr>
         <tr>
           <td>MCP 서버 연결/해제</td>
@@ -1143,12 +1143,12 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
         <tr>
           <td>도구 전체 deny 규칙 추가</td>
           <td>내장 도구 정의가 시스템 프롬프트에서 제거됨</td>
-          <td><span class="mono">Bash(rm *)</span> 같은 범위 규칙은 캐시에 무해</td>
+          <td><span class="mono">Bash(rm *)</span> 같은 범위 규칙은 캐시에 영향을 주지 않음</td>
         </tr>
         <tr>
           <td><span class="mono">/compact</span></td>
           <td>대화 이력이 요약으로 교체됨</td>
-          <td>휴지점에서, 캐시가 따뜻할 때 실행</td>
+          <td>작업이 일단락된 시점에, 캐시가 만료되기 전에 실행</td>
         </tr>
         <tr>
           <td>Claude Code 업그레이드</td>
@@ -1160,7 +1160,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
   </div>
 
   <p>
-    반대로 다음 행동들은 대화 끝에 내용을 덧붙이거나 요청 자체를 건드리지 않아서 캐시를 지킵니다.
+    반대로 다음 행동들은 대화 끝에 내용을 덧붙이거나 요청 자체를 건드리지 않아서 캐시를 유지합니다.
   </p>
 
   <ul class="plain">
@@ -1175,7 +1175,7 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
     <span class="callout-title">주의 - 업그레이드 직후의 긴 세션 resume이 가장 비쌉니다</span>
     <p>
       업그레이드 뒤에 세션을 resume하면 대화 이력 전체가 새 시스템 프롬프트 뒤에 놓여
-      캐시 적중 없이 재처리됩니다. 비용이 이력 길이에 비례하므로, 오래 굴린 큰 세션의 복귀
+      캐시 적용 없이 재처리됩니다. 비용이 이력 길이에 비례하므로, 오랫동안 유지한 큰 세션의 복귀
       첫 턴이 그 세션에서 가장 비싼 요청이 될 수 있습니다. 큰 세션은 업그레이드 전에 정리하거나
       요약에서 재개하는 쪽이 쌉니다.
     </p>
