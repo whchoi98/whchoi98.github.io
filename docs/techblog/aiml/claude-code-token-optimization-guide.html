@@ -898,7 +898,7 @@ When you are using compact, please focus on test output and code changes</code><
   <p>
     방향이 틀렸을 때는 컴팩션이 아니라 <span class="mono">/rewind</span>입니다. 대화를 이전 턴으로
     되돌리면 그 지점까지의 Prefix는 이미 캐시에 있으므로 다음 요청이 그대로 캐시에 적중합니다.
-    새 요약을 만들어 캐시를 다시 쌓는 컴팩션보다 되돌리기에는 훨씬 쌉니다.
+    새 요약을 만들어 캐시를 다시 쌓는 컴팩션보다 되돌리기가 훨씬 저렴합니다.
   </p>
 
   <figure class="diagram">
@@ -1247,9 +1247,8 @@ export CLAUDE_CODE_GOAL_CHECKIN_MINUTES=0  <span class="cm"># 유휴 중 goal �
 
   <h3>8.1 구독과 Console</h3>
   <p>
-    Teams와 Enterprise에서는 각 멤버가 5시간 롤링 윈도우와 주간 윈도우로 리셋되는 좌석 허용량을
-    씁니다. 이 허용량은 Claude 챗, Cowork과 공유되므로, 코딩 좌석은 챗 좌석보다 예산을 크게
-    잡아야 합니다. 턴마다 파일 내용과 도구 호출이 실리는 특성상 디버깅 세션 하나가 챗 하루치보다
+    Teams와 Enterprise에서는 각 멤버가 5시간 롤링 윈도우와 주간 윈도우로 리셋되는 좌석(Seat) 허용량을 사용합니다. 이 허용량은 Claude Chat, Cowork과 공유되므로, 코딩 좌석은 Chat 좌석보다 예산을 크게
+    잡아야 합니다. 턴마다 파일 내용과 도구 호출이 실리는 특성상 디버깅 세션 하나가 Chat 하루치보다
     많이 소모할 수 있습니다. 허용량을 넘긴 사용을 허용하려면 usage credits를 켜고 조직, 그룹,
     개인 단위로 한도를 겁니다.
   </p>
