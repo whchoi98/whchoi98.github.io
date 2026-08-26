@@ -172,6 +172,26 @@
     box.appendChild(pre);
   });
 
+  /* ---------- 조회수 (GoatCounter public counter) ---------- */
+  var vc = document.querySelector("[data-views]");
+  if (vc) {
+    var code = vc.getAttribute("data-goat-code");
+    var path = location.pathname;
+    fetch("https://" + code + ".goatcounter.com/counter/" + encodeURIComponent(path) + ".json")
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (d) {
+        var raw = String(d.count || "").replace(/[\s\u2009\u202f]/g, "");
+        var n = parseInt(raw, 10);
+        if (!isFinite(n)) return;
+        var txt = n.toLocaleString("en-US");
+        Array.prototype.forEach.call(vc.querySelectorAll("[data-views-n]"), function (el) {
+          el.textContent = txt;
+        });
+        vc.hidden = false;
+      })
+      .catch(function () { /* 계정 미생성/미공개/네트워크 실패 시 숨김 유지 */ });
+  }
+
   /* ---------- 글 목차 (h2 스크롤 스파이) ---------- */
   var article = document.getElementById("article");
   var tocAside = document.getElementById("toc-aside");

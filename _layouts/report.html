@@ -11,6 +11,7 @@ layout: default
       <a href="/"><span class="l-ko">홈</span><span class="l-en">Home</span></a> /
       {% if cat %}<a href="{{ cat.url }}">{{ page.category }}</a>{% else %}<a href="/tags/?tag={{ page.category | url_encode }}">{{ page.category }}</a>{% endif %} /
       <span>{% if page.title_en %}<span class="l-ko">{{ page.title }}</span><span class="l-en">{{ page.title_en }}</span>{% else %}{{ page.title }}{% endif %}</span>
+      {% if site.goatcounter %}<span class="view-count" data-views data-goat-code="{{ site.goatcounter }}" hidden><span class="l-ko">조회 <b data-views-n></b>회</span><span class="l-en"><b data-views-n></b> views</span></span>{% endif %}
     </div>
   </div>
 </header>

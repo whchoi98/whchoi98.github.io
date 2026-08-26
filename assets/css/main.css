@@ -383,3 +383,8 @@ html.dark .chip-lg.active { background: var(--orange); border-color: var(--orang
   .history-row { grid-template-columns: 1fr; gap: 4px; }
   .about-hero { flex-direction: column; align-items: flex-start; }
 }
+
+/* ---------- 조회수 (GoatCounter) - 색은 부모(crumb/meta-light) 상속 ---------- */
+.view-count { font-size: 12.5px; white-space: nowrap; opacity: .9; }
+.crumb .view-count { margin-left: 10px; }
+.view-count b { font-weight: 600; }

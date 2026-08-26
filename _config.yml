@@ -4,6 +4,7 @@ description: "AWS Solutions Architect's Tech Blog & Workshop - AIML, Container, 
 baseurl: ""
 url: "https://whchoi98.github.io"
 author: whchoi98
+goatcounter: whchoi98   # GoatCounter 사이트 코드 - 조회수 집계/표시
 github_username: whchoi98
 
 permalink: pretty

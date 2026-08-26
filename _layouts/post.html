@@ -13,6 +13,7 @@ layout: default
       <h1 class="post-hero-title">{% if page.title_en %}<span class="l-ko">{{ page.title }}</span><span class="l-en">{{ page.title_en }}</span>{% else %}{{ page.title }}{% endif %}</h1>
       <div class="post-hero-meta">
         <span class="meta-light">{{ page.date | date: "%Y.%m.%d" }} · {{ page.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> · {{ site.author }}</span>
+        {% if site.goatcounter %}<span class="view-count meta-light" data-views data-goat-code="{{ site.goatcounter }}" hidden>· <span class="l-ko">조회 <b data-views-n></b>회</span><span class="l-en"><b data-views-n></b> views</span></span>{% endif %}
         {% for t in page.tags %}<span class="chip chip-dark">{{ t }}</span>{% endfor %}
       </div>
     </div>

@@ -9,7 +9,7 @@
 | 경로 | 역할 |
 |------|------|
 | `css/main.css` | 전체 스타일 단일 파일. `:root` CSS 변수 + `html.dark` 오버라이드로 다크/라이트 테마 구현 |
-| `js/main.js` | 테마 토글(`data-theme-pick`), 언어 토글(`data-lang-pick`, `html.lang-en`), 홈 검색, 태그 필터, 글 목차. localStorage 키: `whchoi98-blog-theme`, `whchoi98-blog-lang` |
+| `js/main.js` | 테마 토글(`data-theme-pick`), 언어 토글(`data-lang-pick`, `html.lang-en`), 홈 검색, 태그 필터, 글 목차, 조회수(`[data-views]` - GoatCounter public counter JSON, 실패 시 hidden 유지). localStorage 키: `whchoi98-blog-theme`, `whchoi98-blog-lang` |
 | `icons/*.svg` | 카테고리 아이콘 (bedrock, lambda, vpc, eks, cloudwatch, database, analytics, step-functions, s3, ecs). `_config.yml` blog_categories의 `icon` 값과 파일명이 일치해야 한다 |
 | `reports/` | 사이트 크롬과 무관한 리포트 정적 자산 |
 
