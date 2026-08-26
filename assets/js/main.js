@@ -172,25 +172,26 @@
     box.appendChild(pre);
   });
 
-  /* ---------- 조회수 (GoatCounter public counter) ---------- */
-  var vc = document.querySelector("[data-views]");
-  if (vc) {
-    var code = vc.getAttribute("data-goat-code");
-    var path = location.pathname;
+  /* ---------- 조회수 (GoatCounter public counter) - 개별 페이지 + 사이트 전체(TOTAL) ---------- */
+  function goatCount(el, path) {
+    var code = el.getAttribute("data-goat-code");
     fetch("https://" + code + ".goatcounter.com/counter/" + encodeURIComponent(path) + ".json")
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then(function (d) {
-        var raw = String(d.count || "").replace(/[\s\u2009\u202f]/g, "");
-        var n = parseInt(raw, 10);
-        if (!isFinite(n)) return;
+        var n = parseInt(String(d.count || "").replace(/[\s\u2009\u202f]/g, ""), 10);
+        if (!isFinite(n) || n < 1) return;
         var txt = n.toLocaleString("en-US");
-        Array.prototype.forEach.call(vc.querySelectorAll("[data-views-n]"), function (el) {
-          el.textContent = txt;
+        Array.prototype.forEach.call(el.querySelectorAll("[data-views-n]"), function (b) {
+          b.textContent = txt;
         });
-        vc.hidden = false;
+        el.hidden = false;
       })
       .catch(function () { /* 계정 미생성/미공개/네트워크 실패 시 숨김 유지 */ });
   }
+  var vc = document.querySelector("[data-views]");
+  if (vc) goatCount(vc, location.pathname);
+  var vt = document.querySelector("[data-views-total]");
+  if (vt) goatCount(vt, "TOTAL");
 
   /* ---------- 글 목차 (h2 스크롤 스파이) ---------- */
   var article = document.getElementById("article");
