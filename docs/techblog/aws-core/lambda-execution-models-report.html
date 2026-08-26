@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Lambda는 이제 하나가 아니다 - 실행 모델 4종과 설정 축 전부 정리</title>
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aws-core/lambda-execution-models/">
+<!-- 본문 폰트. 기본은 Pretendard 동적 서브셋(가볍고 font-display:swap 포함).
+     나눔스퀘어로 바꾸려면 아래 link 를 교체하고 :root 의 --sans 도 함께 바꾼다.
+     자립형 단일 파일이 필요하면 scripts/embed_font.py 로 서브셋을 인라인한다.
+     세 가지 방식의 차이는 references/fonts.md 참고. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@2.0/nanumsquare.css"> -->
+
+<script>
+/* 첫 페인트 전에 테마를 확정해 깜빡임을 막는다. */
+(function () {
+  var KEY = "techblogs-theme", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var dark = saved
+    ? saved === "dark"
+    : !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+})();
+/* 첫 페인트 전에 언어를 확정한다. localStorage 와 ?lang= 파라미터를 읽고 기본은 ko. */
+(function () {
+  var KEY = "techblogs-lang", saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  try {
+    var q = new URLSearchParams(window.location.search).get("lang");
+    if (q === "en" || q === "ko") saved = q;
+  } catch (e) {}
+  document.documentElement.setAttribute("data-lang", saved === "en" ? "en" : "ko");
+})();
+</script>
+<style>
+:root {
+  --paper: #ffffff;
+  --paper-2: #f5f6f8;
+  --ink: #1c232b;
+  --ink-2: #48535f;
+  --muted: #6b7684;
+  --line: #dde2e8;
+  --line-strong: #c2cad2;
+  --navy: #232f3e;
+  --accent: #c2540a;
+  --accent-bg: #fdf4ec;
+  --note-bg: #f2f5f8;
+  --code-bg: #f4f6f8;
+  --link: #0f5c8c;
+  --sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", -apple-system, sans-serif;
+  /* 나눔스퀘어로 전환할 때 위 줄을 주석 처리하고 아래 줄을 활성화한다. */
+  /* --sans: "NanumSquare", "NanumSquareOTF", "Pretendard Variable", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif; */
+  --mono: ui-monospace, "SF Mono", "D2Coding", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- Dark theme ----------
+   토큰 이름은 라이트 기준으로 지어졌지만 역할로 읽는다.
+   --navy = 제목/구조 색, --accent = 위치와 경고. 다크에서는 값만 뒤집힌다.
+   여기 정의된 변수 목록은 :root 와 정확히 일치해야 한다. */
+html[data-theme="dark"] {
+  --paper: #161d26;
+  --paper-2: #1e2833;
+  --ink: #e2e4ec;
+  --ink-2: #a6abbe;
+  --muted: #7b8198;
+  --line: #2c3744;
+  --line-strong: #415061;
+  --navy: #eef1f6;
+  --accent: #ff9900;
+  --accent-bg: #2a2015;
+  --note-bg: #1c2631;
+  --code-bg: #10161e;
+  --link: #6cb8e6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.75;
+  border-top: 3px solid var(--navy);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 48px 28px 72px;
+}
+
+a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+a:hover { color: var(--navy); }
+a:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; border-radius: 2px; }
+
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: 0.86em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.4em;
+  white-space: nowrap;
+}
+strong { font-weight: 700; }
+
+/* ---------- Header ---------- */
+.doc-header { padding-bottom: 32px; border-bottom: 1px solid var(--line-strong); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+h1 {
+  font-size: clamp(25px, 4.2vw, 32px);
+  line-height: 1.35;
+  font-weight: 800;
+  color: var(--navy);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: 12px;
+  font-size: 16.5px;
+  color: var(--ink-2);
+  max-width: 44em;
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+  padding: 22px 26px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-2);
+  text-align: center;
+}
+.stat-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.stat-num {
+  font-size: 32px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  line-height: 1.2;
+}
+.stat-item.new .stat-num { color: var(--accent); }
+.stat-num .unit { font-size: 0.55em; font-weight: 600; margin-left: 2px; }
+.stat-sub { font-size: 12.5px; color: var(--muted); }
+.stat-arrow { font-size: 22px; color: var(--muted); }
+
+/* ---------- Meta ---------- */
+/* 라벨/값 표가 아니라 한 줄에 한 문장씩 놓는 산문 블록이다. */
+.meta { margin-top: 26px; }
+.meta p {
+  margin-top: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+.meta p + p { margin-top: 3px; }
+.meta .mono { font-size: 13px; }
+
+/* ---------- TL;DR ---------- */
+.tldr {
+  margin-top: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 20px 24px;
+  background: var(--note-bg);
+}
+.tldr h2 {
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--navy);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 0; padding: 0;
+}
+.tldr ul { list-style: none; }
+.tldr li {
+  padding-left: 18px;
+  position: relative;
+  margin-bottom: 10px;
+  font-size: 15px;
+  line-height: 1.7;
+}
+.tldr li:last-child { margin-bottom: 0; }
+.tldr li::before {
+  content: "";
+  position: absolute;
+  left: 2px; top: 0.72em;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--navy);
+}
+
+/* ---------- TOC ---------- */
+.toc {
+  margin-top: 36px;
+  padding: 20px 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.toc-title { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.06em; margin-bottom: 12px; }
+.toc ol {
+  list-style: none;
+  columns: 2;
+  column-gap: 40px;
+}
+.toc li { margin-bottom: 7px; font-size: 14.5px; break-inside: avoid; }
+.toc .no { font-size: 12.5px; font-weight: 600; color: var(--accent); margin-right: 8px; }
+.toc a { color: var(--ink); text-decoration: none; }
+.toc a:hover { color: var(--link); text-decoration: underline; }
+
+/* ---------- Sections ---------- */
+section.sec {
+  margin-top: 56px;
+  padding-top: 30px;
+  border-top: 1px solid var(--line);
+}
+
+h2 {
+  font-size: 21.5px;
+  font-weight: 750;
+  color: var(--navy);
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+h2 .no {
+  /* h3의 "2.1"과 동일하게 제목 텍스트의 폰트/크기/굵기를 상속받는다. */
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+h3 {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 34px;
+  line-height: 1.5;
+}
+h4 {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-top: 26px;
+}
+
+p { margin-top: 14px; }
+section.sec > p:first-of-type { margin-top: 18px; }
+
+ul.plain, ol.plain { margin-top: 12px; padding-left: 22px; }
+ul.plain li, ol.plain li { margin-bottom: 8px; padding-left: 4px; }
+ul.plain li::marker { color: var(--muted); }
+ol.plain li::marker { color: var(--accent); font-weight: 600; font-size: 0.9em; }
+
+.lead-def { color: var(--ink); }
+.lead-def b { color: var(--navy); }
+
+/* ---------- Tables ---------- */
+.tbl-wrap { margin-top: 18px; overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding-bottom: 8px;
+  font-family: var(--mono);
+}
+th, td {
+  border: 1px solid var(--line);
+  padding: 9px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+thead th {
+  background: var(--paper-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+td.num, td .num { font-family: var(--mono); font-size: 13px; }
+td code { white-space: normal; word-break: break-all; }
+tbody th {
+  background: var(--paper-2);
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---------- Code blocks ---------- */
+.codeblock { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.code-caption {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--line);
+  padding: 7px 14px;
+}
+.codeblock pre {
+  background: var(--code-bg);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.codeblock pre code { background: none; border: 0; padding: 0; font-size: inherit; white-space: pre; }
+.codeblock .cm { color: var(--muted); }
+/* techblogs-codecopy: 맥 터미널 스타일 코드블록 + 복사 버튼 */
+.codeblock { position: relative; }
+.code-caption { position: relative; padding-left: 60px; padding-right: 46px; }
+.code-caption::before {
+  content: ""; position: absolute; left: 14px; top: 50%; margin-top: -5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #ff5f56; box-shadow: 18px 0 0 #febc2e, 36px 0 0 #28c840;
+}
+.code-copy {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 24px; padding: 0; cursor: pointer;
+  color: var(--ink-2); background: var(--paper);
+  border: 1px solid var(--line); border-radius: 6px;
+  -webkit-appearance: none; appearance: none;
+}
+.code-copy:hover { color: var(--ink); border-color: var(--line-strong); }
+.code-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.code-copy svg { width: 15px; height: 15px; display: block; }
+.code-copy.copied { color: #28a35b; border-color: #28a35b; }
+@media print { .theme-bar { display: none; } .code-copy { display: none; } }
+
+
+/* ---------- Callouts ---------- */
+.callout {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.callout p { margin-top: 10px; }
+.callout p:first-of-type { margin-top: 0; }
+.callout-title {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+.callout.note { background: var(--note-bg); }
+.callout.note .callout-title { color: var(--navy); }
+.callout.warn { background: var(--accent-bg); }
+.callout.warn .callout-title { color: var(--accent); }
+
+/* ---------- Flow diagram ---------- */
+.flow { margin-top: 22px; }
+.fig-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.flow-box {
+  flex: 1 1 160px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--paper);
+}
+.flow-box.emph { border-color: var(--accent); background: var(--accent-bg); }
+.flow-label { font-size: 12.5px; color: var(--muted); }
+.flow-val { font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums; color: var(--navy); }
+.flow-box.emph .flow-val { color: var(--accent); }
+.flow-sep {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.flow figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+
+/* ---------- Theme toggle ---------- */
+.theme-bar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.theme-toggle:hover { color: var(--navy); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 14px; height: 14px; flex-shrink: 0; }
+/* 버튼은 "클릭하면 갈 곳"을 보여준다. */
+.theme-toggle .to-light { display: none; }
+[data-theme="dark"] .theme-toggle .to-dark { display: none; }
+[data-theme="dark"] .theme-toggle .to-light { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- Mermaid diagram ---------- */
+.diagram { margin-top: 22px; }
+.diagram .mermaid {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram .mermaid svg { max-width: 100%; height: auto; }
+.diagram figcaption {
+  margin-top: 12px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.65;
+}
+/* 렌더 전에는 원본 코드가 보이지 않게 감춘다. */
+html:not(.mermaid-ready) .diagram .mermaid { visibility: hidden; min-height: 150px; }
+/* CDN 로드 실패 시 코드를 그대로 보여주는 폴백. */
+.diagram .mermaid.failed {
+  visibility: visible;
+  text-align: left;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ---------- Static diagram (Eraser SVG 등) ----------
+   정적 내보내기는 테마를 따라가지 않으므로, 두 테마에서 모두 읽히도록
+   중성 흰 배경 위에 올린다. 색을 다크용으로 따로 관리하지 않는다. */
+.diagram.static .diagram-frame {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 16px 14px;
+  overflow-x: auto;
+  text-align: center;
+}
+.diagram.static svg,
+.diagram.static img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+/* ---------- References ---------- */
+.refs h3 { margin-top: 26px; font-size: 15px; color: var(--ink-2); }
+.refs ul { list-style: none; margin-top: 10px; }
+.refs li { margin-bottom: 12px; padding-left: 16px; position: relative; }
+.refs li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0.7em;
+  width: 5px; height: 5px;
+  background: var(--line-strong);
+}
+.refs .url {
+  display: block;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 1px;
+}
+
+/* ---------- Footer ---------- */
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line-strong);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .page { padding: 32px 18px 56px; }
+  .toc ol { columns: 1; }
+  .stat { gap: 14px; padding: 18px; }
+  .stat-num { font-size: 26px; }
+  th, td { padding: 8px 10px; }
+}
+
+/* ---------- Print ---------- */
+@media print {
+  body { border-top: none; font-size: 11.5pt; }
+  .theme-bar { display: none; }
+  .page { max-width: none; padding: 0; }
+  a { color: var(--ink); }
+  table, .callout, .codeblock, .flow, .stat, .diagram { break-inside: avoid; }
+  h2, h3, h4 { break-after: avoid; }
+  section.sec { margin-top: 36px; }
+}
+
+/* ---------- KO/EN page visibility ---------- */
+html[data-lang="en"] .page[data-lang="ko"] { display: none; }
+html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
+</style>
+</head>
+<body>
+<div class="page" data-lang="ko">
+
+<!-- ===================== Theme toggle =====================
+     문서 흐름 안에 두어 본문과 겹치지 않게 한다.
+     스크롤해도 계속 보이게 하려면 .theme-bar 를 position: fixed 로 바꾼다. -->
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="다크 모드로 전환">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      다크
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      라이트
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">EN</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AWS LAMBDA / FEATURE ANALYSIS</p>
+  <h1>Lambda는 이제 하나가 아니다 - 실행 모델 4종과 설정 축 전부 정리</h1>
+  <p class="subtitle">
+    AWS Lambda는 이제 단일 실행 모델이 아니라 Functions, Managed Instances, Durable Functions, MicroVMs
+    네 가지 컴퓨트 프리미티브의 묶음입니다. 실행 모델 4종을 1층, 기본 함수 내부의 설정 축을 2층으로 나누어
+    2026-08 기준으로 정리합니다.
+  </p>
+
+  <div class="stat" role="img" aria-label="실행 한도 대비: 기본 Lambda Functions는 15분, Durable Functions는 최대 1년">
+    <div class="stat-item old">
+      <span class="stat-num">15<span class="unit">분</span></span>
+      <span class="stat-sub">기본 Lambda Functions 실행 한도</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">1<span class="unit">년</span></span>
+      <span class="stat-sub">Durable Functions 최대 실행 한도</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>01. 작성 기준일 - 2026-08-26</p>
+    <p>02. 적용 대상 - AWS Lambda로 서버리스 워크로드를 설계하거나 운영하는 팀</p>
+    <p>03. 문서 범위 - 실행 모델 4종과 기본 함수 설정 축, 2026-08 기준</p>
+    <p>04. 주 출처 - AWS 공식 문서(quotas, Managed Instances, Durable Functions)와 Compute Blog(2026-07-10)</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title">
+  <h2 id="tldr-title">요약</h2>
+  <ul>
+    <li>
+      Lambda는 이제 하나의 실행 모델이 아닙니다. 기본 Functions에 Managed Instances, Durable Functions,
+      MicroVMs가 더해져 <strong>실행 모델 4종</strong>의 묶음이 되었고, 실행 한도는 15분에서 최대 1년까지 벌어졌습니다.
+    </li>
+    <li>
+      Managed Instances는 고객 소유 EC2 인스턴스에서 freeze 없이 여러 호출을 동시에 처리합니다.
+      타임아웃이 나도 <strong>코드가 강제 종료되지 않으므로</strong> 기존 함수를 그대로 옮기면
+      중복 쓰기나 중복 알림 같은 부작용이 생길 수 있습니다.
+    </li>
+    <li>
+      Durable Functions는 체크포인트와 replay로 최대 1년짜리 워크플로를 Lambda 안에서 실행하고,
+      MicroVMs는 Firecracker를 직접 노출해 HTTPS/WebSocket/gRPC로 접속하는 최대 8시간 샌드박스를 제공합니다.
+    </li>
+    <li>
+      선택 기준은 워크로드 성격입니다. 이벤트 단발 처리는 Functions, 상시 활성 병렬 처리는 Managed Instances,
+      장기 워크플로는 Durable Functions, 사용자/AI 생성 코드 격리는 MicroVMs를 선택합니다.
+    </li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="목차">
+  <p class="toc-title">목차</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1">실행 모델 4종 한눈에</a></li>
+    <li><span class="no">02</span><a href="#s2">Lambda Managed Instances</a></li>
+    <li><span class="no">03</span><a href="#s3">Lambda Durable Functions</a></li>
+    <li><span class="no">04</span><a href="#s4">Lambda MicroVMs</a></li>
+    <li><span class="no">05</span><a href="#s5">기본 Lambda Functions의 설정 축</a></li>
+    <li><span class="no">06</span><a href="#s6">선택 가이드와 운영 주의</a></li>
+    <li><span class="no">--</span><a href="#refs">참고 자료</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1">
+  <h2><span class="no">01</span>실행 모델 4종 한눈에</h2>
+  <p>
+    2026년 8월 현재 Lambda라는 이름 아래에는 서로 다른 실행 모델 네 가지가 있습니다.
+    우리가 알던 호출당 실행 모델은 이제 그중 하나인 Lambda Functions이고,
+    나머지 셋은 실행 단위와 격리 수준 자체가 다릅니다.
+    이 섹션은 네 모델을 한 표로 비교하고, 어느 모델에서 시작할지 판단하는 분기를 제시합니다.
+  </p>
+  <p>
+    네 모델은 무엇이 얼마나 다를까요?
+    표 1은 실행 단위, 최대 지속 시간, 격리, 상태 유지, 주 용도 다섯 축으로 차이를 요약합니다.
+    최대 지속 시간만 봐도 <strong>15분에서 최대 1년까지</strong> 벌어집니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 1. Lambda 실행 모델 4종 비교 (2026-08 기준)</caption>
+      <thead>
+        <tr>
+          <th scope="col">모델</th>
+          <th scope="col">실행 단위</th>
+          <th scope="col">최대 지속</th>
+          <th scope="col">격리</th>
+          <th scope="col">상태 유지</th>
+          <th scope="col">주 용도</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Lambda Functions (기본)</th>
+          <td>호출(invocation)</td>
+          <td><span class="num">15분</span></td>
+          <td>Firecracker microVM (관리형)</td>
+          <td>없음</td>
+          <td>이벤트 기반 단발 처리</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda Managed Instances</th>
+          <td>고객 소유 EC2 인스턴스</td>
+          <td>인스턴스 상주</td>
+          <td>컨테이너</td>
+          <td>환경 상주</td>
+          <td>상시 활성, 병렬 처리 워크로드</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda Durable Functions</th>
+          <td>durable execution</td>
+          <td><span class="num">최대 1년</span></td>
+          <td>기본 Lambda와 동일</td>
+          <td>체크포인트</td>
+          <td>다단계 워크플로, AI 오케스트레이션</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda MicroVMs</th>
+          <td>MicroVM 인스턴스</td>
+          <td><span class="num">8시간</span></td>
+          <td>VM 수준 (Firecracker 직접)</td>
+          <td>메모리, 디스크 스냅샷</td>
+          <td>사용자/AI 생성 코드 샌드박스</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Lambda Functions는 우리가 알던 Lambda입니다.
+    이벤트가 도착하면 호출 단위로 실행되고, 호출 사이에는 실행 환경이 freeze(일시 정지)됩니다.
+    격리는 Firecracker가 담당하는데, Firecracker는 Lambda의 격리 계층을 맡아 온 경량 microVM 가상화 기술입니다.
+  </p>
+  <p>
+    Lambda Managed Instances는 코드를 고객 소유 EC2 인스턴스에서 실행하고 Lambda는 운영만 담당합니다.
+    실행 환경이 freeze되지 않고 계속 활성 상태로 남으며, 한 환경 안에서 여러 호출이 동시에 실행됩니다.
+    상시 활성, 병렬 처리 워크로드가 대상이고 동작 차이는 섹션 02에서 자세히 다룹니다.
+  </p>
+  <p>
+    Lambda Durable Functions는 durable execution, 즉 체크포인트를 남기고 중단 지점부터 이어가는
+    실행 방식을 Lambda에 추가합니다.
+    체크포인트와 replay 메커니즘으로 하나의 실행이 최대 1년까지 이어집니다.
+    다단계 워크플로와 AI 오케스트레이션이 주 용도이며 섹션 03에서 다룹니다.
+  </p>
+  <p>
+    Lambda MicroVMs는 Firecracker를 프리미티브로 직접 노출합니다.
+    핸들러와 이벤트 모델이 아니라 MicroVM마다 부여되는 전용 HTTPS 엔드포인트에 직접 접속하는 방식이라
+    기존 Lambda와 사고방식 자체가 다릅니다.
+    사용자나 AI가 생성한 코드를 VM 수준으로 격리하는 샌드박스가 주 용도이며 섹션 04에서 다룹니다.
+  </p>
+
+  <p>
+    모델 선택의 출발점은 워크로드 성격입니다.
+    그림 1은 네 가지 대표 상황을 각 실행 모델로 잇는 분기를 보여줍니다.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q{"워크로드 성격은?"} -->|"이벤트 단발 처리"| F["Lambda Functions (최대 15분)"]
+  Q -->|"상시 활성, 병렬 처리"| MI["Managed Instances (인스턴스 상주)"]
+  Q -->|"장기 워크플로"| DF["Durable Functions (최대 1년)"]
+  Q -->|"코드 샌드박스"| MV["MicroVMs (최대 8시간, VM 격리)"]
+    </div>
+    <figcaption>
+      그림 1. 워크로드 성격에 따른 실행 모델 선택 분기.
+      이벤트 단발이면 기본 Functions에서 시작하고, 상시 병렬 처리, 장기 워크플로,
+      코드 샌드박스일 때만 나머지 모델로 넘어갑니다.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2">
+  <h2><span class="no">02</span>Lambda Managed Instances</h2>
+  <p>
+    Managed Instances는 코드를 고객 소유 EC2 인스턴스에서 실행하고 운영은 Lambda가 담당하는 모델입니다.
+    같은 함수 코드를 올려도 실행 환경의 동작이 기본 Lambda와 근본적으로 다릅니다.
+    이 섹션은 그 동작 차이와, 기존 함수를 그대로 옮길 때 걸리는 함정을 정리합니다.
+  </p>
+
+  <h3>2.1 freeze가 없고, 한 환경이 여러 호출을 동시에 처리합니다</h3>
+  <p>
+    기본 Lambda는 호출이 끝나면 실행 환경을 freeze하지만, Managed Instances의 실행 환경은
+    freeze 없이 계속 활성 상태로 남습니다.
+    호출 사이에도 실행 환경이 멈추지 않고 계속 동작한다는 뜻입니다.
+  </p>
+  <p>
+    호출 처리 방식도 다릅니다. 한 실행 환경 안에서 여러 호출이 런타임 워커별로 동시에 실행됩니다.
+    실행 환경 1개가 동시 호출 1건을 처리한다는 기본 Lambda의 등식이 여기서는 성립하지 않습니다.
+  </p>
+  <p>
+    타임아웃은 호출별로 독립 적용됩니다.
+    한 호출이 타임아웃되어도 같은 환경의 다른 호출은 영향 없이 계속 실행됩니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 타임아웃이 나도 코드는 종료되지 않습니다</span>
+    <p>
+      Managed Instances에서 호출이 타임아웃되면 Lambda는 호출자에게 에러를 반환하지만,
+      <strong>코드는 강제 종료되지 않고 백그라운드에서 계속 실행됩니다.</strong>
+      코드에서 <span class="mono">context</span>의 잔여 시간을 직접 확인해 중단하지 않으면,
+      이미 실패로 처리된 호출이 뒤늦게 완료되어 중복 쓰기나 중복 알림 같은 부작용을 만듭니다.
+      기본 Lambda 함수를 마이그레이션할 때 반드시 인지해야 하는 차이입니다.
+    </p>
+  </div>
+
+  <h3>2.2 backpressure와 컨테이너 폐기 정책</h3>
+  <p>
+    과부하 상황의 동작도 다릅니다.
+    Managed Instances는 backpressure, 즉 처리 용량을 넘는 요청을 쌓아 두는 대신
+    앞단에서 거부하는 방식을 씁니다. 런타임 워커가 전부 바쁘면 신규 요청은 거부됩니다.
+  </p>
+  <p>
+    에러 처리 정책도 단순합니다. 실행 환경에 에러가 나면 Lambda는 리셋이나 복구를 시도하지 않고
+    컨테이너를 폐기한 뒤 새것으로 교체합니다.
+    실행 환경 안에 상태를 오래 쌓아 두는 설계라면 이 폐기 정책을 전제로 해야 합니다.
+  </p>
+
+  <h3>2.3 한도와 스케일링</h3>
+  <p>
+    기본 Lambda와 한도는 어떻게 다를까요?
+    초기화는 최대 15분까지 허용되고, 파일 디스크립터 한도는 4,096개로 기본 Lambda의
+    1,024개보다 큽니다. 실행 환경 OS는 Bottlerocket 기반입니다.
+  </p>
+  <p>
+    스케일링은 최소/최대 실행 환경 제한 안에서 트래픽에 따라 자동으로 이루어지고,
+    유휴 시 0으로 축소하는 scale-to-zero도 지원합니다.
+    2026-05-12부터는 Amazon EventBridge Scheduler로 일회성 또는 반복 일정을 정의해
+    용량 한도를 사전에 조정하는 스케줄 기반 스케일링이 추가되었습니다.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3">
+  <h2><span class="no">03</span>Lambda Durable Functions</h2>
+  <p>
+    Durable Functions는 실행 도중 체크포인트를 남기고, 중단되면 그 지점부터 이어가는
+    durable execution을 Lambda 함수 안에 구현한 모델입니다.
+    이 메커니즘 덕분에 하나의 실행이 15분이 아니라 최대 1년까지 이어집니다.
+    이 섹션은 두 프리미티브와 결정론 요구, Step Functions와의 선택 기준, 한도를 정리합니다.
+  </p>
+
+  <h3>3.1 step과 wait, 그리고 replay</h3>
+  <p>
+    개발자가 쓰는 프리미티브는 두 개입니다.
+    <span class="mono">step</span>은 재시도와 진행 추적이 내장된 비즈니스 로직 단위이고,
+    <span class="mono">wait</span>는 과금 없이 실행을 중단해 두는 대기입니다.
+    긴 승인 대기나 외부 이벤트 대기를 <span class="mono">wait</span>로 처리하면
+    그 시간에는 요금이 발생하지 않습니다.
+  </p>
+  <p>
+    실행이 재개되면 코드는 처음부터 다시 실행됩니다.
+    다만 이미 완료된 <span class="mono">step</span>은 저장된 체크포인트 결과로 건너뛰는데,
+    이 재실행 방식을 replay라고 부릅니다.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">참고 - replay가 요구하는 결정론</span>
+    <p>
+      replay는 같은 코드를 다시 실행하면 같은 경로를 지나간다는 전제 위에 서 있습니다.
+      따라서 함수는 결정론적이어야 합니다.
+      실행할 때마다 값이 달라지는 로직이 섞이면 재개 시점의 실행 경로가 원래 실행과 달라질 수 있습니다.
+    </p>
+  </div>
+
+  <p>
+    SDK는 JavaScript, TypeScript, Python, Java 네 언어를 지원합니다.
+    워크플로를 별도 DSL이 아니라 이 언어들의 일반 코드로 그대로 쓴다는 점이 이 모델의 핵심입니다.
+  </p>
+
+  <h3>3.2 Step Functions와 어떻게 가를까</h3>
+  <p>
+    다단계 워크플로에는 이미 Step Functions가 있습니다. 언제 무엇을 쓸까요?
+    표 2는 두 선택지를 실행 위치, 정의 방식, 어울리는 상황으로 비교합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 2. Durable Functions와 Step Functions 선택 기준</caption>
+      <thead>
+        <tr>
+          <th scope="col">기준</th>
+          <th scope="col">Lambda Durable Functions</th>
+          <th scope="col">Step Functions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">실행 위치</th>
+          <td>Lambda 함수 안</td>
+          <td>독립 서비스</td>
+        </tr>
+        <tr>
+          <th scope="row">워크플로 정의</th>
+          <td>일반 프로그래밍 언어 코드</td>
+          <td>그래프 DSL, 비주얼 디자이너</td>
+        </tr>
+        <tr>
+          <th scope="row">어울리는 경우</th>
+          <td>워크플로가 비즈니스 로직과 밀결합일 때</td>
+          <td>220개 이상 서비스 통합과 무보수 운영이 필요할 때</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>3.3 한도 - 상향 불가 항목이 설계 기준입니다</h3>
+  <p>
+    한도는 세 가지만 기억하면 됩니다.
+    리전당 실행은 500만 건이고, 버지니아, 오레곤, 아일랜드 리전은 1,000만 건입니다.
+    실행당 durable operation은 3,000개, 실행당 영속 데이터는 100MB이며
+    <strong>이 두 한도는 상향 신청이 불가능합니다.</strong>
+  </p>
+  <p>
+    상향 불가 한도는 운영이 아니라 설계 단계의 제약입니다.
+    durable operation 수가 3,000개에 다가가는 워크플로라면 실행 분할을 설계에서 고려해야 합니다.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4">
+  <h2><span class="no">04</span>Lambda MicroVMs</h2>
+  <p>
+    MicroVMs는 Lambda의 격리 계층이던 Firecracker를 프리미티브로 직접 노출하는 모델입니다.
+    AWS Compute Blog가 2026-07-10에 발표했고, 핸들러와 이벤트라는 기존 Lambda의 사고방식이
+    여기서는 적용되지 않습니다.
+    MicroVM마다 전용 HTTPS 엔드포인트가 부여되고, 애플리케이션에 HTTPS, WebSocket, gRPC로 직접 접속합니다.
+  </p>
+
+  <h3>4.1 Dockerfile에서 스냅샷까지</h3>
+  <p>
+    배포 파이프라인은 Dockerfile에서 출발합니다.
+    Dockerfile로 이미지를 정의하면 빌드, 앱 초기화, 스냅샷 생성까지 Lambda가 수행합니다.
+    실행 시에는 이 스냅샷에서 부팅하므로 의존성이 모두 로드된 상태로 즉시 시작됩니다.
+  </p>
+  <p>
+    실행 중인 MicroVM은 idle 정책에 따라 자동으로 suspend됩니다.
+    suspend 동안에는 메모리와 디스크 상태가 보존된 채 스토리지 요금만 발생하고,
+    다시 필요해지면 자동으로 resume됩니다.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 스냅샷은 모든 MicroVM이 공유합니다</span>
+    <p>
+      이미지에 포함된 값은 그 스냅샷에서 부팅하는 모든 MicroVM이 그대로 공유합니다.
+      고유 ID, 시크릿, 랜덤 시드는 이미지에 넣지 말고 <strong>MicroVM 시작 후에 생성해야 하며</strong>,
+      자격증명과 네트워크 연결도 시작 후에 재수립해야 합니다.
+      이 처리는 lifecycle hook에서 수행합니다.
+    </p>
+  </div>
+
+  <h3>4.2 리소스, 과금, 네트워크</h3>
+  <p>
+    리소스는 어디까지 쓸 수 있을까요?
+    기본은 메모리 2GB에 1vCPU이고, 베이스라인은 최대 8GB/4vCPU까지 설정할 수 있습니다.
+    부하가 오르면 베이스라인의 4배까지 자동 수직 확장되어 피크 기준 32GB/16vCPU에 이릅니다.
+  </p>
+  <p>
+    메모리와 vCPU 비율은 2:1로 고정이고 아키텍처는 ARM64입니다.
+    과금은 baseline-plus-consumption 방식입니다.
+    베이스라인 용량을 평균 사용량에 맞춰 두고, 이를 넘는 초과분은 실제로 사용할 때만 과금됩니다.
+  </p>
+  <p>
+    네트워크 연결은 방향에 따라 두 기능으로 나뉩니다.
+    MicroVM에서 VPC로 나가는 아웃바운드는 Lambda Network Connector(LNC)라는 신규 리소스로 연결합니다.
+    반대로 VPC에서 MicroVM으로 들어오는 인바운드는 AWS PrivateLink를 지원해(2026-08-25 발표)
+    MicroVM API 호출과 각 MicroVM의 HTTPS 엔드포인트 접속을 퍼블릭 인터넷 노출 없이 수행할 수 있습니다.
+  </p>
+
+  <h3>4.3 용도와 한도</h3>
+  <p>
+    주 용도는 사용자나 AI가 생성한 코드를 VM 수준으로 격리해 실행하는 샌드박스입니다.
+    브라우저 IDE, 노트북, AI 코딩 에이전트 샌드박스, 취약점 스캐너, CI/CD 격리 환경이 대표 사례이고,
+    Claude Managed Agents의 self-hosted sandbox provider로도 사용할 수 있습니다.
+  </p>
+  <p>
+    한도는 지속 시간과 총량 양쪽에 있습니다. MicroVM 하나의 최대 지속 시간은 8시간입니다.
+    계정과 리전당 총 메모리는 400GB(버지니아, 오레곤, 오하이오, 도쿄는 1,024GB)에 4배 버스트가 가능하고,
+    이미지는 100개, 이미지당 버전은 50개까지입니다.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5">
+  <h2><span class="no">05</span>기본 Lambda Functions의 설정 축</h2>
+  <p>
+    1층에서 실행 모델을 골랐다면, 2층은 기본 Lambda Functions 내부의 설정 축입니다.
+    같은 Functions 모델이라도 패키징, 호출 형태, 동시성, 리소스의 조합에 따라 동작과 한도가 달라집니다.
+    이 섹션은 그 축들을 quotas 문서의 수치와 함께 정리합니다.
+  </p>
+
+  <h3>5.1 패키징, 스토리지, 런타임, 아키텍처</h3>
+  <p>
+    코드를 어떤 형태로 만들어 무엇 위에서 실행할지 정하는 축부터 봅니다.
+    표 3은 네 축의 선택지와 한도를 요약합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 3. 패키징, 스토리지, 런타임, 아키텍처 축 요약</caption>
+      <thead>
+        <tr>
+          <th scope="col">축</th>
+          <th scope="col">선택지</th>
+          <th scope="col">한도와 비고</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">패키징 - zip</th>
+          <td>zip 아카이브 업로드</td>
+          <td>압축 <span class="num">50MB</span>(API/콘솔 직접 업로드), 압축 해제 <span class="num">250MB</span>(레이어와 커스텀 런타임 포함). 초과 시 S3 경유</td>
+        </tr>
+        <tr>
+          <th scope="row">패키징 - 컨테이너</th>
+          <td>컨테이너 이미지</td>
+          <td>비압축 <span class="num">10GB</span>, Amazon ECR에 저장</td>
+        </tr>
+        <tr>
+          <th scope="row">코드 스토리지</th>
+          <td>Lambda 관리형 스토리지</td>
+          <td>리전당 <span class="num">300GB</span>, 상향 불가. 초과가 예상되면 자체 관리 S3로 전환</td>
+        </tr>
+        <tr>
+          <th scope="row">런타임</th>
+          <td>관리형 5계열 + OS-only</td>
+          <td>Node.js, Python, Java, .NET, Ruby와 provided.al2023(커스텀 런타임용). Node.js 26과 Python 3.15는 퍼블릭 프리뷰</td>
+        </tr>
+        <tr>
+          <th scope="row">아키텍처</th>
+          <td>x86_64 / arm64</td>
+          <td>arm64는 Graviton2 프로세서. 지원 런타임 전체가 두 아키텍처를 모두 지원</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    퍼블릭 프리뷰 런타임에는 단서가 있습니다.
+    Node.js 26과 Python 3.15는 Lambda SLA와 AWS 기술 지원 플랜의 보장 대상이 아니며,
+    AWS는 프로덕션 워크로드 사용을 금지한다고 명시합니다(2026-08-25 발표).
+  </p>
+
+  <h3>5.2 호출 형태 5종 - 입구가 페이로드 한도를 정합니다</h3>
+  <p>
+    같은 함수라도 어떤 입구로 호출하느냐에 따라 페이로드 한도와 실패 처리 방식이 달라집니다.
+    입구는 크게 다섯 가지입니다.
+  </p>
+  <ul class="plain">
+    <li>
+      동기(RequestResponse) - 호출자가 응답을 기다리는 방식입니다.
+      요청과 응답 페이로드는 각 6MB까지입니다.
+    </li>
+    <li>
+      비동기(Event) - 페이로드는 1MB이고 Lambda가 기본 2회 재시도합니다.
+      최종 실패 시 이벤트를 DLQ(Dead Letter Queue) 또는 on-failure destination으로 보냅니다.
+    </li>
+    <li>
+      이벤트 소스 매핑 - 이벤트 폴러(event poller)라는 Lambda 측 리소스가 소스를 폴링해 함수를 호출합니다.
+      지원 소스는 SQS, Kinesis, DynamoDB, MSK, Amazon MQ, self-managed Apache Kafka, Amazon DocumentDB 7종입니다.
+    </li>
+    <li>
+      응답 스트리밍 - 응답을 최대 200MB까지 스트리밍합니다.
+      첫 6MB는 대역폭 제한이 없고 이후 2MBps로 제한됩니다.
+    </li>
+    <li>
+      Function URL과 Lambda@Edge - Function URL은 함수에 부여되는 전용 HTTP(S) 엔드포인트로,
+      퍼블릭 인터넷 전용이라 PrivateLink를 지원하지 않습니다. Lambda@Edge는 CloudFront와 함께 동작합니다.
+    </li>
+  </ul>
+
+  <h3>5.3 동시성 3종과 스케일링 속도</h3>
+  <p>
+    트래픽이 몰리면 함수는 얼마나 많이, 얼마나 빨리 늘어날 수 있을까요?
+    표 4는 동시성 3종과 스케일링 속도를 요약합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 4. 동시성 3종과 스케일링 속도</caption>
+      <thead>
+        <tr>
+          <th scope="col">항목</th>
+          <th scope="col">기본값과 한도</th>
+          <th scope="col">비고</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">온디맨드 동시성</th>
+          <td class="num">리전당 기본 1,000</td>
+          <td>수만 단위까지 상향 요청 가능</td>
+        </tr>
+        <tr>
+          <th scope="row">예약 동시성 (reserved)</th>
+          <td class="num">기본 최대 900</td>
+          <td>특정 함수 전용 몫을 확보. 100은 항상 unreserved로 남음. 추가 요금 없음</td>
+        </tr>
+        <tr>
+          <th scope="row">프로비저닝드 동시성 (provisioned)</th>
+          <td>초당 호출 한도 = 동시성 할당량의 10배</td>
+          <td>10배 규칙은 계정 레벨과 온디맨드에도 동일 적용</td>
+        </tr>
+        <tr>
+          <th scope="row">스케일링 속도</th>
+          <td class="num">10초당 실행 환경 1,000개</td>
+          <td>함수별로 적용</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    콜드 스타트를 줄이는 축으로는 SnapStart가 있습니다.
+    함수 버전을 게시할 때 초기화를 미리 수행해 실행 환경의 메모리와 디스크 상태를
+    Firecracker microVM 스냅샷으로 캡처해 두고, 첫 호출과 스케일업 시 그 스냅샷에서 재개(resume)하는 방식입니다.
+    Java 11, Python 3.12, .NET 8 이상의 관리형 런타임만 지원하고, Java는 추가 비용이 없지만
+    Python과 .NET은 스냅샷 캐싱과 복원 요금이 발생합니다.
+  </p>
+
+  <h3>5.4 리소스 한도 - 메모리가 CPU와 대역폭을 정합니다</h3>
+  <p>
+    Lambda Functions에는 CPU를 따로 설정하는 항목이 없습니다.
+    메모리를 128MB에서 10,240MB까지 1MB 단위로 설정하면 CPU가 비례해 붙고,
+    1,769MB에서 vCPU 1개 상당이 됩니다.
+    타임아웃은 최대 900초이고, 임시 스토리지 /tmp는 512MB에서 10,240MB까지입니다.
+  </p>
+  <p>
+    네트워크 대역폭은 어디까지 늘어날까요?
+    기본은 625Mbps인데, VPC에 연결하지 않은 함수는 Service Quotas에서
+    "Network bandwidth per execution environment" 할당량 상향을 요청할 수 있습니다.
+    활성화되면 2GB에서 625Mbps를 시작으로 메모리에 비례해 늘어나
+    10,240MB에서 최대 3,000Mbps에 이릅니다(2026-08-05 발표).
+  </p>
+
+  <h3>5.5 네트워크, Layers, 권한, 기타 한도</h3>
+  <p>
+    네트워크 축은 VPC 연결 여부로 갈립니다.
+    VPC 연결 함수는 ENI(Elastic Network Interface)를 사용하는데,
+    ENI는 VPC당 500개이고 이 한도를 EFS 등 다른 서비스와 공유합니다.
+    앞서 본 MicroVMs가 LNC라는 별도 리소스로 VPC에 나가는 것과 달리 기본 함수는 ENI 방식입니다.
+  </p>
+  <p>
+    확장과 권한 축도 한도가 있습니다.
+    Layers는 함수당 최대 5개이고 Extensions를 지원합니다.
+    리소스 기반 정책은 20KB이며, 2026-08-25부터는 단일 정책 문서에 여러 principal과 action을 담고
+    IAM condition key 전체를 쓸 수 있는 완전한 IAM 리소스 기반 정책이 지원됩니다.
+  </p>
+  <p>
+    나머지 한도는 숫자만 기억해 두면 됩니다.
+    환경 변수는 총 4KB, 파일 디스크립터와 프로세스/스레드는 각 1,024개입니다.
+    컨트롤 플레인 API는 합산 15 RPS이고, GetFunction(100 RPS)과 GetPolicy(15 RPS)는 별도 할당량입니다.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6">
+  <h2><span class="no">06</span>선택 가이드와 운영 주의</h2>
+  <p>
+    마지막으로 지금까지의 내용을 선택 기준과 운영 주의사항으로 접어 봅니다.
+    선택의 출발점은 워크로드가 이벤트 단발인지, 상시 병렬인지, 장기 워크플로인지, 코드 샌드박스인지입니다.
+    표 5는 대표 상황별로 어느 모델에서 시작할지 정리합니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 5. 상황별 실행 모델 선택 가이드</caption>
+      <thead>
+        <tr>
+          <th scope="col">상황</th>
+          <th scope="col">선택</th>
+          <th scope="col">이유</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>API 백엔드, 이벤트 기반 단발 처리</td>
+          <th scope="row">Lambda Functions</th>
+          <td>호출당 실행과 15분 한도로 충분한 대부분의 서버리스 워크로드</td>
+        </tr>
+        <tr>
+          <td>상시 활성 환경에서 여러 요청을 병렬 처리</td>
+          <th scope="row">Managed Instances</th>
+          <td>freeze 없이 동시 호출 처리. 타임아웃 시 코드 미종료 함정 주의</td>
+        </tr>
+        <tr>
+          <td>승인 대기가 낀 장기 다단계 워크플로, AI 오케스트레이션</td>
+          <th scope="row">Durable Functions</th>
+          <td>step/wait와 replay로 최대 1년. 워크플로가 비즈니스 로직과 밀결합일 때</td>
+        </tr>
+        <tr>
+          <td>220개 이상 서비스 통합, 무보수 운영이 우선</td>
+          <th scope="row">Step Functions</th>
+          <td>그래프 DSL과 비주얼 디자이너를 갖춘 독립 워크플로 서비스</td>
+        </tr>
+        <tr>
+          <td>사용자나 AI가 생성한 코드의 격리 실행</td>
+          <th scope="row">MicroVMs</th>
+          <td>VM 수준 격리와 스냅샷 부팅, 최대 8시간 세션</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 앞단 10,000 RPS, 뒷단 동시성 1,000의 미스매치</span>
+    <p>
+      API Gateway의 기본 스로틀은 10,000 RPS인데 Lambda의 기본 동시성은 리전당 1,000입니다.
+      기본값 그대로 조합하면 앞단이 뒷단보다 커서, 트래픽이 몰릴 때 API Gateway는 통과시키고
+      <strong>Lambda에서 스로틀링이 걸리는 병목</strong>이 생깁니다.
+      프로덕션 전에 Lambda 동시성 할당량을 예상 트래픽에 맞춰 상향해야 합니다.
+    </p>
+  </div>
+
+  <p>
+    할당량은 계정 상태에 따라서도 다릅니다.
+    신규 계정은 동시성과 메모리 할당량이 축소된 상태로 시작하고, 사용량이 늘어나면 AWS가 자동으로 상향합니다.
+    새 계정에서 부하 테스트가 예상보다 일찍 스로틀되면 이 축소 상태를 먼저 확인해야 합니다.
+  </p>
+
+  <p class="lead-def">
+    <b>결론:</b> 한 문장으로 요약하면, Lambda는 이제 단일 실행 모델이 아니라 Functions, Managed Instances,
+    Durable Functions, MicroVMs 네 가지 컴퓨트 프리미티브의 묶음이며, 서버리스 설계의 첫 질문은
+    "메모리를 얼마로 잡을까"가 아니라 "어느 실행 모델에서 시작할까"로 바뀌었습니다.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="lambda-execution-models-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="lambda-execution-models-archmap.png" alt="인터랙티브 아키텍처 맵 전체 이미지 - Lambda 실행 모델 4종의 구조와 접속 경로"></a>
+    <figcaption>그림 2. 인터랙티브 아키텍처 맵 전체 보기. 이미지를 클릭하면 노드 탐색, 경로 추적, 다크/라이트 테마를 지원하는 <a href="lambda-execution-models-archmap.html" target="_blank" rel="noopener">인터랙티브 버전 ↗</a>이 열립니다.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs">
+  <h2><span class="no">--</span>참고 자료</h2>
+
+  <h3>1차 출처</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html">Lambda quotas</a>
+      - AWS 공식 문서 (본문 한도 수치의 기준)
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-execution-environment.html">Lambda Managed Instances execution environment</a>
+      - AWS 공식 문서
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-execution-environment.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html">Lambda Durable Functions</a>
+      - AWS 공식 문서
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/blogs/compute/announcing-lambda-microvms-serverless-compute-environments-with-vm-level-isolation-and-near-instant-startup/">Announcing Lambda MicroVMs: serverless compute environments with VM-level isolation and near-instant startup</a>
+      - AWS Compute Blog (2026-07-10)
+      <span class="url">https://aws.amazon.com/blogs/compute/announcing-lambda-microvms-serverless-compute-environments-with-vm-level-isolation-and-near-instant-startup/</span>
+    </li>
+  </ul>
+
+  <h3>What's New 발표 (본문 확인 완료)</h3>
+  <ul>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-full-iam-resource-based-policies/">AWS Lambda functions now support full IAM resource-based policies</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-full-iam-resource-based-policies/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-node-js-python-public-preview/">Node.js 26, Python 3.15 관리형 런타임 퍼블릭 프리뷰</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-node-js-python-public-preview/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-network-bandwidth/">Lambda 네트워크 대역폭 상향 (VPC 미연결 함수, 최대 3,000Mbps)</a>
+      - AWS What's New (2026-08-05)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-network-bandwidth/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/05/aws-lambda-managed-instances/">Lambda Managed Instances 스케줄 기반 스케일링</a>
+      - AWS What's New (2026-05-12)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/05/aws-lambda-managed-instances/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/lambda-microvms-supports-privatelink">AWS Lambda MicroVMs now supports AWS PrivateLink</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/lambda-microvms-supports-privatelink</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    작성 기준일: 2026-08-26.
+    본 문서는 AWS Lambda 공식 문서(quotas, Managed Instances, Durable Functions)와
+    AWS Compute Blog, What's New 발표를 기반으로 작성한 기술 분석 자료입니다.
+    수치와 기본값은 작성 시점 기준이며, 최신 값은 위 공식 문서에서 확인하세요.
+  </p>
+</footer>
+
+</div>
+
+<div class="page" data-lang="en">
+<div class="theme-bar">
+  <button type="button" class="theme-toggle" aria-pressed="false" aria-label="Switch to dark mode">
+    <span class="to-dark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+      </svg>
+      Dark
+    </span>
+    <span class="to-light">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>
+      </svg>
+      Light
+    </span>
+  </button>
+  <button type="button" class="theme-toggle lang-toggle" aria-label="Switch language">한국어</button>
+</div>
+
+<!-- ===================== Header ===================== -->
+<header class="doc-header">
+  <p class="eyebrow">AWS LAMBDA / FEATURE ANALYSIS</p>
+  <h1>Lambda Is No Longer One Thing - All Four Execution Models and Every Configuration Axis</h1>
+  <p class="subtitle">
+    AWS Lambda is no longer a single execution model but a bundle of four compute primitives:
+    Functions, Managed Instances, Durable Functions, and MicroVMs. This document organizes them
+    as of 2026-08 in two layers: the four execution models as layer 1, and the configuration axes
+    inside base functions as layer 2.
+  </p>
+
+  <div class="stat" role="img" aria-label="Execution limits compared: base Lambda Functions allow 15 minutes, Durable Functions up to 1 year">
+    <div class="stat-item old">
+      <span class="stat-num">15<span class="unit">min</span></span>
+      <span class="stat-sub">Base Lambda Functions execution limit</span>
+    </div>
+    <div class="stat-arrow" aria-hidden="true">&rarr;</div>
+    <div class="stat-item new">
+      <span class="stat-num">1<span class="unit">year</span></span>
+      <span class="stat-sub">Durable Functions maximum execution limit</span>
+    </div>
+  </div>
+
+  <div class="meta">
+    <p>01. Written as of - 2026-08-26</p>
+    <p>02. Audience - teams designing or operating serverless workloads on AWS Lambda</p>
+    <p>03. Scope - the four execution models and base function configuration axes, as of 2026-08</p>
+    <p>04. Primary sources - official AWS documentation (quotas, Managed Instances, Durable Functions) and the Compute Blog (2026-07-10)</p>
+  </div>
+</header>
+
+<!-- ===================== TL;DR ===================== -->
+<section class="tldr" aria-labelledby="tldr-title-en">
+  <h2 id="tldr-title-en">TL;DR</h2>
+  <ul>
+    <li>
+      Lambda is no longer a single execution model. With Managed Instances, Durable Functions, and
+      MicroVMs added to base Functions, it is now a bundle of <strong>four execution models</strong>,
+      and the execution limit spans from 15 minutes to up to 1 year.
+    </li>
+    <li>
+      Managed Instances run multiple invocations concurrently on customer-owned EC2 instances with no freeze.
+      Even on a timeout, <strong>your code is not forcibly terminated</strong>, so migrating an existing
+      function as-is can produce side effects such as duplicate writes or duplicate notifications.
+    </li>
+    <li>
+      Durable Functions use checkpoints and replay to run workflows of up to 1 year inside Lambda,
+      and MicroVMs expose Firecracker directly, providing sandboxes of up to 8 hours reachable over
+      HTTPS/WebSocket/gRPC.
+    </li>
+    <li>
+      The selection criterion is workload characteristics. Choose Functions for one-shot event processing,
+      Managed Instances for always-on parallel processing, Durable Functions for long-running workflows,
+      and MicroVMs for isolating user- or AI-generated code.
+    </li>
+  </ul>
+</section>
+
+<!-- ===================== TOC ===================== -->
+<nav class="toc" aria-label="Table of contents">
+  <p class="toc-title">Contents</p>
+  <ol>
+    <li><span class="no">01</span><a href="#s1-en">The four execution models at a glance</a></li>
+    <li><span class="no">02</span><a href="#s2-en">Lambda Managed Instances</a></li>
+    <li><span class="no">03</span><a href="#s3-en">Lambda Durable Functions</a></li>
+    <li><span class="no">04</span><a href="#s4-en">Lambda MicroVMs</a></li>
+    <li><span class="no">05</span><a href="#s5-en">Configuration axes of base Lambda Functions</a></li>
+    <li><span class="no">06</span><a href="#s6-en">Selection guide and operational cautions</a></li>
+    <li><span class="no">--</span><a href="#refs-en">References</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<!-- ===================== 01 ===================== -->
+<section class="sec" id="s1-en">
+  <h2><span class="no">01</span>The four execution models at a glance</h2>
+  <p>
+    As of August 2026, four distinct execution models live under the Lambda name.
+    The per-invocation execution model we knew is now just one of them, Lambda Functions,
+    and the other three differ in their very execution unit and isolation level.
+    This section compares the four models in a single table and presents the branching
+    logic for deciding which model to start from.
+  </p>
+  <p>
+    How much do the four models differ, and in what?
+    Table 1 summarizes the differences along five axes: execution unit, maximum duration,
+    isolation, state retention, and primary use.
+    Maximum duration alone spans <strong>from 15 minutes to up to 1 year</strong>.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 1. The four Lambda execution models compared (as of 2026-08)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Model</th>
+          <th scope="col">Execution unit</th>
+          <th scope="col">Max duration</th>
+          <th scope="col">Isolation</th>
+          <th scope="col">State retention</th>
+          <th scope="col">Primary use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Lambda Functions (base)</th>
+          <td>Invocation</td>
+          <td><span class="num">15 min</span></td>
+          <td>Firecracker microVM (managed)</td>
+          <td>None</td>
+          <td>One-shot event-driven processing</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda Managed Instances</th>
+          <td>Customer-owned EC2 instance</td>
+          <td>Instance-resident</td>
+          <td>Container</td>
+          <td>Environment-resident</td>
+          <td>Always-on, parallel workloads</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda Durable Functions</th>
+          <td>Durable execution</td>
+          <td><span class="num">Up to 1 year</span></td>
+          <td>Same as base Lambda</td>
+          <td>Checkpoints</td>
+          <td>Multi-step workflows, AI orchestration</td>
+        </tr>
+        <tr>
+          <th scope="row">Lambda MicroVMs</th>
+          <td>MicroVM instance</td>
+          <td><span class="num">8 hours</span></td>
+          <td>VM-level (Firecracker directly)</td>
+          <td>Memory, disk snapshot</td>
+          <td>Sandbox for user/AI-generated code</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    Lambda Functions is the Lambda we knew.
+    When an event arrives, it runs per invocation, and between invocations the execution
+    environment is frozen (paused).
+    Isolation is handled by Firecracker, the lightweight microVM virtualization technology
+    that has served as Lambda's isolation layer.
+  </p>
+  <p>
+    Lambda Managed Instances runs your code on customer-owned EC2 instances while Lambda handles
+    only operations.
+    The execution environment is never frozen and stays active, and multiple invocations run
+    concurrently within a single environment.
+    It targets always-on, parallel workloads; the behavioral differences are covered in detail in section 02.
+  </p>
+  <p>
+    Lambda Durable Functions adds durable execution to Lambda - an execution style that leaves
+    checkpoints and resumes from the point of interruption.
+    With the checkpoint and replay mechanism, a single execution can last up to 1 year.
+    Multi-step workflows and AI orchestration are the primary uses, covered in section 03.
+  </p>
+  <p>
+    Lambda MicroVMs exposes Firecracker directly as a primitive.
+    Instead of the handler-and-event model, you connect directly to a dedicated HTTPS endpoint
+    assigned to each MicroVM, so the mental model itself differs from the Lambda we knew.
+    Its primary use is a sandbox that isolates user- or AI-generated code at the VM level,
+    covered in section 04.
+  </p>
+
+  <p>
+    The starting point for model selection is workload characteristics.
+    Figure 1 shows the branching that maps four representative situations to each execution model.
+  </p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q{"What is the workload like?"} -->|"One-shot event processing"| F["Lambda Functions (up to 15 min)"]
+  Q -->|"Always-on, parallel processing"| MI["Managed Instances (instance-resident)"]
+  Q -->|"Long-running workflow"| DF["Durable Functions (up to 1 year)"]
+  Q -->|"Code sandbox"| MV["MicroVMs (up to 8 hours, VM isolation)"]
+    </div>
+    <figcaption>
+      Figure 1. Execution model selection by workload characteristics.
+      Start from base Functions for one-shot events, and move to the other models only for
+      always-on parallel processing, long-running workflows, or code sandboxes.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ===================== 02 ===================== -->
+<section class="sec" id="s2-en">
+  <h2><span class="no">02</span>Lambda Managed Instances</h2>
+  <p>
+    Managed Instances is a model that runs your code on customer-owned EC2 instances while Lambda
+    handles operations.
+    Even with the same function code, the execution environment behaves fundamentally differently
+    from base Lambda.
+    This section lays out those behavioral differences and the traps you hit when migrating an
+    existing function as-is.
+  </p>
+
+  <h3>2.1 No freeze, and one environment handles multiple invocations concurrently</h3>
+  <p>
+    Base Lambda freezes the execution environment when an invocation ends, but a Managed Instances
+    execution environment stays active with no freeze.
+    That means the execution environment keeps running even between invocations.
+  </p>
+  <p>
+    Invocation handling also differs. Within one execution environment, multiple invocations run
+    concurrently, one per runtime worker.
+    Base Lambda's equation - one execution environment handles one concurrent invocation - does not
+    hold here.
+  </p>
+  <p>
+    Timeouts apply independently per invocation.
+    Even if one invocation times out, other invocations in the same environment keep running unaffected.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - your code is not terminated on timeout</span>
+    <p>
+      When an invocation times out on Managed Instances, Lambda returns an error to the caller, but
+      <strong>your code is not forcibly terminated and keeps running in the background.</strong>
+      Unless your code checks the remaining time on <span class="mono">context</span> and stops itself,
+      an invocation already treated as failed can complete late and produce side effects such as
+      duplicate writes or duplicate notifications.
+      This is a difference you must be aware of when migrating base Lambda functions.
+    </p>
+  </div>
+
+  <h3>2.2 Backpressure and the container disposal policy</h3>
+  <p>
+    Behavior under overload also differs.
+    Managed Instances uses backpressure: instead of queuing requests beyond its processing capacity,
+    it rejects them up front. When all runtime workers are busy, new requests are rejected.
+  </p>
+  <p>
+    The error handling policy is equally simple. When an execution environment errors, Lambda does
+    not attempt a reset or recovery; it discards the container and replaces it with a new one.
+    A design that accumulates long-lived state inside the execution environment must assume this
+    disposal policy.
+  </p>
+
+  <h3>2.3 Limits and scaling</h3>
+  <p>
+    How do the limits differ from base Lambda?
+    Initialization is allowed up to 15 minutes, and the file descriptor limit is 4,096, larger than
+    base Lambda's 1,024. The execution environment OS is based on Bottlerocket.
+  </p>
+  <p>
+    Scaling happens automatically with traffic within minimum/maximum execution environment bounds,
+    and scale-to-zero on idle is also supported.
+    Since 2026-05-12, schedule-based scaling has been added: you define one-time or recurring
+    schedules with Amazon EventBridge Scheduler to adjust capacity limits in advance.
+  </p>
+</section>
+
+<!-- ===================== 03 ===================== -->
+<section class="sec" id="s3-en">
+  <h2><span class="no">03</span>Lambda Durable Functions</h2>
+  <p>
+    Durable Functions is a model that implements durable execution inside a Lambda function:
+    it leaves checkpoints during execution and, if interrupted, resumes from that point.
+    Thanks to this mechanism, a single execution can last up to 1 year instead of 15 minutes.
+    This section covers the two primitives and the determinism requirement, the criteria for
+    choosing between this and Step Functions, and the limits.
+  </p>
+
+  <h3>3.1 step and wait, and replay</h3>
+  <p>
+    Developers use two primitives.
+    <span class="mono">step</span> is a unit of business logic with built-in retries and progress
+    tracking, and <span class="mono">wait</span> suspends execution without incurring charges.
+    Handle long approval waits or external event waits with <span class="mono">wait</span>,
+    and no charges accrue during that time.
+  </p>
+  <p>
+    When execution resumes, the code runs again from the beginning.
+    However, already-completed <span class="mono">step</span>s are skipped using their saved
+    checkpoint results - this re-execution style is called replay.
+  </p>
+
+  <div class="callout note">
+    <span class="callout-title">Note - the determinism that replay demands</span>
+    <p>
+      Replay rests on the premise that re-running the same code follows the same path.
+      The function must therefore be deterministic.
+      If logic that yields a different value on each run creeps in, the execution path at resume
+      time can diverge from the original execution.
+    </p>
+  </div>
+
+  <p>
+    The SDK supports four languages: JavaScript, TypeScript, Python, and Java.
+    The heart of this model is that you write workflows as plain code in these languages,
+    not in a separate DSL.
+  </p>
+
+  <h3>3.2 How to choose between this and Step Functions</h3>
+  <p>
+    Step Functions already exists for multi-step workflows. When do you use which?
+    Table 2 compares the two options by execution location, definition style, and the situations
+    each suits.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 2. Choosing between Durable Functions and Step Functions</caption>
+      <thead>
+        <tr>
+          <th scope="col">Criterion</th>
+          <th scope="col">Lambda Durable Functions</th>
+          <th scope="col">Step Functions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Execution location</th>
+          <td>Inside a Lambda function</td>
+          <td>Independent service</td>
+        </tr>
+        <tr>
+          <th scope="row">Workflow definition</th>
+          <td>Plain programming language code</td>
+          <td>Graph DSL, visual designer</td>
+        </tr>
+        <tr>
+          <th scope="row">Suits when</th>
+          <td>The workflow is tightly coupled with business logic</td>
+          <td>You need 220+ service integrations and hands-off operation</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>3.3 Limits - the non-raisable items are your design constraints</h3>
+  <p>
+    Only three limits need remembering.
+    Executions per region: 5 million, and 10 million in the Virginia, Oregon, and Ireland regions.
+    Durable operations per execution: 3,000; persistent data per execution: 100MB - and
+    <strong>these two limits cannot be raised.</strong>
+  </p>
+  <p>
+    Non-raisable limits are design-stage constraints, not operational ones.
+    A workflow whose durable operation count approaches 3,000 should consider execution splitting
+    at design time.
+  </p>
+</section>
+
+<!-- ===================== 04 ===================== -->
+<section class="sec" id="s4-en">
+  <h2><span class="no">04</span>Lambda MicroVMs</h2>
+  <p>
+    MicroVMs expose Firecracker - previously Lambda's isolation layer - directly as a primitive.
+    The AWS Compute Blog announced it on 2026-07-10, and the familiar Lambda mindset of
+    handlers and events does not apply here.
+    Each MicroVM is assigned a dedicated HTTPS endpoint, and you connect to the application
+    directly over HTTPS, WebSocket, or gRPC.
+  </p>
+
+  <h3>4.1 From Dockerfile to snapshot</h3>
+  <p>
+    The deployment pipeline starts from a Dockerfile.
+    Once you define the image with a Dockerfile, Lambda performs the build, app initialization,
+    and snapshot creation.
+    At run time it boots from this snapshot, so it starts instantly with all dependencies already loaded.
+  </p>
+  <p>
+    A running MicroVM is automatically suspended according to the idle policy.
+    While suspended, memory and disk state are preserved and only storage charges accrue;
+    when needed again, it resumes automatically.
+  </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - the snapshot is shared by every MicroVM</span>
+    <p>
+      Any value baked into the image is shared as-is by every MicroVM that boots from that snapshot.
+      Unique IDs, secrets, and random seeds must not go into the image - <strong>generate them after
+      the MicroVM starts</strong> - and credentials and network connections must also be re-established
+      after startup. Handle this in a lifecycle hook.
+    </p>
+  </div>
+
+  <h3>4.2 Resources, billing, and networking</h3>
+  <p>
+    How far do the resources go?
+    The default is 2GB of memory with 1 vCPU, and the baseline can be set up to 8GB/4vCPU.
+    Under load it scales vertically and automatically up to 4x the baseline,
+    reaching 32GB/16vCPU at peak.
+  </p>
+  <p>
+    The memory-to-vCPU ratio is fixed at 2:1 and the architecture is ARM64.
+    Billing is baseline-plus-consumption.
+    You set the baseline capacity to your average usage, and anything above it is billed
+    only when actually used.
+  </p>
+  <p>
+    Network connectivity splits into two features by direction.
+    Outbound traffic from a MicroVM into a VPC goes through a new resource called the
+    Lambda Network Connector (LNC).
+    Inbound traffic from a VPC into MicroVMs supports AWS PrivateLink (announced 2026-08-25),
+    so MicroVM API calls and connections to each MicroVM's HTTPS endpoint can be made
+    without public internet exposure.
+  </p>
+
+  <h3>4.3 Uses and limits</h3>
+  <p>
+    The primary use is sandboxes that run user- or AI-generated code with VM-level isolation.
+    Representative cases include browser IDEs, notebooks, AI coding agent sandboxes,
+    vulnerability scanners, and isolated CI/CD environments, and it can also serve as the
+    self-hosted sandbox provider for Claude Managed Agents.
+  </p>
+  <p>
+    Limits exist on both duration and totals. The maximum duration of a single MicroVM is 8 hours.
+    Total memory per account and region is 400GB (1,024GB in Virginia, Oregon, Ohio, and Tokyo)
+    with 4x burst, and you get up to 100 images and 50 versions per image.
+  </p>
+</section>
+
+<!-- ===================== 05 ===================== -->
+<section class="sec" id="s5-en">
+  <h2><span class="no">05</span>Configuration axes of base Lambda Functions</h2>
+  <p>
+    Once you have chosen an execution model on layer 1, layer 2 is the set of configuration axes
+    inside base Lambda Functions.
+    Even within the same Functions model, behavior and limits change with the combination of
+    packaging, invocation type, concurrency, and resources.
+    This section organizes those axes together with the figures from the quotas documentation.
+  </p>
+
+  <h3>5.1 Packaging, storage, runtimes, and architecture</h3>
+  <p>
+    Start with the axes that decide what shape your code takes and what it runs on.
+    Table 3 summarizes the options and limits along four axes.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 3. Packaging, storage, runtime, and architecture axes</caption>
+      <thead>
+        <tr>
+          <th scope="col">Axis</th>
+          <th scope="col">Options</th>
+          <th scope="col">Limits and notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Packaging - zip</th>
+          <td>zip archive upload</td>
+          <td>Compressed <span class="num">50MB</span> (direct API/console upload), uncompressed <span class="num">250MB</span> (including layers and custom runtimes). Go through S3 beyond that</td>
+        </tr>
+        <tr>
+          <th scope="row">Packaging - container</th>
+          <td>Container image</td>
+          <td>Uncompressed <span class="num">10GB</span>, stored in Amazon ECR</td>
+        </tr>
+        <tr>
+          <th scope="row">Code storage</th>
+          <td>Lambda-managed storage</td>
+          <td><span class="num">300GB</span> per region, cannot be raised. Switch to self-managed S3 if you expect to exceed it</td>
+        </tr>
+        <tr>
+          <th scope="row">Runtimes</th>
+          <td>5 managed families + OS-only</td>
+          <td>Node.js, Python, Java, .NET, Ruby, plus provided.al2023 (for custom runtimes). Node.js 26 and Python 3.15 are in public preview</td>
+        </tr>
+        <tr>
+          <th scope="row">Architecture</th>
+          <td>x86_64 / arm64</td>
+          <td>arm64 uses Graviton2 processors. All supported runtimes support both architectures</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    The public preview runtimes come with a caveat.
+    Node.js 26 and Python 3.15 are not covered by the Lambda SLA or AWS technical support plans,
+    and AWS explicitly prohibits their use for production workloads (announced 2026-08-25).
+  </p>
+
+  <h3>5.2 The five invocation types - the entry point sets the payload limit</h3>
+  <p>
+    Even for the same function, the payload limit and failure handling differ by which entry point
+    invokes it.
+    There are broadly five entry points.
+  </p>
+  <ul class="plain">
+    <li>
+      Synchronous (RequestResponse) - the caller waits for the response.
+      Request and response payloads are up to 6MB each.
+    </li>
+    <li>
+      Asynchronous (Event) - the payload is 1MB and Lambda retries twice by default.
+      On final failure, the event goes to a DLQ (Dead Letter Queue) or an on-failure destination.
+    </li>
+    <li>
+      Event source mapping - a Lambda-side resource called an event poller polls the source
+      and invokes the function.
+      Seven sources are supported: SQS, Kinesis, DynamoDB, MSK, Amazon MQ,
+      self-managed Apache Kafka, and Amazon DocumentDB.
+    </li>
+    <li>
+      Response streaming - streams responses up to 200MB.
+      The first 6MB has no bandwidth cap; after that, it is limited to 2MBps.
+    </li>
+    <li>
+      Function URLs and Lambda@Edge - a Function URL is a dedicated HTTP(S) endpoint assigned
+      to a function; it is public-internet-only and does not support PrivateLink.
+      Lambda@Edge works together with CloudFront.
+    </li>
+  </ul>
+
+  <h3>5.3 The three concurrency types and scaling rate</h3>
+  <p>
+    When traffic surges, how many instances can a function grow to, and how fast?
+    Table 4 summarizes the three concurrency types and the scaling rate.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 4. The three concurrency types and scaling rate</caption>
+      <thead>
+        <tr>
+          <th scope="col">Item</th>
+          <th scope="col">Default and limit</th>
+          <th scope="col">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">On-demand concurrency</th>
+          <td class="num">1,000 per region by default</td>
+          <td>Can be raised into the tens of thousands on request</td>
+        </tr>
+        <tr>
+          <th scope="row">Reserved concurrency</th>
+          <td class="num">Up to 900 by default</td>
+          <td>Carves out a dedicated share for a specific function. 100 always remains unreserved. No extra charge</td>
+        </tr>
+        <tr>
+          <th scope="row">Provisioned concurrency</th>
+          <td>Invocations-per-second limit = 10x the concurrency allocation</td>
+          <td>The 10x rule applies equally at the account level and to on-demand</td>
+        </tr>
+        <tr>
+          <th scope="row">Scaling rate</th>
+          <td class="num">1,000 execution environments per 10 seconds</td>
+          <td>Applied per function</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    SnapStart is the axis for reducing cold starts.
+    When a function version is published, initialization runs ahead of time and the execution
+    environment's memory and disk state is captured as a Firecracker microVM snapshot;
+    on first invocation and scale-up, execution resumes from that snapshot.
+    Only managed runtimes at Java 11, Python 3.12, and .NET 8 or later are supported;
+    Java has no extra cost, while Python and .NET incur snapshot caching and restore charges.
+  </p>
+
+  <h3>5.4 Resource limits - memory sets CPU and bandwidth</h3>
+  <p>
+    Lambda Functions has no separate CPU setting.
+    Set memory anywhere from 128MB to 10,240MB in 1MB increments and CPU scales proportionally,
+    with 1,769MB corresponding to 1 vCPU.
+    The timeout maxes out at 900 seconds, and ephemeral storage /tmp ranges from 512MB to 10,240MB.
+  </p>
+  <p>
+    How far can network bandwidth grow?
+    The default is 625Mbps, but functions not attached to a VPC can request an increase of the
+    "Network bandwidth per execution environment" quota in Service Quotas.
+    Once enabled, bandwidth starts at 625Mbps at 2GB and grows proportionally with memory,
+    reaching up to 3,000Mbps at 10,240MB (announced 2026-08-05).
+  </p>
+
+  <h3>5.5 Networking, Layers, permissions, and other limits</h3>
+  <p>
+    The network axis splits on VPC attachment.
+    VPC-attached functions use ENIs (Elastic Network Interfaces); the limit is 500 ENIs per VPC,
+    shared with other services such as EFS.
+    Unlike MicroVMs, which reach into a VPC through the separate LNC resource as seen earlier,
+    base functions use the ENI approach.
+  </p>
+  <p>
+    The extension and permission axes have limits too.
+    Layers are capped at 5 per function, and Extensions are supported.
+    Resource-based policies are 20KB, and since 2026-08-25, full IAM resource-based policies are
+    supported - a single policy document can hold multiple principals and actions and use the
+    entire set of IAM condition keys.
+  </p>
+  <p>
+    For the remaining limits, just remember the numbers.
+    Environment variables total 4KB, and file descriptors and processes/threads are 1,024 each.
+    Control plane APIs share a combined 15 RPS, while GetFunction (100 RPS) and GetPolicy (15 RPS)
+    have separate quotas.
+  </p>
+</section>
+
+<!-- ===================== 06 ===================== -->
+<section class="sec" id="s6-en">
+  <h2><span class="no">06</span>Selection guide and operational cautions</h2>
+  <p>
+    Finally, let us fold everything so far into selection criteria and operational cautions.
+    The starting point for selection is whether the workload is one-shot event processing,
+    always-on parallel processing, a long-running workflow, or a code sandbox.
+    Table 5 organizes which model to start from for representative situations.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 5. Execution model selection guide by situation</caption>
+      <thead>
+        <tr>
+          <th scope="col">Situation</th>
+          <th scope="col">Choice</th>
+          <th scope="col">Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>API backends, one-shot event-driven processing</td>
+          <th scope="row">Lambda Functions</th>
+          <td>Most serverless workloads, where per-invocation execution and the 15-minute limit suffice</td>
+        </tr>
+        <tr>
+          <td>Parallel processing of multiple requests in an always-active environment</td>
+          <th scope="row">Managed Instances</th>
+          <td>Handles concurrent invocations with no freeze. Watch the pitfall of code not terminating on timeout</td>
+        </tr>
+        <tr>
+          <td>Long multi-step workflows with approval waits, AI orchestration</td>
+          <th scope="row">Durable Functions</th>
+          <td>Up to 1 year with step/wait and replay. When the workflow is tightly coupled with business logic</td>
+        </tr>
+        <tr>
+          <td>220+ service integrations, hands-off operation first</td>
+          <th scope="row">Step Functions</th>
+          <td>An independent workflow service with a graph DSL and a visual designer</td>
+        </tr>
+        <tr>
+          <td>Isolated execution of user- or AI-generated code</td>
+          <th scope="row">MicroVMs</th>
+          <td>VM-level isolation and snapshot boot, sessions up to 8 hours</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - the mismatch of 10,000 RPS in front and concurrency 1,000 behind</span>
+    <p>
+      API Gateway's default throttle is 10,000 RPS, while Lambda's default concurrency is 1,000 per region.
+      Combined with defaults as-is, the front end is larger than the back end, so when traffic surges,
+      API Gateway lets requests through and <strong>Lambda becomes the throttling bottleneck</strong>.
+      Before production, raise the Lambda concurrency quota to match expected traffic.
+    </p>
+  </div>
+
+  <p>
+    Quotas also vary with account status.
+    New accounts start with reduced concurrency and memory quotas, and AWS raises them automatically
+    as usage grows.
+    If a load test on a fresh account throttles earlier than expected, check this reduced state first.
+  </p>
+
+  <p class="lead-def">
+    <b>Conclusion:</b> In one sentence, Lambda is no longer a single execution model but a bundle of
+    four compute primitives - Functions, Managed Instances, Durable Functions, and MicroVMs - and the
+    first question of serverless design has changed from &ldquo;how much memory should I allocate&rdquo;
+    to &ldquo;which execution model should I start from&rdquo;.
+  </p>
+</section>
+
+<!-- ===================== References ===================== -->
+<figure class="flow">
+    <a href="lambda-execution-models-archmap.html" target="_blank" rel="noopener"><img class="fig-img" src="lambda-execution-models-archmap.png" alt="Full interactive architecture map - the four Lambda execution models and their access paths"></a>
+    <figcaption>Figure 2. Full view of the interactive architecture map. Click the image to open the <a href="lambda-execution-models-archmap.html" target="_blank" rel="noopener">interactive version ↗</a> with node exploration, path tracing, and dark/light themes.</figcaption>
+  </figure>
+
+<section class="sec refs" id="refs-en">
+  <h2><span class="no">--</span>References</h2>
+
+  <h3>Primary sources</h3>
+  <ul>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html">Lambda quotas</a>
+      - Official AWS documentation (the basis for the limit figures in this document)
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-execution-environment.html">Lambda Managed Instances execution environment</a>
+      - Official AWS documentation
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-execution-environment.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html">Lambda Durable Functions</a>
+      - Official AWS documentation
+      <span class="url">https://docs.aws.amazon.com/lambda/latest/dg/durable-functions.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/blogs/compute/announcing-lambda-microvms-serverless-compute-environments-with-vm-level-isolation-and-near-instant-startup/">Announcing Lambda MicroVMs: serverless compute environments with VM-level isolation and near-instant startup</a>
+      - AWS Compute Blog (2026-07-10)
+      <span class="url">https://aws.amazon.com/blogs/compute/announcing-lambda-microvms-serverless-compute-environments-with-vm-level-isolation-and-near-instant-startup/</span>
+    </li>
+  </ul>
+
+  <h3>What's New announcements (full text verified)</h3>
+  <ul>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-full-iam-resource-based-policies/">AWS Lambda functions now support full IAM resource-based policies</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-full-iam-resource-based-policies/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-node-js-python-public-preview/">Node.js 26 and Python 3.15 managed runtimes in public preview</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-node-js-python-public-preview/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-network-bandwidth/">Lambda network bandwidth increase (non-VPC functions, up to 3,000Mbps)</a>
+      - AWS What's New (2026-08-05)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-lambda-network-bandwidth/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/05/aws-lambda-managed-instances/">Lambda Managed Instances schedule-based scaling</a>
+      - AWS What's New (2026-05-12)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/05/aws-lambda-managed-instances/</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/lambda-microvms-supports-privatelink">AWS Lambda MicroVMs now supports AWS PrivateLink</a>
+      - AWS What's New (2026-08-25)
+      <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/lambda-microvms-supports-privatelink</span>
+    </li>
+  </ul>
+</section>
+
+</main>
+
+<footer class="doc-footer">
+  <p>
+    Written as of 2026-08-26.
+    This document is a technical analysis based on the official AWS Lambda documentation
+    (quotas, Managed Instances, Durable Functions), the AWS Compute Blog, and What's New announcements.
+    Figures and defaults are as of the time of writing; check the official documentation above
+    for the latest values.
+  </p>
+</footer>
+</div>
+
+<script>
+/* 테마 토글. 저장은 localStorage 를 쓰되 차단된 환경에서는 조용히 넘어간다.
+   KO / EN 두 페이지에 버튼이 하나씩 있으므로 전부 바인딩한다. */
+(function () {
+  var KEY = "techblogs-theme";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(
+    document.querySelectorAll(".theme-toggle:not(.lang-toggle)")
+  );
+  if (!btns.length) return;
+
+  function sync() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    btns.forEach(function (btn) {
+      var page = btn.closest(".page");
+      var en = page && page.getAttribute("data-lang") === "en";
+      btn.setAttribute("aria-pressed", String(dark));
+      btn.setAttribute("aria-label", en
+        ? (dark ? "Switch to light mode" : "Switch to dark mode")
+        : (dark ? "라이트 모드로 전환" : "다크 모드로 전환"));
+    });
+  }
+  sync();
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      sync();
+      document.dispatchEvent(new CustomEvent("themechange", { detail: { theme: next } }));
+    });
+  });
+})();
+
+/* 언어 토글. data-lang 전환 + localStorage 저장 + langchange 이벤트.
+   Mermaid 다이어그램이 있으면 themechange 도 함께 보내 재렌더한다. */
+(function () {
+  var KEY = "techblogs-lang";
+  var root = document.documentElement;
+  var btns = Array.prototype.slice.call(document.querySelectorAll(".lang-toggle"));
+  if (!btns.length) return;
+
+  btns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-lang") === "en" ? "ko" : "en";
+      root.setAttribute("data-lang", next);
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      document.dispatchEvent(new CustomEvent("langchange", { detail: { lang: next } }));
+      if (document.querySelector(".diagram .mermaid")) {
+        document.dispatchEvent(new CustomEvent("themechange", {
+          detail: { theme: root.getAttribute("data-theme") }
+        }));
+      }
+    });
+  });
+})();
+</script>
+
+<!-- Mermaid. 다이어그램이 없는 문서에서는 이 블록을 삭제한다.
+     CDN 의존이므로 오프라인 배포가 전제라면 .flow 또는 인라인 SVG 를 쓴다. -->
+<script type="module">
+const blocks = Array.from(document.querySelectorAll(".diagram .mermaid"));
+if (blocks.length) {
+  blocks.forEach((el) => { el.dataset.src = el.textContent.trim(); });
+  const reveal = () => document.documentElement.classList.add("mermaid-ready");
+
+  try {
+    const { default: mermaid } = await import(
+      "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+    );
+
+    /* 다이어그램 색을 문서 토큰에서 읽어오므로 테마를 따라간다. */
+    const render = async () => {
+      const s = getComputedStyle(document.documentElement);
+      const t = (name) => s.getPropertyValue(name).trim();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: t("--sans"),
+        themeVariables: {
+          background: t("--paper"),
+          primaryColor: t("--paper-2"),
+          primaryTextColor: t("--ink"),
+          primaryBorderColor: t("--line-strong"),
+          secondaryColor: t("--note-bg"),
+          tertiaryColor: t("--code-bg"),
+          lineColor: t("--muted"),
+          textColor: t("--ink"),
+          fontSize: "14px"
+        }
+      });
+      blocks.forEach((el) => {
+        el.removeAttribute("data-processed");
+        el.textContent = el.dataset.src;
+      });
+      await mermaid.run({ nodes: blocks });
+    };
+
+    await render();
+    reveal();
+    document.addEventListener("themechange", () => { render().catch(() => {}); });
+  } catch (e) {
+    /* 로드 실패 시 다이어그램 소스를 코드로 노출한다. */
+    blocks.forEach((el) => el.classList.add("failed"));
+    reveal();
+  }
+}
+</script>
+
+
+<!-- techblogs-codecopy: 코드블록 복사 버튼 (아이콘 전용, execCommand 폴백 포함) -->
+<script>
+(function () {
+  var CLIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+  var OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+  function fallback(txt, cb) {
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = txt; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.top = "-1000px"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta); cb(ok);
+    } catch (e) { cb(false); }
+  }
+  function copyText(txt, cb) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () { cb(true); },
+                                              function () { fallback(txt, cb); });
+    } else { fallback(txt, cb); }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".codeblock"), function (block) {
+    var pre = block.querySelector("pre");
+    if (!pre || block.querySelector(".code-copy")) return;
+    block.style.position = block.style.position || "relative";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy";
+    btn.setAttribute("aria-label", "코드 복사");
+    btn.innerHTML = CLIP;
+    block.appendChild(btn);
+    var t;
+    btn.addEventListener("click", function () {
+      copyText(pre.innerText, function (ok) {
+        btn.innerHTML = ok ? OK : CLIP;
+        btn.classList.toggle("copied", ok);
+        btn.setAttribute("aria-label", ok ? "복사됨" : "코드 복사");
+        clearTimeout(t);
+        t = setTimeout(function () {
+          btn.innerHTML = CLIP;
+          btn.classList.remove("copied");
+          btn.setAttribute("aria-label", "코드 복사");
+        }, 1600);
+      });
+    });
+  });
+})();
+</script>
+
+
+</body>
+</html>
