@@ -1,6 +1,6 @@
 ---
-title: "ECS는 무엇으로 어떻게 실행되나 - 컴퓨트, 배포, 네트워크 형태 전부 정리"
-title_en: "What Runs ECS, and How - Compute, Deployment, and Network Models in One Place"
+title: "Amazon ECS 실행 구조와 선택 기준 - 컴퓨트, 배포, 네트워크"
+title_en: "Amazon ECS Execution Structure and Selection Criteria - Compute, Deployment, and Networking"
 layout: report
 report_src: /docs/techblog/container/ecs-execution-models-report.html
 date: 2026-08-26
