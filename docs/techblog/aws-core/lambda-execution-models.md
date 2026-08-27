@@ -1,6 +1,6 @@
 ---
-title: "Lambda는 이제 하나가 아니다 - 실행 모델 4종과 설정 축 전부 정리"
-title_en: "Lambda Is No Longer One Thing - All Four Execution Models and Every Configuration Axis"
+title: "AWS Lambda 실행 모델 4종의 구조와 선택 기준"
+title_en: "The Four AWS Lambda Execution Models - Structure and Selection Criteria"
 layout: report
 report_src: /docs/techblog/aws-core/lambda-execution-models-report.html
 date: 2026-08-26
