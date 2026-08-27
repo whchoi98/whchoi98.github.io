@@ -420,9 +420,8 @@ html[data-theme="light"] .step-title .step-no, html[data-theme="light"] .btn.pri
 (function(){
   var KEY='hol-theme', root=document.documentElement, btn=document.getElementById('themeToggle');
   function label(){ btn.textContent = root.getAttribute('data-theme')==='light' ? '다크 모드' : '라이트 모드'; }
-  var saved=null; try{saved=localStorage.getItem(KEY);}catch(e){}
-  if(saved==='light'){ root.setAttribute('data-theme','light'); }
-  else if(saved==='dark'){ root.removeAttribute('data-theme'); }
+  // 초대 페이지는 저장된 선호와 무관하게 항상 다크 모드로 시작합니다.
+  root.removeAttribute('data-theme');
   label();
   btn.addEventListener('click',function(){
     var light = root.getAttribute('data-theme')==='light';
