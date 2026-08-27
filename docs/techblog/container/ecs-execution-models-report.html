@@ -597,10 +597,10 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     이 프레임 전환을 축으로 2026-08 기준 ECS의 컴퓨트, 실행, 배포, 네트워크, 스토리지 선택지를 한 문서에 정리합니다.
   </p>
 
-  <div class="stat" role="img" aria-label="ECS 배포 전략: 2종에서 6종으로">
+  <div class="stat" role="img" aria-label="ECS 배포 전략: 3종에서 6종으로">
     <div class="stat-item old">
-      <span class="stat-num">2<span class="unit">종</span></span>
-      <span class="stat-sub">Rolling과 CodeDeploy Blue/Green뿐이던 배포 전략</span>
+      <span class="stat-num">3<span class="unit">종</span></span>
+      <span class="stat-sub">Rolling / CodeDeploy Blue/Green / External이던 배포 전략</span>
     </div>
     <div class="stat-arrow" aria-hidden="true">&rarr;</div>
     <div class="stat-item new">
@@ -634,8 +634,8 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
       2026-08-25부터는 AWS Batch의 컴퓨트 옵션으로도 쓸 수 있습니다.
     </li>
     <li>
-      배포 전략은 Rolling과 CodeDeploy Blue/Green 2종에서 Rolling / 내장 Blue/Green / Linear / Canary /
-      CodeDeploy Blue/Green / External <strong>6종</strong>으로 늘었습니다. AWS 공식 문서는 CodeDeploy 방식 대신
+      배포 전략은 Rolling / CodeDeploy Blue/Green / External 3종에서 내장 Blue/Green, Linear, Canary가
+      더해진 <strong>6종</strong>으로 늘었습니다. AWS는 CodeDeploy Blue/Green 문서의 첫 문단에서
       내장 Blue/Green 사용을 권고합니다.
     </li>
     <li>
@@ -673,8 +673,9 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     <strong>실제 실행은 capacity provider로 구성하라</strong>고 권고합니다.
   </p>
   <p>
-    두 축은 1:1로 대응하지 않습니다. 표 1처럼 Spot Fleet은 capacity provider로만 존재하고
-    launch type 목록에는 없으며, 온프레미스용 EXTERNAL은 반대로 launch type에만 있습니다.
+    두 축은 1:1로 대응하지 않습니다. 표 1처럼 온프레미스용 EXTERNAL은 launch type에만 있고,
+    개발자 가이드가 capacity provider 전용이라고 언급하는 Spot Fleet은 launch type 목록에 없습니다.
+    다만 Spot Fleet 표기는 공식 문서 안에서 상충하므로 표 아래에 유보를 달았습니다.
   </p>
 
   <div class="tbl-wrap">
@@ -711,11 +712,28 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
         <tr>
           <th scope="row">EC2 Spot Fleet</th>
           <td>없음 - capacity provider 전용</td>
-          <td>Spot Fleet</td>
+          <td>Spot Fleet (표기 상충, 표 아래 참고)</td>
         </tr>
       </tbody>
     </table>
   </div>
+
+  <p>
+    표 1의 Spot Fleet 행은 공식 문서 내 표기가 상충하므로 유보가 필요합니다. 개발자 가이드에는
+    "Spot Fleet은 capacity provider로만 제공된다"는 문장이 있으나, 같은 문단의 지원 열거
+    (FARGATE / FARGATE_SPOT / Auto Scaling group / ECS Managed Instances)에는 빠져 있고,
+    <span class="mono">CreateCapacityProvider</span> API도 Auto Scaling group과
+    Managed Instances 두 종류의 생성만 지원합니다.
+  </p>
+
+  <p>
+    표 1의 <span class="mono">FARGATE_SPOT</span>은 중단 특성을 설계에 반영해야 합니다.
+    Spot 중단 시 태스크 중지 2분 전에 경고가 오는데, EventBridge로 가는 task state change 이벤트와
+    실행 중인 태스크에 대한 SIGTERM 시그널 두 경로로 전달됩니다. 컨테이너가 SIGTERM을 처리하지 못하면
+    <span class="mono">stopTimeout</span>(기본 30초, Spot에서는 120초 이하 권장)이 지난 뒤 SIGKILL을 받아
+    데이터 유실이 생길 수 있고, 용량 부족 시 ECS는 Spot을 온디맨드로 대체하지 않고 용량이 생길 때까지
+    기동을 재시도합니다.
+  </p>
 
   <p>
     혼합 규칙은 계층에 따라 다릅니다. 하나의 클러스터에는 모든 종류의 capacity provider를 혼합해 등록할 수 있지만,
@@ -837,6 +855,13 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
       </tbody>
     </table>
   </div>
+
+  <p>
+    표 3에서 Fargate의 "vCPU/메모리만 지정"도 자유 조합이 아닙니다. 0.25 vCPU에서 32 vCPU까지
+    CPU 티어별로 허용 메모리 대역이 고정된 이산 조합만 유효하고(예: 0.25 vCPU는 512 MiB / 1 GB / 2 GB
+    3가지), 조합을 벗어난 값은 <span class="mono">RegisterTaskDefinition</span> 단계에서 에러로 거부됩니다.
+  </p>
+
   <h3>2.1 언제 선택하나 - 문서가 제시하는 기준 5가지</h3>
   <p>
     ECS 개발자 가이드는 Managed Instances를 선택할 상황을 다섯 가지로 제시합니다.
@@ -867,7 +892,8 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
   <p>
     2026-04-01에 발표된 Managed daemons는 모니터링, 로깅, 추적 에이전트를 플랫폼 팀이 중앙에서 관리하는
     구성체입니다. 애플리케이션 팀과 조정 없이 독립적으로 배포하고 업데이트할 수 있으며,
-    ECS Managed Instances capacity provider 전용입니다.
+    ECS Managed Instances capacity provider 전용입니다. 서비스의
+    <span class="mono">schedulingStrategy: DAEMON</span>(3.2절)과는 이름만 비슷할 뿐 별개 기능입니다.
   </p>
   <p>
     데몬 프로세스는 인스턴스당 정확히 1개 실행됩니다. <strong>애플리케이션 태스크보다 먼저 시작되고
@@ -957,7 +983,7 @@ flowchart TD
 <section class="sec" id="s4">
   <h2><span class="no">04</span>배포 전략 6종</h2>
   <p>
-    새 리비전을 내보내는 방법은 Rolling과 CodeDeploy Blue/Green 2종에서 6종으로 늘었습니다.
+    새 리비전을 내보내는 방법은 Rolling / CodeDeploy Blue/Green / External 3종에서 6종으로 늘었습니다.
     공식 문서의 구조는 배포 컨트롤러 3종(ECS / CodeDeploy / External)이고, 이 중 ECS 컨트롤러가
     <span class="mono">ROLLING</span> / <span class="mono">BLUE_GREEN</span> /
     <span class="mono">LINEAR</span> / <span class="mono">CANARY</span> 4개 전략을 품습니다.
@@ -984,7 +1010,7 @@ flowchart TD
           <td><span class="mono">ECS</span></td>
           <td>태스크 점진 교체. <span class="mono">minimumHealthyPercent</span> 하한과 <span class="mono">maximumPercent</span> 상한으로 속도 제어</td>
           <td>불필요</td>
-          <td>로드밸런서 없는 서비스, 가장 단순한 운영. 기본값</td>
+          <td>점진적 트래픽 제어가 불필요한 대부분의 서비스. 기본값이며 로드밸런서를 요구하지 않는 전략</td>
         </tr>
         <tr>
           <th scope="row">Blue/Green (내장)</th>
@@ -1025,7 +1051,7 @@ flowchart TD
     </table>
   </div>
   <p>
-    선택 기준에 대한 AWS의 입장은 명확합니다. CodeDeploy Blue/Green 문서는 첫머리에서
+    선택 기준에 대한 AWS의 입장은 명확합니다. CodeDeploy Blue/Green 배포 문서는 제목 바로 아래 첫 문단에서
     <strong>내장 Blue/Green 사용을 권장</strong>한다고 명시합니다.
     CodeDeploy 방식은 기존 파이프라인 유지가 필요한 경우의 선택지로 남습니다.
   </p>
@@ -1182,6 +1208,12 @@ flowchart TD
     <a href="/docs/techblog/networking/appmesh-to-vpc-lattice/">App Mesh에서 VPC Lattice로 전환한 실측 기록</a>
     게시물에서 측정값 기준으로 다뤘습니다.
   </p>
+  <p>
+    Service Connect로의 전환은 설정 변경이 아니라 서비스 재생성 이벤트입니다.
+    하나의 ECS 서비스는 App Mesh의 mesh와 Service Connect namespace에 동시에 속할 수 없어
+    서비스를 다시 만들어야 하고, 무중단이 필요하면 서비스 복제본을 만들어 트래픽을 점진 이전하는
+    blue/green 방식이 AWS 공식 권고입니다.
+  </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
@@ -1204,10 +1236,15 @@ flowchart TD
     <li>Amazon EFS - Linux 태스크용 지속 공유 스토리지. Fargate / EC2 / Managed Instances 지원</li>
     <li>FSx for Windows File Server - Windows 태스크용 지속 스토리지. EC2 전용</li>
     <li>Docker volume - Linux / Windows 지속 볼륨. EC2 전용</li>
-    <li>bind mount - 호스트 경로 마운트, 임시(ephemeral). Fargate / EC2 / Managed Instances 지원</li>
+    <li>bind mount - 컨테이너 수명에 묶이는 임시(ephemeral) 볼륨. Fargate에서는 호스트 경로 마운트가 아니라
+        태스크에 할당된 임시 스토리지(기본 20 GiB, 최대 200 GiB)를 태스크 안 컨테이너끼리 공유하는 용도이고,
+        호스트 경로를 지정하는 <span class="mono">host</span> / <span class="mono">sourcePath</span>는
+        EC2 호스팅 태스크 전용입니다. Fargate / EC2 / Managed Instances 지원</li>
   </ul>
   <p>
     현행 공식 문서의 볼륨 옵션 표에는 FSx for NetApp ONTAP과 Amazon S3 Files까지 총 7종이 올라 있습니다.
+    Amazon S3 Files는 S3 데이터를 파일 시스템 인터페이스로 빠르게 캐시 접근하는 지속 볼륨으로,
+    Fargate와 Managed Instances의 Linux 태스크를 지원합니다.
     볼륨마다 지원 컴퓨트가 다르므로, FSx for Windows File Server와 Docker volume이
     EC2 전용이라는 점을 포함해 공식 표에서 조합을 확인하고 설계하는 것이 안전합니다.
   </p>
@@ -1225,12 +1262,24 @@ flowchart TD
         새 태스크는 항상 해당 버전의 최신 revision에서 기동합니다</li>
     <li>ECS Exec - 실행 중인 컨테이너에 셸로 접근하는 디버깅 도구. IPv6-only 구성에서는 미지원</li>
     <li>태스크 배치 - EC2는 placement strategy(binpack / random / spread)와 constraint를 모두 지원하고,
-        Managed Instances는 constraint만 일부 빌트인 attribute로 지원하며, Fargate는 둘 다 지원하지 않습니다.
-        Fargate의 가용 영역 분산은 플랫폼이 알아서 수행합니다</li>
+        Managed Instances는 strategy 없이 constraint만 지원하되 빌트인 attribute 가운데
+        <span class="mono">ecs.subnet-id</span> / <span class="mono">ecs.availability-zone</span> /
+        <span class="mono">ecs.instance-type</span> / <span class="mono">ecs.cpu-architecture</span>
+        4종 subset만 허용하며, Fargate는 둘 다 지원하지 않습니다.
+        Managed Instances와 Fargate의 가용 영역 분산은 플랫폼이 알아서 수행합니다</li>
     <li>스케일링 2층 - 태스크 수는 서비스 오토스케일링
         (target tracking / step / scheduled / predictive 4종)이,
         태스크를 올릴 용량은 capacity provider의 클러스터 오토스케일링이 담당합니다</li>
   </ul>
+
+  <p>
+    스케일링 2층 가운데 용량 층을 EC2 Auto Scaling group capacity provider로 운영할 때의 관리 노브는
+    세 가지입니다. managed scaling을 켜면 ECS가 <span class="mono">CapacityProviderReservation</span>
+    메트릭과 target tracking 정책을 만들어 인스턴스의 scale-in/out을 대신 관리합니다.
+    target capacity(유효 범위 1~100%)를 100 미만으로 두면 그만큼 여유 용량을 상시 확보해
+    후속 태스크 기동이 빨라지고, managed termination protection은 태스크가 실행 중인 인스턴스가
+    scale-in으로 종료되지 않게 보호합니다(ASG의 instance scale-in protection 활성화가 전제 조건).
+  </p>
 
   <h3>6.3 상황별 선택 가이드</h3>
   <p>
@@ -1272,8 +1321,8 @@ flowchart TD
           <td><span class="mono">RunTask</span> / EventBridge Scheduler 예약 태스크</td>
         </tr>
         <tr>
-          <td>로드밸런서 없는 서비스의 배포</td>
-          <td>Rolling (기본값)</td>
+          <td>점진적 트래픽 제어가 필요 없는 대부분의 서비스, 로드밸런서 없는 서비스</td>
+          <td>Rolling - 기본값이며 로드밸런서를 요구하지 않는 전략</td>
         </tr>
         <tr>
           <td>신버전을 검증하며 트래픽을 옮기고 싶다</td>
@@ -1286,6 +1335,64 @@ flowchart TD
       </tbody>
     </table>
   </div>
+
+  <p>
+    표 6의 <span class="mono">EXTERNAL</span>(ECS Anywhere)은 기능 제약을 전제로 선택해야 합니다.
+    ELB 로드밸런싱, service discovery, <span class="mono">awsvpc</span> 네트워크 모드,
+    capacity provider, EFS 볼륨이 지원되지 않으므로, 공식 문서도 인바운드 트래픽을 받는
+    웹 서비스류 워크로드에는 비효율적이라고 명시합니다.
+  </p>
+
+  <h3>6.4 설계 상한 - 핵심 서비스 쿼터</h3>
+  <p>
+    마지막 축은 설계 상한이 되는 서비스 쿼터입니다. 표 7은 리전별 기본값 기준의 대표 수치입니다.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>표 7. 대표 서비스 쿼터 - 리전별 기본값</caption>
+      <thead>
+        <tr>
+          <th scope="col">쿼터</th>
+          <th scope="col">기본값</th>
+          <th scope="col">상향 조정</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>계정당 클러스터 수</td>
+          <td>10,000</td>
+          <td>가능</td>
+        </tr>
+        <tr>
+          <td>클러스터당 서비스 수</td>
+          <td>5,000</td>
+          <td>불가</td>
+        </tr>
+        <tr>
+          <td>서비스당 태스크 수 (desired count)</td>
+          <td>5,000</td>
+          <td>불가</td>
+        </tr>
+        <tr>
+          <td>클러스터당 컨테이너 인스턴스 수</td>
+          <td>5,000</td>
+          <td>불가</td>
+        </tr>
+        <tr>
+          <td>task definition family당 revision 수</td>
+          <td>1,000,000</td>
+          <td>불가</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    두 가지 함정이 있습니다. task definition revision은 등록 해제하거나 삭제해도 1,000,000 한도 계산에서
+    빠지지 않습니다. Fargate 쿼터는 태스크 수가 아니라 vCPU 개수 기준이고, 신규 계정은 낮은 초기값에서
+    시작해 사용량에 따라 자동 상향됩니다.
+  </p>
 
   <p class="lead-def">
     <b>결론:</b> 한 문장으로 요약하면, 선언은 태스크 정의의 <span class="mono">requiresCompatibilities</span>에
@@ -1364,6 +1471,41 @@ flowchart TD
       - 출시 공지 (2026-08-25)
       <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-batch-on-ecs-managed-instances/</span>
     </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html">Fargate capacity providers</a>
+      - Fargate Spot 중단 통지와 stopTimeout 권고
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html">Fargate 태스크 CPU와 메모리 유효 조합</a>
+      - 티어별 허용 메모리 대역
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html">Auto Scaling group capacity providers</a>
+      - managed scaling, target capacity, managed termination protection
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html">Amazon ECS task placement</a>
+      - Managed Instances의 strategy 미지원과 constraint attribute subset
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/">Migrating from AWS App Mesh to Amazon ECS Service Connect</a>
+      - AWS Containers Blog, 서비스 재생성과 blue/green 전환
+      <span class="url">https://aws.amazon.com/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html">Amazon ECS Anywhere</a>
+      - EXTERNAL의 기능 제약 (로드밸런싱, awsvpc 등)
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/general/latest/gr/ecs-service.html">Amazon ECS endpoints and quotas</a>
+      - 표 7의 서비스 쿼터 수치
+      <span class="url">https://docs.aws.amazon.com/general/latest/gr/ecs-service.html</span>
+    </li>
   </ul>
 </section>
 
@@ -1412,10 +1554,10 @@ flowchart TD
     ECS compute, execution, deployment, network, and storage options as of 2026-08 in a single place.
   </p>
 
-  <div class="stat" role="img" aria-label="ECS deployment strategies: from 2 to 6">
+  <div class="stat" role="img" aria-label="ECS deployment strategies: from 3 to 6">
     <div class="stat-item old">
-      <span class="stat-num">2<span class="unit">types</span></span>
-      <span class="stat-sub">Deployment strategies when only Rolling and CodeDeploy Blue/Green existed</span>
+      <span class="stat-num">3<span class="unit">types</span></span>
+      <span class="stat-sub">Deployment strategies when they were Rolling / CodeDeploy Blue/Green / External</span>
     </div>
     <div class="stat-arrow" aria-hidden="true">&rarr;</div>
     <div class="stat-item new">
@@ -1450,9 +1592,9 @@ flowchart TD
       Since 2026-08-25 it can also be used as a compute option for AWS Batch.
     </li>
     <li>
-      Deployment strategies grew from 2 (Rolling and CodeDeploy Blue/Green) to <strong>6</strong>: Rolling /
-      built-in Blue/Green / Linear / Canary / CodeDeploy Blue/Green / External. AWS official documentation
-      recommends the built-in Blue/Green over the CodeDeploy approach.
+      Deployment strategies grew from the 3 of Rolling / CodeDeploy Blue/Green / External to
+      <strong>6</strong>, with built-in Blue/Green, Linear, and Canary added. AWS recommends using the
+      built-in Blue/Green in the first paragraph of the CodeDeploy Blue/Green documentation.
     </li>
     <li>
       There are 5 network modes, but Fargate is <span class="mono">awsvpc</span>-only, and App Mesh support
@@ -1489,8 +1631,10 @@ flowchart TD
     <strong>configuring actual execution with capacity providers</strong>.
   </p>
   <p>
-    The two axes do not map 1:1. As Table 1 shows, Spot Fleet exists only as a capacity provider and is absent
-    from the launch type list, while EXTERNAL for on-premises conversely exists only as a launch type.
+    The two axes do not map 1:1. As Table 1 shows, EXTERNAL for on-premises exists only as a launch type,
+    and Spot Fleet, which the Developer Guide mentions as capacity-provider-only, is absent from the launch
+    type list. However, the Spot Fleet notation conflicts within the official documentation, so a
+    reservation is noted below the table.
   </p>
 
   <div class="tbl-wrap">
@@ -1527,11 +1671,29 @@ flowchart TD
         <tr>
           <th scope="row">EC2 Spot Fleet</th>
           <td>None - capacity provider only</td>
-          <td>Spot Fleet</td>
+          <td>Spot Fleet (conflicting notation - see note below the table)</td>
         </tr>
       </tbody>
     </table>
   </div>
+
+  <p>
+    The Spot Fleet row in Table 1 needs a reservation because the notation conflicts within the official
+    documentation. The Developer Guide contains the sentence that Spot Fleet is available only as a capacity
+    provider, yet the supported enumeration in the same passage
+    (FARGATE / FARGATE_SPOT / Auto Scaling group / ECS Managed Instances) omits it, and the
+    <span class="mono">CreateCapacityProvider</span> API also supports creating only two kinds -
+    Auto Scaling group and Managed Instances.
+  </p>
+
+  <p>
+    <span class="mono">FARGATE_SPOT</span> in Table 1 requires designing for its interruption behavior.
+    On a Spot interruption, a warning arrives 2 minutes before the task stops, delivered through two paths:
+    a task state change event to EventBridge and a SIGTERM signal to the running task. If the container does
+    not handle SIGTERM, it receives SIGKILL after <span class="mono">stopTimeout</span> (default 30 seconds;
+    120 seconds or less recommended on Spot) and data loss can follow, and when capacity runs short ECS does
+    not replace Spot with On-Demand - it retries launching until capacity becomes available.
+  </p>
 
   <p>
     Mixing rules differ by layer. A single cluster can register every kind of capacity provider together, but
@@ -1656,6 +1818,14 @@ flowchart TD
       </tbody>
     </table>
   </div>
+
+  <p>
+    Even Fargate&#39;s "vCPU/memory only" in Table 3 is not a free-form combination. From 0.25 vCPU to
+    32 vCPU, only discrete combinations with fixed allowed memory bands per CPU tier are valid
+    (e.g. 0.25 vCPU allows 3 choices: 512 MiB / 1 GB / 2 GB), and values outside the combinations are
+    rejected with an error at the <span class="mono">RegisterTaskDefinition</span> stage.
+  </p>
+
   <h3>2.1 When to choose it - the 5 criteria the docs give</h3>
   <p>
     The ECS Developer Guide lists five situations that call for Managed Instances.
@@ -1688,6 +1858,8 @@ flowchart TD
     Managed daemons, announced on 2026-04-01, is a construct that lets platform teams centrally manage
     monitoring, logging, and tracing agents. They can be deployed and updated independently, without
     coordinating with application teams, and are exclusive to the ECS Managed Instances capacity provider.
+    It shares only the name with a service&#39;s <span class="mono">schedulingStrategy: DAEMON</span>
+    (section 3.2) - the two are separate features.
   </p>
   <p>
     Exactly 1 daemon process runs per instance. It <strong>starts before application tasks and stops
@@ -1780,7 +1952,7 @@ flowchart TD
 <section class="sec" id="s4-en">
   <h2><span class="no">04</span>The 6 deployment strategies</h2>
   <p>
-    The ways to roll out a new revision grew from 2 - Rolling and CodeDeploy Blue/Green - to 6.
+    The ways to roll out a new revision grew from the 3 of Rolling / CodeDeploy Blue/Green / External to 6.
     The official documentation is structured around 3 deployment controllers (ECS / CodeDeploy / External),
     and the ECS controller among them carries the 4 strategies
     <span class="mono">ROLLING</span> / <span class="mono">BLUE_GREEN</span> /
@@ -1808,7 +1980,7 @@ flowchart TD
           <td><span class="mono">ECS</span></td>
           <td>Gradual task replacement. Speed is controlled by the <span class="mono">minimumHealthyPercent</span> floor and the <span class="mono">maximumPercent</span> ceiling</td>
           <td>Not required</td>
-          <td>Services without a load balancer, simplest operation. Default</td>
+          <td>Most services that need no gradual traffic control. The default, and a strategy that requires no load balancer</td>
         </tr>
         <tr>
           <th scope="row">Blue/Green (built-in)</th>
@@ -1849,7 +2021,8 @@ flowchart TD
     </table>
   </div>
   <p>
-    AWS&#39;s position on how to choose is clear. The CodeDeploy Blue/Green documentation states up front that it
+    AWS&#39;s position on how to choose is clear. The CodeDeploy Blue/Green deployment documentation states,
+    in the first paragraph right below the title, that it
     <strong>recommends using the built-in Blue/Green</strong>.
     The CodeDeploy approach remains the option for cases that must keep an existing pipeline.
   </p>
@@ -2007,6 +2180,12 @@ flowchart TD
     VPC Lattice. The hands-on migration is covered, with measured values, in the post
     <a href="/docs/techblog/networking/appmesh-to-vpc-lattice/">A measured record of migrating from App Mesh to VPC Lattice</a>.
   </p>
+  <p>
+    Migrating to Service Connect is a service re-creation event, not a configuration change.
+    A single ECS service cannot belong to an App Mesh mesh and a Service Connect namespace at the same time,
+    so the service must be re-created; if zero downtime is required, the AWS official recommendation is a
+    blue/green approach that creates a replica of the service and shifts traffic over gradually.
+  </p>
 </section>
 
 <!-- ===================== 06 ===================== -->
@@ -2030,11 +2209,18 @@ flowchart TD
     <li>Amazon EFS - persistent shared storage for Linux tasks. Supports Fargate / EC2 / Managed Instances</li>
     <li>FSx for Windows File Server - persistent storage for Windows tasks. EC2 only</li>
     <li>Docker volume - persistent volumes for Linux / Windows. EC2 only</li>
-    <li>bind mount - host path mounts, ephemeral. Supports Fargate / EC2 / Managed Instances</li>
+    <li>bind mount - an ephemeral volume tied to the container lifetime. On Fargate it is not a host path
+        mount but a way for containers in a task to share the ephemeral storage allocated to the task
+        (20 GiB by default, up to 200 GiB), and <span class="mono">host</span> /
+        <span class="mono">sourcePath</span>, which name a host path, are exclusive to EC2-hosted tasks.
+        Supports Fargate / EC2 / Managed Instances</li>
   </ul>
   <p>
     The volume options table in the current official documentation lists a total of 7 types, up to and
-    including FSx for NetApp ONTAP and Amazon S3 Files. Supported compute differs per volume, so it is safest
+    including FSx for NetApp ONTAP and Amazon S3 Files.
+    Amazon S3 Files is a persistent volume that provides fast, cached access to S3 data through a file
+    system interface, supporting Linux tasks on Fargate and Managed Instances.
+    Supported compute differs per volume, so it is safest
     to verify combinations against the official table when designing - including the fact that FSx for Windows
     File Server and Docker volume are EC2 only.
   </p>
@@ -2052,12 +2238,27 @@ flowchart TD
     <li>ECS Exec - a debugging tool that gives shell access into a running container.
         Not supported in IPv6-only configurations</li>
     <li>Task placement - EC2 supports both placement strategies (binpack / random / spread) and constraints,
-        Managed Instances supports constraints only, with a subset of built-in attributes, and Fargate
-        supports neither. Fargate handles Availability Zone spreading on its own</li>
+        while Managed Instances supports constraints only, without strategies, allowing just the 4-attribute
+        subset of built-in attributes
+        <span class="mono">ecs.subnet-id</span> / <span class="mono">ecs.availability-zone</span> /
+        <span class="mono">ecs.instance-type</span> / <span class="mono">ecs.cpu-architecture</span>,
+        and Fargate supports neither.
+        Managed Instances and Fargate handle Availability Zone spreading on their own</li>
     <li>Two scaling layers - the number of tasks is handled by service auto scaling
         (4 kinds: target tracking / step / scheduled / predictive), and
         the capacity to run tasks on is handled by the capacity provider&#39;s cluster auto scaling</li>
   </ul>
+
+  <p>
+    When the capacity layer of the two scaling layers runs on an EC2 Auto Scaling group capacity provider,
+    there are three management knobs. Turning on managed scaling makes ECS create the
+    <span class="mono">CapacityProviderReservation</span> metric and a target tracking policy, managing
+    instance scale-in/out on your behalf.
+    Setting target capacity (valid range 1~100%) below 100 keeps that much spare capacity available at all
+    times so subsequent task launches start faster, and managed termination protection keeps instances with
+    running tasks from being terminated by scale-in (enabling the ASG&#39;s instance scale-in protection is a
+    prerequisite).
+  </p>
 
   <h3>6.3 A situation-based selection guide</h3>
   <p>
@@ -2099,8 +2300,8 @@ flowchart TD
           <td><span class="mono">RunTask</span> / EventBridge Scheduler scheduled tasks</td>
         </tr>
         <tr>
-          <td>Deploying a service without a load balancer</td>
-          <td>Rolling (default)</td>
+          <td>Most services that need no gradual traffic control, services without a load balancer</td>
+          <td>Rolling - the default, and a strategy that requires no load balancer</td>
         </tr>
         <tr>
           <td>I want to move traffic while validating the new version</td>
@@ -2113,6 +2314,65 @@ flowchart TD
       </tbody>
     </table>
   </div>
+
+  <p>
+    Choosing <span class="mono">EXTERNAL</span> (ECS Anywhere) from Table 6 must be premised on its feature
+    constraints. ELB load balancing, service discovery, the <span class="mono">awsvpc</span> network mode,
+    capacity providers, and EFS volumes are not supported, and the official documentation states it is
+    inefficient for web-service-style workloads that receive inbound traffic.
+  </p>
+
+  <h3>6.4 Design ceilings - key service quotas</h3>
+  <p>
+    The last axis is the service quotas that set design ceilings. Table 7 lists representative figures based
+    on per-Region defaults.
+  </p>
+
+  <div class="tbl-wrap">
+    <table>
+      <caption>Table 7. Representative service quotas - per-Region defaults</caption>
+      <thead>
+        <tr>
+          <th scope="col">Quota</th>
+          <th scope="col">Default</th>
+          <th scope="col">Adjustable</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Clusters per account</td>
+          <td>10,000</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td>Services per cluster</td>
+          <td>5,000</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Tasks per service (desired count)</td>
+          <td>5,000</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Container instances per cluster</td>
+          <td>5,000</td>
+          <td>No</td>
+        </tr>
+        <tr>
+          <td>Revisions per task definition family</td>
+          <td>1,000,000</td>
+          <td>No</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>
+    There are two traps. Task definition revisions do not leave the 1,000,000-limit count even when
+    deregistered or deleted. Fargate quotas are counted in vCPUs rather than tasks, and new accounts start
+    from low initial values that are raised automatically with usage.
+  </p>
 
   <p class="lead-def">
     <b>Conclusion:</b> in one sentence - leave declaration to the task definition&#39;s
@@ -2192,6 +2452,41 @@ flowchart TD
       <a href="https://aws.amazon.com/about-aws/whats-new/2026/08/aws-batch-on-ecs-managed-instances/">What&#39;s New - AWS Batch on Amazon ECS Managed Instances</a>
       - launch announcement (2026-08-25)
       <span class="url">https://aws.amazon.com/about-aws/whats-new/2026/08/aws-batch-on-ecs-managed-instances/</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html">Fargate capacity providers</a>
+      - Fargate Spot interruption notice and stopTimeout guidance
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-capacity-providers.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html">Valid CPU and memory combinations for Fargate tasks</a>
+      - allowed memory bands per tier
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html">Auto Scaling group capacity providers</a>
+      - managed scaling, target capacity, managed termination protection
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html">Amazon ECS task placement</a>
+      - Managed Instances&#39; lack of strategy support and the constraint attribute subset
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html</span>
+    </li>
+    <li>
+      <a href="https://aws.amazon.com/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/">Migrating from AWS App Mesh to Amazon ECS Service Connect</a>
+      - AWS Containers Blog, service re-creation and blue/green migration
+      <span class="url">https://aws.amazon.com/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html">Amazon ECS Anywhere</a>
+      - EXTERNAL feature constraints (load balancing, awsvpc, and more)
+      <span class="url">https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html</span>
+    </li>
+    <li>
+      <a href="https://docs.aws.amazon.com/general/latest/gr/ecs-service.html">Amazon ECS endpoints and quotas</a>
+      - the service quota figures in Table 7
+      <span class="url">https://docs.aws.amazon.com/general/latest/gr/ecs-service.html</span>
     </li>
   </ul>
 </section>
