@@ -692,7 +692,7 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
           <td>호출(invocation)</td>
           <td><span class="num">15분</span></td>
           <td>Firecracker microVM (관리형)</td>
-          <td>없음</td>
+          <td>보장 없음 (웜 재사용 시 /tmp, 전역 변수 유지)</td>
           <td>이벤트 기반 단발 처리</td>
         </tr>
         <tr>
@@ -727,6 +727,9 @@ html:not([data-lang="en"]) .page[data-lang="en"] { display: none; }
     Lambda Functions는 우리가 알던 Lambda입니다.
     이벤트가 도착하면 호출 단위로 실행되고, 호출 사이에는 실행 환경이 freeze(일시 정지)됩니다.
     격리는 Firecracker가 담당하는데, Firecracker는 Lambda의 격리 계층을 맡아 온 경량 microVM 가상화 기술입니다.
+    freeze된 환경이 다음 호출에 재사용되면 /tmp 디렉토리와 핸들러 밖 전역 변수 상태는 그대로 유지됩니다.
+    DB 커넥션을 초기화 코드에서 만들어 재사용하는 최적화가 성립하는 이유가 이것인데,
+    실행 환경은 수 시간 주기로 교체되므로 호출 간 상태 유지를 보장으로 가정해서는 안 됩니다.
   </p>
   <p>
     Lambda Managed Instances는 코드를 고객 소유 EC2 인스턴스에서 실행하고 Lambda는 운영만 담당합니다.
@@ -765,6 +768,15 @@ flowchart LR
       코드 샌드박스일 때만 나머지 모델로 넘어갑니다.
     </figcaption>
   </figure>
+
+  <p>
+    네 모델이 완전히 배타적인 것은 아닙니다.
+    AWS 문서는 Durable Functions를 checkpoint/replay 메커니즘을 쓰는
+    일반 Lambda 함수(regular Lambda functions)로 설명하므로,
+    Durable Functions는 별도 인프라가 아니라 기본 Functions 위에서 동작하는 실행 모드에 해당합니다.
+    반면 Managed Instances나 MicroVMs와 Durable Functions의 조합 가능 여부는
+    작성 시점의 공식 문서에 언급이 없어 이 문서에서는 단정하지 않습니다.
+  </p>
 </section>
 
 <!-- ===================== 02 ===================== -->
@@ -786,6 +798,18 @@ flowchart LR
     호출 처리 방식도 다릅니다. 한 실행 환경 안에서 여러 호출이 런타임 워커별로 동시에 실행됩니다.
     실행 환경 1개가 동시 호출 1건을 처리한다는 기본 Lambda의 등식이 여기서는 성립하지 않습니다.
   </p>
+
+  <div class="callout warn">
+    <span class="callout-title">주의 - 호출 사이의 격리가 사라집니다</span>
+    <p>
+      기본 Lambda는 실행 환경 1개가 동시 호출 1건만 처리하고 환경 자체가 Firecracker microVM으로 격리되지만,
+      Managed Instances에서는 동시 호출들이 같은 컨테이너의 프로세스 공간을 런타임 워커 단위로 나눠 씁니다.
+      전역 변수 오염, 스레드 안전성, 한 호출의 메모리 누수가 다른 호출로 번지는 문제가
+      <strong>마이그레이션 시 새로 검토해야 하는 항목</strong>이 됩니다.
+      AWS 문서도 스레드 안전성, 상태 관리, 컨텍스트 격리를 이 실행 모델에서는 다르게 다뤄야 한다고 명시합니다.
+    </p>
+  </div>
+
   <p>
     타임아웃은 호출별로 독립 적용됩니다.
     한 호출이 타임아웃되어도 같은 환경의 다른 호출은 영향 없이 계속 실행됩니다.
@@ -814,17 +838,28 @@ flowchart LR
     실행 환경 안에 상태를 오래 쌓아 두는 설계라면 이 폐기 정책을 전제로 해야 합니다.
   </p>
 
-  <h3>2.3 한도와 스케일링</h3>
+  <h3>2.3 한도, 스케일링, 과금</h3>
   <p>
     기본 Lambda와 한도는 어떻게 다를까요?
     초기화는 최대 15분까지 허용되고, 파일 디스크립터 한도는 4,096개로 기본 Lambda의
     1,024개보다 큽니다. 실행 환경 OS는 Bottlerocket 기반입니다.
   </p>
   <p>
-    스케일링은 최소/최대 실행 환경 제한 안에서 트래픽에 따라 자동으로 이루어지고,
-    유휴 시 0으로 축소하는 scale-to-zero도 지원합니다.
+    스케일링은 최소/최대 실행 환경 설정 안에서 리소스 사용 신호에 따라 자동으로 이루어집니다.
+    다만 자동 scale-to-zero는 없습니다.
+    트래픽이 없어도 설정된 최소 실행 환경(기본 3개)까지만 줄어듭니다.
+    최소와 최대를 모두 0으로 지정하면 함수가 비활성화되고 기반 인스턴스가 종료되는데,
+    이후 트래픽이 와도 자동으로 복귀하지 않으므로 0이 아닌 값으로 다시 설정해야 합니다.
     2026-05-12부터는 Amazon EventBridge Scheduler로 일회성 또는 반복 일정을 정의해
     용량 한도를 사전에 조정하는 스케줄 기반 스케일링이 추가되었습니다.
+  </p>
+  <p>
+    과금 구조도 기본 Lambda와 다릅니다.
+    요청 100만 건당 $0.20의 요청 요금에, 프로비저닝된 EC2 인스턴스 요금과
+    EC2 온디맨드 가격의 15%에 해당하는 관리 수수료가 더해집니다.
+    호출별 실행 시간 과금은 없는 대신, 표 1의 인스턴스 상주가 뜻하는 대로
+    트래픽이 없어도 인스턴스가 떠 있는 동안에는 계속 과금됩니다.
+    EC2 Savings Plans와 예약 인스턴스 할인은 기반 EC2 요금에만 적용되고 관리 수수료에는 적용되지 않습니다.
   </p>
 </section>
 
@@ -904,10 +939,18 @@ flowchart LR
 
   <h3>3.3 한도 - 상향 불가 항목이 설계 기준입니다</h3>
   <p>
-    한도는 세 가지만 기억하면 됩니다.
-    리전당 실행은 500만 건이고, 버지니아, 오레곤, 아일랜드 리전은 1,000만 건입니다.
+    총량 한도부터 봅니다.
+    동시에 실행 중인 durable execution은 리전당 500만 건이고, 버지니아, 오레곤, 아일랜드 리전은 1,000만 건입니다.
     실행당 durable operation은 3,000개, 실행당 영속 데이터는 100MB이며
     <strong>이 두 한도는 상향 신청이 불가능합니다.</strong>
+  </p>
+  <p>
+    진입 속도에도 한도가 있습니다.
+    durable execution을 시작하는 함수 호출 속도는 리전당 300 RPS이며 상향 요청은 가능합니다.
+    주문이나 결제처럼 요청 하나가 실행 하나를 시작하는 흐름이라면
+    리전당 500만 건보다 이 진입 상한에 먼저 걸립니다.
+    실행 이력을 조회하는 GetDurableExecutionHistory와 ListDurableExecutionsByFunction 같은 관측 API도
+    각 15 RPS라 대시보드 폴링 주기를 설계에 반영해야 합니다.
   </p>
   <p>
     상향 불가 한도는 운영이 아니라 설계 단계의 제약입니다.
@@ -976,6 +1019,18 @@ flowchart LR
     계정과 리전당 총 메모리는 400GB(버지니아, 오레곤, 오하이오, 도쿄는 1,024GB)에 4배 버스트가 가능하고,
     이미지는 100개, 이미지당 버전은 50개까지입니다.
   </p>
+  <p>
+    처리량 한도는 VM 단위와 API 단위 양쪽에 있습니다.
+    VM당 동시 연결은 vCPU에 비례해 1vCPU 8개에서 16vCPU 128개까지이고,
+    VM당 초당 요청은 4vCPU/8GB 구성에서 40건, 16vCPU/32GB 구성에서 160건입니다.
+    이 두 한도는 상향 신청이 불가능합니다.
+  </p>
+  <p>
+    API 속도 한도는 계정과 리전당 적용되며 상향 요청이 가능합니다.
+    기동(RunMicrovm)과 재개(ResumeMicrovm)는 각 5 TPS, 일시 정지(SuspendMicrovm)는 2 TPS입니다.
+    기동 5 TPS는 기본값 기준 분당 300개 수준이라, 분당 수백 개 규모의 샌드박스 기동까지는 기본 한도 안에서 가능합니다.
+    동시 이미지 빌드는 계정과 리전당 기본 5개(버지니아, 오레곤, 오하이오, 도쿄는 10개)입니다.
+  </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
@@ -983,7 +1038,7 @@ flowchart LR
   <h2><span class="no">05</span>기본 Lambda Functions의 설정 축</h2>
   <p>
     1층에서 실행 모델을 골랐다면, 2층은 기본 Lambda Functions 내부의 설정 축입니다.
-    같은 Functions 모델이라도 패키징, 호출 형태, 동시성, 리소스의 조합에 따라 동작과 한도가 달라집니다.
+    같은 Functions 모델이라도 패키징, 호출 방식, 동시성, 리소스의 조합에 따라 동작과 한도가 달라집니다.
     이 섹션은 그 축들을 quotas 문서의 수치와 함께 정리합니다.
   </p>
 
@@ -1036,36 +1091,47 @@ flowchart LR
   <p>
     퍼블릭 프리뷰 런타임에는 단서가 있습니다.
     Node.js 26과 Python 3.15는 Lambda SLA와 AWS 기술 지원 플랜의 보장 대상이 아니며,
-    AWS는 프로덕션 워크로드 사용을 금지한다고 명시합니다(2026-08-25 발표).
+    AWS는 프로덕션 워크로드에 사용해서는 안 된다(should not be used)고 명시합니다(2026-08-25 발표).
+    기술적으로 차단되는 것은 아니고 문서상의 지침입니다.
   </p>
 
-  <h3>5.2 호출 형태 5종 - 입구가 페이로드 한도를 정합니다</h3>
+  <h3>5.2 호출 방식 3종과 진입 지점 - 입구가 페이로드 한도를 정합니다</h3>
   <p>
     같은 함수라도 어떤 입구로 호출하느냐에 따라 페이로드 한도와 실패 처리 방식이 달라집니다.
-    입구는 크게 다섯 가지입니다.
+    층위를 나누면 호출 방식은 동기, 비동기, 이벤트 소스 매핑 세 가지이고,
+    응답 스트리밍은 그중 동기의 변형이며, Function URL이나 Lambda@Edge는 호출 방식이 아니라 진입 지점입니다.
   </p>
   <ul class="plain">
     <li>
       동기(RequestResponse) - 호출자가 응답을 기다리는 방식입니다.
       요청과 응답 페이로드는 각 6MB까지입니다.
+      실행 환경 인스턴스당 초당 10건까지 처리하므로 총 호출 상한은 동시성의 10배입니다.
+      동시성이 1,000이면 동기 호출 상한은 10,000 RPS입니다.
     </li>
     <li>
       비동기(Event) - 페이로드는 1MB이고 Lambda가 기본 2회 재시도합니다.
       최종 실패 시 이벤트를 DLQ(Dead Letter Queue) 또는 on-failure destination으로 보냅니다.
+      실행 환경당 요청 수 제한이 없어 총 상한은 함수가 쓸 수 있는 동시성에만 좌우되고,
+      동기의 10배 계산은 여기에 성립하지 않습니다.
     </li>
     <li>
       이벤트 소스 매핑 - 이벤트 폴러(event poller)라는 Lambda 측 리소스가 소스를 폴링해 함수를 호출합니다.
-      지원 소스는 SQS, Kinesis, DynamoDB, MSK, Amazon MQ, self-managed Apache Kafka, Amazon DocumentDB 7종입니다.
-    </li>
-    <li>
-      응답 스트리밍 - 응답을 최대 200MB까지 스트리밍합니다.
-      첫 6MB는 대역폭 제한이 없고 이후 2MBps로 제한됩니다.
-    </li>
-    <li>
-      Function URL과 Lambda@Edge - Function URL은 함수에 부여되는 전용 HTTP(S) 엔드포인트로,
-      퍼블릭 인터넷 전용이라 PrivateLink를 지원하지 않습니다. Lambda@Edge는 CloudFront와 함께 동작합니다.
+      작성 시점 문서 기준 지원 소스는 SQS, Kinesis, DynamoDB, MSK, Amazon MQ,
+      self-managed Apache Kafka, Amazon DocumentDB 7종입니다.
     </li>
   </ul>
+  <p>
+    응답 스트리밍은 별도 호출 방식이 아니라 동기 호출의 변형입니다.
+    응답을 최대 200MB까지 스트리밍하고, 첫 6MB는 대역폭 제한이 없으며 이후 2MBps로 제한됩니다.
+  </p>
+  <p>
+    Function URL, Lambda@Edge, API Gateway는 함수를 어디서 호출할지 정하는 진입 지점입니다.
+    Function URL은 함수에 부여되는 전용 HTTP(S) 엔드포인트로,
+    퍼블릭 인터넷 전용이라 PrivateLink를 지원하지 않습니다.
+    Lambda@Edge는 CloudFront와 함께 동작하고, API Gateway는 자체 스로틀을 앞단에 더합니다(섹션 06 참고).
+    어느 진입 지점이든 뒤에서는 위 호출 방식 중 하나로 함수에 도달하므로,
+    입구의 조합이 곧 페이로드 한도와 처리량 상한을 정합니다.
+  </p>
 
   <h3>5.3 동시성 3종과 스케일링 속도</h3>
   <p>
@@ -1091,13 +1157,13 @@ flowchart LR
         </tr>
         <tr>
           <th scope="row">예약 동시성 (reserved)</th>
-          <td class="num">기본 최대 900</td>
-          <td>특정 함수 전용 몫을 확보. 100은 항상 unreserved로 남음. 추가 요금 없음</td>
+          <td class="num">계정 동시성에서 100을 뺀 값까지</td>
+          <td>특정 함수 전용 몫을 확보. 기본 계정 동시성 1,000 기준 최대 900이고, 계정 동시성을 상향하면 함께 커짐. 100 유닛은 항상 unreserved로 남음. 추가 요금 없음</td>
         </tr>
         <tr>
           <th scope="row">프로비저닝드 동시성 (provisioned)</th>
-          <td>초당 호출 한도 = 동시성 할당량의 10배</td>
-          <td>10배 규칙은 계정 레벨과 온디맨드에도 동일 적용</td>
+          <td>동기 호출 한도 = 할당 동시성의 10배</td>
+          <td>10배 규칙은 동기 호출 한정. 온디맨드 함수의 동기 호출도 환경당 10 RPS로 동일. 비동기는 환경당 요청 수 무제한</td>
         </tr>
         <tr>
           <th scope="row">스케일링 속도</th>
@@ -1431,7 +1497,7 @@ flowchart LR
           <td>Invocation</td>
           <td><span class="num">15 min</span></td>
           <td>Firecracker microVM (managed)</td>
-          <td>None</td>
+          <td>Not guaranteed (/tmp and global variables persist on warm reuse)</td>
           <td>One-shot event-driven processing</td>
         </tr>
         <tr>
@@ -1468,6 +1534,11 @@ flowchart LR
     environment is frozen (paused).
     Isolation is handled by Firecracker, the lightweight microVM virtualization technology
     that has served as Lambda's isolation layer.
+    When a frozen environment is reused for the next invocation, the /tmp directory and
+    global variable state outside the handler are preserved as-is.
+    This is why the optimization of creating a DB connection in initialization code and
+    reusing it works - but execution environments are replaced every few hours, so state
+    retention across invocations must not be assumed as a guarantee.
   </p>
   <p>
     Lambda Managed Instances runs your code on customer-owned EC2 instances while Lambda handles
@@ -1509,6 +1580,16 @@ flowchart LR
       always-on parallel processing, long-running workflows, or code sandboxes.
     </figcaption>
   </figure>
+
+  <p>
+    The four models are not entirely mutually exclusive.
+    The AWS documentation describes Durable Functions as regular Lambda functions that use
+    the checkpoint/replay mechanism, so Durable Functions is not separate infrastructure but
+    an execution mode that operates on top of base Functions.
+    Whether Durable Functions can be combined with Managed Instances or MicroVMs, on the
+    other hand, is not mentioned in the official documentation at the time of writing,
+    so this document makes no claim either way.
+  </p>
 </section>
 
 <!-- ===================== 02 ===================== -->
@@ -1535,6 +1616,20 @@ flowchart LR
     Base Lambda's equation - one execution environment handles one concurrent invocation - does not
     hold here.
   </p>
+
+  <div class="callout warn">
+    <span class="callout-title">Caution - isolation between invocations goes away</span>
+    <p>
+      In base Lambda, one execution environment handles only one concurrent invocation and the
+      environment itself is isolated as a Firecracker microVM, but on Managed Instances concurrent
+      invocations share the same container's process space, divided per runtime worker.
+      Global variable pollution, thread safety, and one invocation's memory leak spilling into
+      another become <strong>items you must newly review when migrating</strong>.
+      The AWS documentation also states that thread safety, state management, and context
+      isolation must be handled differently in this execution model.
+    </p>
+  </div>
+
   <p>
     Timeouts apply independently per invocation.
     Even if one invocation times out, other invocations in the same environment keep running unaffected.
@@ -1565,17 +1660,32 @@ flowchart LR
     disposal policy.
   </p>
 
-  <h3>2.3 Limits and scaling</h3>
+  <h3>2.3 Limits, scaling, and billing</h3>
   <p>
     How do the limits differ from base Lambda?
     Initialization is allowed up to 15 minutes, and the file descriptor limit is 4,096, larger than
     base Lambda's 1,024. The execution environment OS is based on Bottlerocket.
   </p>
   <p>
-    Scaling happens automatically with traffic within minimum/maximum execution environment bounds,
-    and scale-to-zero on idle is also supported.
+    Scaling happens automatically based on resource usage signals, within the configured
+    minimum/maximum execution environment bounds.
+    There is, however, no automatic scale-to-zero.
+    Even with no traffic, capacity shrinks only down to the configured minimum execution
+    environments (3 by default).
+    Setting both the minimum and maximum to 0 disables the function and terminates the
+    underlying instances, and it does not come back automatically when traffic returns -
+    you must set them back to non-zero values.
     Since 2026-05-12, schedule-based scaling has been added: you define one-time or recurring
     schedules with Amazon EventBridge Scheduler to adjust capacity limits in advance.
+  </p>
+  <p>
+    The billing structure also differs from base Lambda.
+    A request charge of $0.20 per million requests is combined with the provisioned EC2
+    instance cost and a management fee equal to 15% of the EC2 on-demand price.
+    There is no per-invocation duration charge; instead, as the instance-resident label in
+    Table 1 implies, billing continues while instances are up even with no traffic.
+    EC2 Savings Plans and Reserved Instance discounts apply only to the underlying EC2 cost,
+    not to the management fee.
   </p>
 </section>
 
@@ -1659,10 +1769,20 @@ flowchart LR
 
   <h3>3.3 Limits - the non-raisable items are your design constraints</h3>
   <p>
-    Only three limits need remembering.
-    Executions per region: 5 million, and 10 million in the Virginia, Oregon, and Ireland regions.
+    Start with the aggregate limits.
+    Concurrently running durable executions are capped at 5 million per region, and 10 million
+    in the Virginia, Oregon, and Ireland regions.
     Durable operations per execution: 3,000; persistent data per execution: 100MB - and
     <strong>these two limits cannot be raised.</strong>
+  </p>
+  <p>
+    The entry rate is limited too.
+    Function invocations that start a durable execution are limited to 300 RPS per region,
+    and this limit can be raised on request.
+    In flows where one request starts one execution - orders or payments, say - you hit this
+    entry ceiling before the 5-million-per-region cap.
+    Observability APIs such as GetDurableExecutionHistory and ListDurableExecutionsByFunction
+    are also limited to 15 RPS each, so factor dashboard polling intervals into the design.
   </p>
   <p>
     Non-raisable limits are design-stage constraints, not operational ones.
@@ -1739,6 +1859,22 @@ flowchart LR
     Total memory per account and region is 400GB (1,024GB in Virginia, Oregon, Ohio, and Tokyo)
     with 4x burst, and you get up to 100 images and 50 versions per image.
   </p>
+  <p>
+    Throughput limits exist at both the VM level and the API level.
+    Concurrent connections per VM scale with vCPU, from 8 at 1 vCPU to 128 at 16 vCPU,
+    and requests per second per VM are 40 on a 4vCPU/8GB configuration and 160 on a
+    16vCPU/32GB configuration.
+    These two limits cannot be raised.
+  </p>
+  <p>
+    API rate limits apply per account and region and can be raised on request.
+    Launch (RunMicrovm) and resume (ResumeMicrovm) are 5 TPS each, and suspend
+    (SuspendMicrovm) is 2 TPS.
+    Launching at 5 TPS amounts to roughly 300 per minute at the defaults, so sandbox launches
+    on the order of a few hundred per minute fit within the default limits.
+    Concurrent image builds default to 5 per account and region (10 in Virginia, Oregon,
+    Ohio, and Tokyo).
+  </p>
 </section>
 
 <!-- ===================== 05 ===================== -->
@@ -1801,40 +1937,54 @@ flowchart LR
   <p>
     The public preview runtimes come with a caveat.
     Node.js 26 and Python 3.15 are not covered by the Lambda SLA or AWS technical support plans,
-    and AWS explicitly prohibits their use for production workloads (announced 2026-08-25).
+    and AWS states they should not be used for production workloads (announced 2026-08-25).
+    This is documented guidance, not a technical block.
   </p>
 
-  <h3>5.2 The five invocation types - the entry point sets the payload limit</h3>
+  <h3>5.2 The three invocation types and entry points - the entrance sets the payload limit</h3>
   <p>
-    Even for the same function, the payload limit and failure handling differ by which entry point
+    Even for the same function, the payload limit and failure handling differ by which entrance
     invokes it.
-    There are broadly five entry points.
+    Sorted into layers, there are three invocation types - synchronous, asynchronous, and
+    event source mapping; response streaming is a variant of synchronous, and Function URLs
+    or Lambda@Edge are entry points, not invocation types.
   </p>
   <ul class="plain">
     <li>
       Synchronous (RequestResponse) - the caller waits for the response.
       Request and response payloads are up to 6MB each.
+      Each execution environment instance handles up to 10 requests per second, so the total
+      invocation ceiling is 10x the concurrency.
+      With a concurrency of 1,000, the synchronous invocation ceiling is 10,000 RPS.
     </li>
     <li>
       Asynchronous (Event) - the payload is 1MB and Lambda retries twice by default.
       On final failure, the event goes to a DLQ (Dead Letter Queue) or an on-failure destination.
+      There is no per-environment request cap, so the total ceiling depends only on the
+      concurrency available to the function - the synchronous 10x math does not apply here.
     </li>
     <li>
       Event source mapping - a Lambda-side resource called an event poller polls the source
       and invokes the function.
-      Seven sources are supported: SQS, Kinesis, DynamoDB, MSK, Amazon MQ,
-      self-managed Apache Kafka, and Amazon DocumentDB.
-    </li>
-    <li>
-      Response streaming - streams responses up to 200MB.
-      The first 6MB has no bandwidth cap; after that, it is limited to 2MBps.
-    </li>
-    <li>
-      Function URLs and Lambda@Edge - a Function URL is a dedicated HTTP(S) endpoint assigned
-      to a function; it is public-internet-only and does not support PrivateLink.
-      Lambda@Edge works together with CloudFront.
+      Per the documentation at the time of writing, seven sources are supported: SQS, Kinesis,
+      DynamoDB, MSK, Amazon MQ, self-managed Apache Kafka, and Amazon DocumentDB.
     </li>
   </ul>
+  <p>
+    Response streaming is not a separate invocation type but a variant of synchronous invocation.
+    It streams responses up to 200MB; the first 6MB has no bandwidth cap, after which it is
+    limited to 2MBps.
+  </p>
+  <p>
+    Function URLs, Lambda@Edge, and API Gateway are entry points that decide where the function
+    is invoked from.
+    A Function URL is a dedicated HTTP(S) endpoint assigned to a function;
+    it is public-internet-only and does not support PrivateLink.
+    Lambda@Edge works together with CloudFront, and API Gateway adds its own throttle in front
+    (see section 06).
+    Whatever the entry point, requests reach the function through one of the invocation types
+    above, so the combination at the entrance determines the payload limits and throughput ceilings.
+  </p>
 
   <h3>5.3 The three concurrency types and scaling rate</h3>
   <p>
@@ -1860,13 +2010,13 @@ flowchart LR
         </tr>
         <tr>
           <th scope="row">Reserved concurrency</th>
-          <td class="num">Up to 900 by default</td>
-          <td>Carves out a dedicated share for a specific function. 100 always remains unreserved. No extra charge</td>
+          <td class="num">Up to the account concurrency minus 100</td>
+          <td>Carves out a dedicated share for a specific function. At the default account concurrency of 1,000 that is at most 900, and it grows as the account concurrency is raised. 100 units always remain unreserved. No extra charge</td>
         </tr>
         <tr>
           <th scope="row">Provisioned concurrency</th>
-          <td>Invocations-per-second limit = 10x the concurrency allocation</td>
-          <td>The 10x rule applies equally at the account level and to on-demand</td>
+          <td>Synchronous invocation limit = 10x the allocated concurrency</td>
+          <td>The 10x rule applies to synchronous invocations only. Synchronous invocations of on-demand functions are likewise 10 RPS per environment. Asynchronous invocations have no per-environment request cap</td>
         </tr>
         <tr>
           <th scope="row">Scaling rate</th>
