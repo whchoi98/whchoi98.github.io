@@ -36,6 +36,7 @@ exclude:
   - "docs/reference"
   - "docs/architecture.md"
   - "docs/onboarding.md"
+  - "review-doc"
   - "scripts"
   - "tests"
   - "tools"
