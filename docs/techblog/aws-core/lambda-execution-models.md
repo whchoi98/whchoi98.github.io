@@ -1,5 +1,5 @@
 ---
-title: "AWS Lambda 실행 모델 4종의 구조와 선택 기준"
+title: "AWS Lambda의 4가지 실행 모델 - 구조와 선택 기준"
 title_en: "The Four AWS Lambda Execution Models - Structure and Selection Criteria"
 layout: report
 report_src: /docs/techblog/aws-core/lambda-execution-models-report.html
