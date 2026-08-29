@@ -14,12 +14,12 @@ email: whchoi98@gmail.com
     <span class="l-en">I am a technology leader with 26 years of experience in IT platform transformation, including 7 years at AWS.</span>
   </p>
   <p>
-    <span class="l-ko">엔터프라이즈와 함께 대규모 클라우드 플랫폼을 설계하고 현대화합니다. 클라우드 아키텍처, Kubernetes와 컨테이너, 네트워킹, 생성형 AI, Agentic AI가 주 영역입니다.</span>
-    <span class="l-en">I work with enterprises to design and modernize large-scale cloud platforms, with a focus on cloud architecture, Kubernetes and containers, networking, generative AI, and Agentic AI.</span>
+    <span class="l-ko">AWS Korea의 Principal Solutions Architect로, 국내 주요 엔터프라이즈 및 디지털 기업의 클라우드 전환과 아키텍처 현대화를 지원하고 있습니다. 특히 클라우드 네이티브 아키텍처와 Agentic AI 분야에 전문성을 가지고 있으며, 고객이 Amazon Bedrock을 비롯한 AWS의 생성형 AI 및 Agentic AI 기술을 안정적이고 비용 효율적으로 도입하고 확장할 수 있도록 아키텍처 설계와 기술 자문을 제공하고 있습니다.</span>
+    <span class="l-en">As a Principal Solutions Architect at AWS Korea, I support cloud transformation and architecture modernization for major Korean enterprises and digital-native companies. I specialize in cloud-native architecture and Agentic AI, providing architecture design and technical advisory so customers can adopt and scale AWS generative AI and Agentic AI technologies - including Amazon Bedrock - reliably and cost-effectively.</span>
   </p>
   <p>
-    <span class="l-ko">아키텍처 설계에 그치지 않고, 복잡한 기술 과제를 확장 가능한 패턴으로 바꾸고, 엔지니어링 팀의 신기술 도입을 돕고, 고객 프로젝트와 커뮤니티, 강연을 통해 기술 리더십을 확산하는 데 집중합니다.</span>
-    <span class="l-en">My work goes beyond architecture design. I focus on turning complex technical challenges into scalable patterns, helping engineering teams adopt new technologies, and spreading technical leadership through customer engagements, communities, and public speaking.</span>
+    <span class="l-ko">컨테이너, 네트워킹, 비용 최적화를 비롯한 클라우드 핵심 기술부터 Agentic AI를 활용한 업무 혁신과 지능형 시스템 구축까지 폭넓은 영역에서 AWS 아키텍처 모범 사례를 제시하고 있습니다. 이를 통해 고객의 복잡한 기술적 과제를 해결하고, AI와 클라우드를 기반으로 지속 가능한 기술 전략을 수립하고 실행할 수 있도록 기술 리더십을 발휘하고 있습니다.</span>
+    <span class="l-en">I present AWS architecture best practices across a wide range of areas, from core cloud technologies such as containers, networking, and cost optimization to work innovation and intelligent systems built with Agentic AI - helping customers solve complex technical challenges and establish and execute sustainable technology strategies built on AI and the cloud.</span>
   </p>
 </div>
 
