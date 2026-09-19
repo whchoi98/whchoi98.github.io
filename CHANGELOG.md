@@ -28,6 +28,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Add a result-sample section to the six capstone lab pages linking the deployed sample apps on `whchoi.net` (clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)
 - Rebuild `ccw-hands-on-lab` from the 2026-09-19 "My Workshop" reader build with a shared `assets/` directory (common table of contents, search, dark mode, print view, reading history); archive the previous standalone build and legacy capstone labs A–D under `ccw-hands-on-lab/v1/`; update the workshop nav page (Capstone 2 row, v1 archive note)
 - Replace the theme entirely with a custom Jekyll theme (navy/orange card UI, dark mode, tag filter, workshop sidebar) after iterating through Chirpy, TeXt, and Just the Docs
 - Unify all existing posts into techblogs-format report documents
@@ -71,6 +72,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 캡스톤 랩 페이지 6개에 `whchoi.net`의 배포 샘플 앱(clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)을 연결하는 결과 샘플 섹션 추가
 - `ccw-hands-on-lab`을 2026-09-19 "My Workshop" 리더 빌드로 재구성(공용 `assets/` 디렉토리, 공통 목차·검색·다크 모드·인쇄·읽기 기록); 이전 독립 실행형 빌드와 레거시 캡스톤 랩 A–D를 `ccw-hands-on-lab/v1/`에 보관; 워크샵 네비게이션 페이지 갱신(Capstone 2 행, v1 아카이브 안내)
 - Chirpy, TeXt, Just the Docs를 거쳐 커스텀 Jekyll 테마로 전면 교체 (네이비/오렌지 카드 UI, 다크 모드, 태그 필터, 워크샵 사이드바)
 - 기존 게시물 전체를 techblogs 형식 리포트 문서로 통일
