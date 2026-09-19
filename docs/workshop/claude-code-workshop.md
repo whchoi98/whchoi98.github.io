@@ -2,7 +2,7 @@
 title: Claude Code Deep Dive Workshop
 parent: Workshop
 nav_order: 3
-last_modified_date: "2026-08-10"
+last_modified_date: "2026-09-19"
 ---
 
 # Claude Code Deep Dive Workshop
@@ -44,7 +44,7 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 |:--------|:-----|:-----|
 | [SETUP — Capstone 시작 전, 설치하면 좋은 것들](/ccw-hands-on-lab/ClaudeCode_Capstone_Setup.html) | Claude HUD 계기판, superpowers, Agent Toolkit for AWS 6종, 풀 스택 플러그인 32종 일괄 설치 | 15분 / 단계 4개 |
 | [MISSION 1 — Press Start: Clawd Jump, 에이전틱 게임 개발](/ccw-hands-on-lab/ClaudeCode_Capstone1_HandsOnLab.html) | Clawd 마스코트의 슈퍼마리오풍 플랫포머를 superpowers로 만들어 CloudFront로 개장. Bedrock 미사용, API 키 불필요 | 135분 |
-| [MISSION 2 — Market Desk: 터미널 주식 시황 데스크](/ccw-hands-on-lab/ClaudeCode_Capstone2_HandsOnLab.html) | Textual + yfinance + pykrx + Bedrock으로 지표 바, 골든크로스 차트, 호가창, 뉴스 AI 분석까지 풀스펙 빌드 | 135분 / 미션 5 + DoD |
+| [MISSION 2 — Market Desk: 웹 시황 대시보드](/ccw-hands-on-lab/ClaudeCode_Capstone2_HandsOnLab.html) | FastAPI + React + lightweight-charts로 지표 바, 지수 카드, 종목 테이블, 캔들 차트를 구현하고 Bedrock 종목 분석을 SSE로 스트리밍 — make run 하나로 실행 | 135분 / 미션 5 + DoD |
 | [MISSION 3 — Frame It: Generative Hours, 코드로 그린 전시](/ccw-hands-on-lab/ClaudeCode_Capstone3_HandsOnLab.html) | 제너러티브 아트 두 점으로 여는 인터랙티브 미디어 아트 전시 — 추상이 태어나는 순간을 직접 경험. Bedrock 미사용 | 120분 / 미션 6 + DoD |
 | [MISSION 4 — Trend Radar: 유튜브 급상승 30 트렌드 레이더](/ccw-hands-on-lab/ClaudeCode_Capstone4_HandsOnLab.html) | 급상승 30을 주기 수집해 스냅샷으로 쌓고 순위 변동·NEW·카테고리 점유율의 흐름을 분석 — Bedrock을 SDK 없이 REST로 직접 호출 | 135분 / 미션 5 + DoD |
 | [MISSION 5 — Quake Watch: 실시간 지진 워치](/ccw-hands-on-lab/ClaudeCode_Capstone5_HandsOnLab.html) | USGS 실시간 피드를 멱등 수집해 세계지도 SVG에 진앙 펄스로 표시, Bedrock이 지난 24시간을 한국어로 해설 — 키 발급 없음, CloudFront 실배포 | 120분 / 미션 5 + DoD |
@@ -63,4 +63,7 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 ---
 
 {: .note }
-랩 가이드는 독립 실행형 HTML 페이지로 제공됩니다. 위 링크를 클릭하면 새 스타일의 랩 페이지가 열리며, [랩 포털](/ccw-hands-on-lab/index.html)에서 전체 랩을 한눈에 볼 수 있습니다. 랩 원본과 강의자료는 [GitHub 저장소](https://github.com/whchoi98/claude-code-workshop)에서 관리됩니다.
+랩 가이드는 공통 목차·검색·다크 모드·인쇄·읽기 기록을 갖춘 읽기용 HTML 페이지로 제공됩니다(2026-09-19 빌드). 위 링크를 클릭하면 랩 페이지가 열리며, [랩 포털](/ccw-hands-on-lab/index.html)에서 전체 랩을 한눈에 볼 수 있습니다. 랩 원본과 강의자료는 [GitHub 저장소](https://github.com/whchoi98/claude-code-workshop)에서 관리됩니다.
+
+{: .note }
+이전 빌드는 [/ccw-hands-on-lab/v1/](/ccw-hands-on-lab/v1/index.html)에 보관되어 있으며, 레거시 캡스톤 랩 A–D는 이 아카이브에서만 제공됩니다.
