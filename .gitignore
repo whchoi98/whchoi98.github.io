@@ -4,6 +4,8 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 vendor/
+# Lab pages ship their own highlight.js under assets/vendor (not a Bundler vendor dir)
+!ccw-hands-on-lab/assets/vendor/
 
 # IDE
 .vscode/

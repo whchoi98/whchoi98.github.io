@@ -41,6 +41,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Remove three posts (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- Fix `ccw-hands-on-lab/assets/vendor/` (highlight.js and its license) being dropped by the Bundler `vendor/` gitignore rule, which left the lab pages' code highlighting 404 on the live site and out of the offline ZIP
 - Fix the Chapter 2 lab JSON post-processing step to read `.result` and run metadata from `--output-format json` output instead of the non-existent `.summary`/`.issues` keys, with a callout on the real structure
 - Fix advisor cost analysis overhead ratio narrative (59% to 28% cross-denominator error) and hedge n=1 claims
 - Fix light theme regressions by converting hardcoded colors to theme variables, including the eDM hero banner palette
@@ -87,6 +88,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 3편 제거 (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- Bundler용 `vendor/` gitignore 규칙에 걸려 커밋되지 않던 `ccw-hands-on-lab/assets/vendor/`(highlight.js와 라이선스) 수정 - 라이브 사이트에서 랩 페이지 코드 하이라이트가 404였고 오프라인 ZIP에서도 누락
 - Chapter 2 랩 JSON 후처리 단계 수정: `--output-format json` 출력에서 존재하지 않는 `.summary`/`.issues` 대신 `.result`와 실행 메타데이터를 읽도록 변경, 실제 구조 설명 콜아웃 추가
 - advisor 비용 분석의 오버헤드 비율 서사 수정 (59%→28%, 분모 교차 오류) 및 n=1 주장 헤지 처리
 - 하드코딩 색상을 테마 변수로 전환해 라이트 테마 회귀 수정 (eDM 히어로 배너 팔레트 포함)
