@@ -2,7 +2,7 @@
 title: Claude Code Deep Dive Workshop
 parent: Workshop
 nav_order: 3
-last_modified_date: "2026-09-19"
+last_modified_date: "2026-09-20"
 ---
 
 # Claude Code Deep Dive Workshop
@@ -13,7 +13,8 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 
 [랩 포털 열기](/ccw-hands-on-lab/index.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [세션 소개](/ccw-hands-on-lab/eDM.html){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
-[사전 점검](/ccw-hands-on-lab/ClaudeCode_Preflight_Check.html){: .btn .fs-5 .mb-4 .mb-md-0 }
+[사전 점검](/ccw-hands-on-lab/ClaudeCode_Preflight_Check.html){: .btn .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[원본 ZIP 다운로드](/ccw-hands-on-lab/ClaudeCode_Workshop_HandsOnLab.zip){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
 
@@ -64,6 +65,9 @@ Claude Code 핸즈온 랩 — 설치와 첫 자동화부터 서브에이전트, 
 
 {: .note }
 랩 가이드는 공통 목차·검색·다크 모드·인쇄·읽기 기록을 갖춘 읽기용 HTML 페이지로 제공됩니다(2026-09-19 빌드). 위 링크를 클릭하면 랩 페이지가 열리며, [랩 포털](/ccw-hands-on-lab/index.html)에서 전체 랩을 한눈에 볼 수 있습니다. 랩 원본과 강의자료는 [GitHub 저장소](https://github.com/whchoi98/claude-code-workshop)에서 관리됩니다.
+
+{: .note }
+전체 교재는 [원본 ZIP](/ccw-hands-on-lab/ClaudeCode_Workshop_HandsOnLab.zip)으로 내려받아 PC에서 오프라인으로 볼 수 있습니다. 압축을 풀고 `index.html`을 브라우저에서 열면 되며, HTML 파일과 `assets` 폴더는 같은 폴더에 두어야 합니다. 각 랩 페이지 상단 우측의 ZIP 버튼도 같은 파일을 내려받습니다.
 
 {: .note }
 이전 빌드는 [/ccw-hands-on-lab/v1/](/ccw-hands-on-lab/v1/index.html)에 보관되어 있으며, 레거시 캡스톤 랩 A–D는 이 아카이브에서만 제공됩니다.

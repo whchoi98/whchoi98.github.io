@@ -32,7 +32,7 @@ The primary flow: author writes a report HTML, QA validates it, a push to main t
 
 ### Build & Deploy Layer
 - **_config.yml** -- Site metadata, category registry (`blog_categories`), path-based layout defaults, and the exclude list that keeps internal docs out of the public site.
-- **.github/workflows/pages-deploy.yml** -- On push to main: checkout, Ruby 3.3 setup with bundler cache, `bundle exec jekyll build`, upload artifact, deploy to GitHub Pages.
+- **.github/workflows/pages-deploy.yml** -- On push to main: checkout, Ruby 3.3 setup with bundler cache, `bash scripts/build-lab-zip.sh` (generates `ccw-hands-on-lab/ClaudeCode_Workshop_HandsOnLab.zip`, force-included via `_config.yml` `include`), `bundle exec jekyll build`, upload artifact, deploy to GitHub Pages.
 - **Local build** -- `PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll build -d _site` for pre-push verification.
 
 ### Authoring Pipeline Layer

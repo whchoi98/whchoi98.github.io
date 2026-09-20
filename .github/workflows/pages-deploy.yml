@@ -39,6 +39,9 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
 
+      - name: Build lab ZIP
+        run: bash scripts/build-lab-zip.sh
+
       - name: Build site
         run: bundle exec jekyll build -d "_site" --baseurl ""
         env:

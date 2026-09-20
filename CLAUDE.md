@@ -78,6 +78,9 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll serve
 # techblogs QA (리포트 HTML 구조/스타일 검증, ERROR 시 exit 1)
 python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<카테고리>/<slug>-report.html
 
+# 랩 오프라인 ZIP 생성 (배포 워크플로가 jekyll build 전에 실행; 로컬 빌드 검증 전에도 실행, 산출물은 gitignore)
+bash scripts/build-lab-zip.sh
+
 # 하네스 테스트
 bash tests/run-all.sh
 

@@ -19,6 +19,9 @@ plugins:
   - jekyll-sitemap
   - jekyll-feed
 
+include:
+  - ccw-hands-on-lab/ClaudeCode_Workshop_HandsOnLab.zip
+
 exclude:
   - .sass-cache/
   - .jekyll-cache/
