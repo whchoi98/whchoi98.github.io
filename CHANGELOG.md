@@ -40,6 +40,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Remove three posts (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- Fix the Chapter 2 lab JSON post-processing step to read `.result` and run metadata from `--output-format json` output instead of the non-existent `.summary`/`.issues` keys, with a callout on the real structure
 - Fix advisor cost analysis overhead ratio narrative (59% to 28% cross-denominator error) and hedge n=1 claims
 - Fix light theme regressions by converting hardcoded colors to theme variables, including the eDM hero banner palette
 - Fix build failure caused by Gitbook Liquid tags in imported content
@@ -84,6 +85,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 3편 제거 (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- Chapter 2 랩 JSON 후처리 단계 수정: `--output-format json` 출력에서 존재하지 않는 `.summary`/`.issues` 대신 `.result`와 실행 메타데이터를 읽도록 변경, 실제 구조 설명 콜아웃 추가
 - advisor 비용 분석의 오버헤드 비율 서사 수정 (59%→28%, 분모 교차 오류) 및 n=1 주장 헤지 처리
 - 하드코딩 색상을 테마 변수로 전환해 라이트 테마 회귀 수정 (eDM 히어로 배너 팔레트 포함)
 - 임포트 콘텐츠의 Gitbook Liquid 태그로 인한 빌드 실패 수정

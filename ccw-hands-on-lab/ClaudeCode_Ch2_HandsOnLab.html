@@ -886,13 +886,23 @@ head -c 400 review-result.json</code></pre>
 <div class="step-title"><span class="step-no">2</span>JSON 후처리</div>
 <div class="code-wrap" data-code-kind="terminal">
 <div class="code-head"><span class="code-label"><span aria-hidden="true" class="terminal-lights"><span class="terminal-light-close"></span><span class="terminal-light-minimize"></span><span class="terminal-light-zoom"></span></span>Terminal</span><button aria-label="Terminal 복사" class="ws-copy" data-copy-code="workshop-code-036" data-copy-label="Terminal 복사" type="button">복사</button></div>
-<pre id="workshop-code-036"><code><span class="cmt"># jq가 있다면: 요약과 high severity만 추출</span>
-jq '.summary' review-result.json
-jq '.issues | map(select(.severity == "high"))' review-result.json 2&gt;/dev/null
+<pre id="workshop-code-036"><code><span class="cmt"># jq가 있다면: 리뷰 본문은 result 키에, 실행 메타데이터는 최상위 키에 있습니다</span>
+jq -r '.result' review-result.json
+jq '{cost_usd: .total_cost_usd, turns: .num_turns, session: .session_id, output_tokens: .usage.output_tokens}' review-result.json
+
+<span class="cmt"># high severity 항목만 보려면 본문 텍스트에서 필터</span>
+jq -r '.result' review-result.json | grep -i -A2 'high'
 
 <span class="cmt"># jq가 없다면</span>
-python3 -m json.tool review-result.json | head -30</code></pre>
+python3 -c 'import json; print(json.load(open("review-result.json"))["result"])'</code></pre>
 </div>
+<div class="callout tip">
+<span class="co-title">JSON 출력의 실제 구조</span>
+    <code class="inline">--output-format json</code>의 최상위 키는 <code class="inline">result</code>, <code class="inline">session_id</code>, <code class="inline">num_turns</code>, <code class="inline">total_cost_usd</code>, <code class="inline">usage</code>, <code class="inline">is_error</code> 같은 실행 메타데이터이고,
+    에이전트가 쓴 리뷰 본문은 <code class="inline">result</code> 문자열 하나에 들어갑니다. <code class="inline">summary</code>나 <code class="inline">issues</code> 같은 키는 없습니다.
+    필드 단위로 다루려면 <code class="inline">--json-schema '&lt;스키마&gt;'</code>를 함께 주세요. 스키마에 맞춘 결과가 <code class="inline">structured_output</code> 키에 담기므로 <code class="inline">jq '.structured_output'</code>으로 읽습니다.
+    스키마 없이 프롬프트로 JSON 출력을 요구했다면 <code class="inline">jq -r '.result | fromjson'</code>으로 한 번 더 파싱합니다. Chapter 5 강의에서 --json-schema 기반의 계약형 파이프라인을 다룹니다.
+  </div>
 <div class="step-title"><span class="step-no">3</span>CI 통합 패턴 확인 (참고)</div>
 <p class="body">
     같은 명령을 GitHub Actions에 넣으면 <strong>PR마다 자동 리뷰</strong>가 됩니다.
