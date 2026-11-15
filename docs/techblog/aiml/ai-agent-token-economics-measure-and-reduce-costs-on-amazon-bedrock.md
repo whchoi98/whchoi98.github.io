@@ -5,7 +5,7 @@ layout: report
 report_src: /docs/techblog/aiml/ai-agent-token-economics-measure-and-reduce-costs-on-amazon-bedrock-report.html
 date: 2026-10-20
 category: AIML
-tags: ["Amazon Bedrock", "Claude Code", "Codex", "OpenTelemetry", "Prompt caching", "Model Context Protocol", "Amazon CloudWatch", "AWS Budgets"]
+tags: ["Amazon Bedrock", "Claude Code", "Codex", "OpenTelemetry", "Prompt Caching", "MCP", "Amazon CloudWatch", "AWS Budgets"]
 icon: bedrock
 minutes: 26
 excerpt: "에이전트는 요청 하나 위에 도구 호출과 컨텍스트 재전송을 스스로 더하므로 사용량 캡만으로는 도입 효과와 비용 절감을 함께 놓칩니다. 비용을 여섯 항목의 곱으로 나누어 측정하고 Amazon Bedrock, Claude Code, Codex 설정으로 항목마다 줄이는 방법을 Uber 사례와 함께 정리했습니다."

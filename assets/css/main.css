@@ -180,6 +180,7 @@ a.featured-card { display: block; }
 .side-more { font-size: 13px; font-weight: 700; padding: 4px 6px; }
 
 .post-section { display: flex; flex-direction: column; gap: 16px; padding-top: 40px; }
+.post-section { scroll-margin-top: 16px; }  /* 홈 오른쪽 위의 "모든 글" 링크가 이 목록으로 온다 */
 .post-section-head { display: flex; align-items: baseline; justify-content: space-between; }
 .post-section-head h2, .cat-section h2 { margin: 0; font-weight: 700; letter-spacing: -0.005em; color: var(--t-text); }
 .post-section-head h2 { font-size: 24px; }
@@ -351,7 +352,7 @@ html.dark .chip-lg.active { background: var(--orange); border-color: var(--orang
 /* ---------- About ---------- */
 .about-main { padding: 36px 32px 48px; display: flex; flex-direction: column; gap: 36px; }
 .about-main h2 { margin: 0 0 12px; font-weight: 700; font-size: 22px; color: var(--t-text); letter-spacing: -0.005em; }
-.about-main p { margin: 0 0 12px; font-size: 15.5px; line-height: 1.7; color: var(--t-text2); max-width: 720px; }
+.about-main p { margin: 0 0 12px; font-size: 15.5px; line-height: 1.7; color: var(--t-text2); }  /* 소개 문단은 본문 폭 전체를 쓴다 */
 .now-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .now-card { padding: 22px; display: flex; flex-direction: column; gap: 8px; }
 .now-title { font-weight: 700; font-size: 15px; color: var(--t-text); }

@@ -10,8 +10,8 @@ layout: default
     {% include topbar.html %}
     <div class="hero">
       <span class="hero-eyebrow">Tech blog · Cloud &amp; AIML</span>
-      <h1 class="hero-title"><span class="l-ko">{{ site.tagline }}</span><span class="l-en">Build, break, measure, write</span></h1>
-      <p class="hero-sub">AWS · Kubernetes · Agentic AI - <span class="l-ko">실패까지 포함한 실측 기록.</span><span class="l-en">measured notes, failures included.</span></p>
+      <h1 class="hero-title"><span class="l-ko">{{ site.tagline }}</span><span class="l-en">Build, validate, measure, document</span></h1>
+      <p class="hero-sub"><span class="l-ko">AWS, Kubernetes, Agentic AI 환경에서 직접 측정한 결과를 실패 사례와 함께 기록합니다.</span><span class="l-en">Measured results from AWS, Kubernetes, and agentic AI environments, recorded together with the failures.</span></p>
     </div>
   </div>
 </header>
@@ -46,11 +46,11 @@ layout: default
           </a>
         {% endif %}
       {% endfor %}
-      <a href="/tags/" class="side-more"><span class="l-ko">모든 글</span><span class="l-en">All posts</span> →</a>
+      <a href="#all-posts" class="side-more"><span class="l-ko">모든 글</span><span class="l-en">All posts</span> →</a>
     </div>
   </div>
 
-  <div class="post-section">
+  <div class="post-section" id="all-posts">
     <div class="post-section-head">
       <h2><span class="l-ko">모든 글</span><span class="l-en">All Posts</span></h2>
       <span id="result-label" class="result-label">전체 {{ posts | size }}편 · 최신순</span>
