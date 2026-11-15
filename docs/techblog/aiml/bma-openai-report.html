@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amazon Bedrock Managed Agents: OpenAI 에이전트를 AWS에서 운영하는 방법</title>
+<meta name="description" content="Amazon Bedrock Managed Agents, powered by OpenAI(BMA)는 에이전트의 실행 루프와 세션 상태를 AWS가 대신 맡아 운영하는 관리형 서비스입니다. BMA의 동작 구조와 첫 세션 실행 절차, BMA로 만든 데모 앱 AI Document Studio의 아키텍처와 시험 결과를 정리했습니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/bma-openai/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-04</span><span class="l-en">Published 2026-11-04</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 13분</span><span class="l-en">13 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/bma-openai/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/bma-openai/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">Amazon Bedrock Managed Agents: OpenAI 에이전트를 AWS에서 운영하는 방법</span><span class="l-en">Amazon Bedrock Managed Agents: How to run OpenAI agents on AWS</span></h1>
+<p class="thesis"><span class="l-ko">OpenAI 에이전트를 AWS에서 운영할 때 실행 루프와 세션 관리를 직접 만들어야 하는가에 답하는 글입니다. BMA를 사용하면 실행 루프, 대화 상태, 컨텍스트 관리를 BMA에 맡기고 세션 요청 하나로 에이전트를 실행합니다. OpenAI Python SDK 코드는 접속 주소와 인증만 바꿔 그대로 사용하고, 모델 권한은 세션 역할에, 실행 권한은 고객 계정의 실행 환경에 나눠 둡니다.</span><span class="l-en">This post answers whether you have to build the execution loop and session management yourself to run OpenAI agents on AWS. With BMA, you hand the execution loop, conversation state, and context management to BMA and run an agent with a single session request. You keep your OpenAI Python SDK code, changing only the base URL and authentication, and you split permissions: model access on the session role, execution permissions on the execution environment in your account.</span></p>
+<div class="tags"><span>#Amazon Bedrock</span><span>#Amazon Bedrock Managed Agents</span><span>#Amazon Bedrock AgentCore</span><span>#OpenAI</span><span>#Codex</span><span>#MCP</span><span>#AWS Lambda</span><span>#Amazon CloudFront</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">Amazon Bedrock Managed Agents 한눈에 보기</a><a href="#ko-s3">예시: AI Document Studio의 아키텍처와 흐름</a><a href="#ko-s4">BMA로 구현할 때 편한 점</a><a href="#ko-s5">BMA가 AI Document Studio에 준 장점</a><a href="#ko-s6">시험 결과와 도입 전 확인 사항</a><a href="#ko-s7">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Amazon Bedrock Managed Agents at a glance</a><a href="#en-s3">Example: AI Document Studio architecture and flow</a><a href="#en-s4">What gets easier when you build with BMA</a><a href="#en-s5">Benefits BMA brought to AI Document Studio</a><a href="#en-s6">Test results and what to check before adoption</a><a href="#en-s7">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>에이전트를 직접 만들다 보면 정작 모델을 호출하는 코드보다 그 주변을 챙기는 코드가 더 길어지곤 합니다. 모델이 요청한 도구를 실행하고 결과를 다시 모델에 넣는 반복 루프를 짜야 합니다. 여러 턴에 걸친 대화를 저장하고 길어진 컨텍스트도 정리해야 합니다. 명령을 실행할 격리된 환경과 그 권한까지 애플리케이션이 직접 준비해야 했습니다.</p>
+<p><a href="https://aws.amazon.com/ko/bedrock/managed-agents-openai/" target="_blank" rel="noopener">Amazon Bedrock Managed Agents, powered by OpenAI</a>(이하 BMA)는 이 일을 AWS가 대신 맡아 운영하는 관리형 서비스입니다. BMA는 AWS와 OpenAI가 OpenAI Agents API를 바탕으로 함께 만든 서비스로, 2026년 9월 29일 <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/09/bedrock-managed-agents-preview/" target="_blank" rel="noopener">프리뷰로 공개</a>되었습니다. 개발자는 세션을 하나 만들면서 모델, 지침, 도구, 실행 환경을 지정하고 메시지를 보내기만 하면 됩니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Amazon Bedrock Managed Agents 한눈에 보기</h2></header><div class="prose">
+<h3>1.1 BMA가 대신 맡는 일</h3>
+<p>BMA의 역할을 한 문장으로 줄이면 “에이전트의 생각은 BMA 안에서, 손발은 고객 계정의 실행 환경에서 움직인다”입니다. 모델을 호출하고 다음 할 일을 정하는 실행 루프는 BMA 안에서 실행되고 명령과 도구는 고객 계정의 실행 환경에서 실행됩니다.</p>
+<p>이 실행 루프를 Codex 하네스(Harness)라고 부릅니다. OpenAI의 Codex에서 가져온 루프로, 모델에게 다음 할 일을 묻고 모델이 고른 도구를 실행하고 그 결과를 다시 모델에 넘기는 과정을 반복합니다. 직접 구현할 때와 비교하면 표 1과 같습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>기능</th><th>직접 구현할 때</th><th>BMA를 사용할 때</th></tr>
+</thead>
+<tbody>
+<tr><td>실행 루프</td><td>도구 호출을 꺼내 실행하고 결과를 다시 넣는 반복을 직접 작성</td><td>Codex 하네스가 도구 선택과 반복을 처리</td></tr>
+<tr><td>대화 상태</td><td>메시지와 도구 결과를 애플리케이션 저장소에 보관</td><td>세션이 메시지, 도구 호출, 중간 결과를 유지</td></tr>
+<tr><td>긴 컨텍스트</td><td>요약이나 잘라내기를 직접 구현</td><td>하네스가 오래된 대화를 압축(Compaction)</td></tr>
+<tr><td>재사용 절차</td><td>프롬프트 템플릿을 코드로 관리</td><td>파일로 작성한 Skills를 실행 환경에 배치</td></tr>
+<tr><td>권한과 감사</td><td>애플리케이션 자격증명으로 처리</td><td>에이전트마다 IAM 역할 지정, 지원되는 API 활동은 AWS CloudTrail에 기록</td></tr>
+<tr><td>인증</td><td>OpenAI API 키 관리</td><td>AWS 자격증명으로 요청에 서명, OpenAI API 키 불필요</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 에이전트를 직접 구현할 때와 BMA를 사용할 때의 차이 (BMA 프리뷰 발표문과 Amazon Bedrock User Guide 기준)</p>
+<p>그림 1은 요청 하나가 처리되는 모습입니다. 에이전트가 명령을 실행하거나 파일을 다뤄야 하면, BMA는 그 작업을 고객 계정의 실행 환경으로 보냅니다. 실행 환경에서는 <code>codex exec-server</code>라는 프로세스가 BMA에 연결된 채로 기다리다가 전달받은 명령만 실행합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig01-bma-01_how-bma-works.png" alt="BMA의 동작 구조" width="1000" height="563" loading="lazy"></div><figcaption><b>그림 1.</b> BMA의 동작 구조 (Amazon Bedrock User Guide와 AgentCore Developer Guide의 BMA 문서 기준)</figcaption></figure>
+<p>글 전체에서 사용하는 용어는 표 2와 같습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>용어</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td>세션(Session)</td><td>모델, 지침, 도구, IAM 역할, 실행 환경을 지정한 하나의 대화. 여러 메시지에 걸쳐 내용을 기억</td></tr>
+<tr><td>턴(Turn)</td><td>메시지 하나를 처리하는 작업 단위. 도구 호출과 답변 생성을 포함</td></tr>
+<tr><td>아이템(Item),<br> 이벤트(Event)</td><td>아이템은 남겨 두는 대화 결과, 이벤트는 작업 진행을 실시간으로 알리는 신호</td></tr>
+<tr><td>세션 역할(Session role)</td><td>BMA가 고객 대신 모델 추론과 Runtime 실행을 할 때 사용하는 IAM 역할</td></tr>
+<tr><td>실행 환경<br> (Execution environment)</td><td>명령과 도구가 실행되는 고객 계정의 컴퓨팅</td></tr>
+<tr><td>Exec server</td><td>실행 환경을 BMA에 연결하는 <code>codex exec-server</code> 프로세스</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> BMA의 핵심 용어 (Amazon Bedrock User Guide의 BMA 프리뷰 문서 기준)</p>
+<p>BMA는 리전별 엔드포인트(<code>https://bedrock-mantle.{region}.api.aws</code>)로 제공됩니다. 프리뷰 리전은 미국 동부(버지니아 북부), 미국 서부(오레곤), 미국 동부(오하이오) 세 곳입니다. 프리뷰 기간에는 BMA 자체 요금이 없고 모델 추론과 에이전트가 사용하는 AWS 리소스 비용만 발생합니다.</p>
+<h3>1.2 실행 환경 두 가지</h3>
+<p>실행 환경은 두 가지 중에서 고릅니다.</p>
+<ul>
+<li>자체 호스팅: 이미 운영 중인 서버나 컨테이너에서 exec server를 직접 실행합니다.</li>
+<li>AgentCore Runtime: exec server를 담은 컨테이너를 Amazon Bedrock AgentCore Runtime에 배포해 둡니다.</li>
+</ul>
+<p>처음이라면 AgentCore Runtime으로 시작하는 것을 권장합니다. BMA가 필요할 때 Runtime을 실행하므로 서버를 구동할 필요가 없습니다. 세션마다 전용 microVM(가벼운 가상 머신)이 만들어져 서로 분리되고 AgentCore CLI가 프로젝트 템플릿과 배포 명령도 제공합니다.</p>
+<h3>1.3 첫 세션 실행 절차</h3>
+<p>BMA를 가장 빠르게 시험하는 방법은 AgentCore CLI의 BMA 템플릿입니다. 공식 문서에 따르면 프로젝트 생성부터 후속 메시지 전송까지 약 15분이 걸립니다. 준비물은 Node.js 20 이상, uv(Python 패키지 관리 도구), AWS 자격증명, 사용할 모델의 접근 권한입니다.</p>
+<p>아래 명령은 <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-bma.html" target="_blank" rel="noopener">AWS 문서의 절차</a>를 따르며 이 문법이 동작하는 CLI 0.31 버전으로 설치를 고정했습니다. 버전 없이 설치하면 npm의 <code>latest</code> 태그인 1.0.x가 설치되는데, 1.0.x의 <code>create</code>는 <code>--framework</code> 옵션을 받지 않습니다. 1.0.x를 사용한다면 <code>agentcore create --help</code>에서 BMA 템플릿 옵션을 먼저 확인합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 1. 프로젝트 생성: BedrockManagedAgents 프레임워크 템플릿
+npm install -g @aws/agentcore@0.31
+export AWS_REGION=us-east-1
+agentcore create --name MyManagedAgent --framework BedrockManagedAgents
+cd MyManagedAgent
+
+# 2. 배포: CodeBuild가 계정 안에서 이미지를 빌드하고 Runtime을 생성
+agentcore deploy
+agentcore status          # 출력에서 Runtime ARN 확인
+
+# 3. 세션 실행 (ARN은 status 출력의 실제 값으로 바꿈)
+RUNTIME_ARN="arn:aws:bedrock-agentcore:us-east-1:&lt;계정 ID&gt;:runtime/&lt;Runtime ID&gt;"
+cd app/MyManagedAgent
+uv run client.py --runtime "$RUNTIME_ARN"
+
+# 4. 같은 세션에 후속 메시지 보내기 (3번 출력의 세션 ID 사용)
+SESSION_ID="&lt;세션 ID&gt;"
+uv run client.py --runtime "$RUNTIME_ARN" --session-id "$SESSION_ID" \
+  --input "Run cat acr-report.txt and show the output."</code></pre></div>
+<p>3번 명령을 실행하면 세션 ID, 에이전트가 실행한 명령과 출력, 최종 답변이 차례로 출력됩니다. 4번 명령은 같은 세션 ID로 후속 메시지를 보내, 에이전트가 앞 턴의 작업을 기억하는지 확인합니다. 시험이 끝나면 <code>agentcore remove all</code>과 <code>agentcore deploy</code>를 차례로 실행합니다. 이 명령은 Runtime과 실행 역할, 프로젝트 스택을 지우지만 모든 리소스를 지우지는 않습니다. 다음 리소스는 남습니다.</p>
+<ul>
+<li>Runtime, 이미지 빌드, 빌드용 Lambda 함수의 CloudWatch Logs 로그 그룹</li>
+<li>Amazon ECR 저장소의 KMS 키(30일 삭제 대기 후 삭제)</li>
+<li>첫 배포 때 만든 <code>CDKToolkit</code> 스택</li>
+<li>계정 전체에 적용되는 CloudWatch Transaction Search 설정(추가 요금 발생 가능)</li>
+</ul>
+<p>예제 클라이언트가 직접 만든 세션 역할도 스택에 속하지 않으므로 IAM에서 따로 확인합니다.</p>
+<p>예제 클라이언트는 OpenAI Python SDK를 그대로 사용합니다. 바꾸는 곳은 두 군데뿐입니다. 접속 주소(<code>base_url</code>)를 BMA 엔드포인트로 바꾸고 API 키 자리에 AWS 자격증명으로 짧은 수명의 토큰을 만드는 함수를 넣습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>client = OpenAI(api_key=lambda: provide_token(region=region),
+                base_url=f"https://bedrock-mantle.{region}.api.aws/openai/v1")
+events = client.beta.agents.sessions.create(
+    agent={"model": BMA_MODEL_ID, "instructions": "Use the available tools to complete the task."},
+    environment={"type": "aws_bedrock_agentcore", "runtime_arn": args.runtime},   # 일부 필드 생략
+    input=args.input, stream=True)</code></pre></div>
+<p>세션 생성 요청에는 모델과 지침(<code>agent</code>), 실행 환경(<code>environment</code>), 첫 메시지(<code>input</code>)가 담깁니다. 코드에서 생략한 필드 중에는 세션 역할(<code>role_arn</code>)도 있으며 프리뷰에서는 필수입니다. 뒤에서 소개할 AI Document Studio도 같은 구조를 사용하고 <code>agent</code>에 MCP 도구를 더했습니다. MCP(Model Context Protocol)는 에이전트가 외부 도구를 호출할 때 사용하는 표준 규약입니다.</p>
+<h3>1.4 모델과 리전 선택</h3>
+<p>BMA에서 GPT-6.1 Sol을 사용하려면 <code>us-east-1</code> 리전의 <code>bedrock-mantle</code> 엔드포인트에서 모델 ID <code>openai.gpt-6.1-sol</code>을 지정합니다.</p>
+<p>GPT-6.1 Sol은 2026년 9월 29일 출시된 모델입니다. 이 모델은 성능과 비용을 함께 고려해야 하는 작업을 위한 모델이며 복잡한 문서 이해와 여러 단계로 이뤄진 업무 흐름에 맞춰져 있습니다. 같은 모델이 <code>bedrock-runtime</code> 엔드포인트에서는 <code>us.openai.gpt-6.1-sol</code>, <code>global.openai.gpt-6.1-sol</code> 같은 리전 간 추론 프로파일(Cross-Region Inference) ID로만 제공됩니다. BMA는 <code>bedrock-mantle</code>에서만 동작하고 리전 간 추론 프로파일도 지원하지 않습니다. 그래서 <code>us.</code>나 <code>global.</code>이 붙지 않은 리전 내(In-Region) 모델 ID를 사용합니다.</p>
+<p>모델 ID는 모델 목록 API(<code>/v1/models</code>)로 확인하고 BMA 세션이 실제로 생성되는지 시험한 뒤 코드에 고정합니다. 목록에 보이는 모델이라고 모두 BMA에서 바로 사용되는 것은 아닙니다. 참고로 BMA 문서의 예제는 기본 모델로 <code>openai.gpt-5.6-luna</code>를 사용합니다.</p>
+<h3>1.5 AgentCore Runtime에서 에이전트를 실행하는 세 가지 방식</h3>
+<p>AgentCore Runtime에서 에이전트를 실행하는 방법은 BMA만 있는 것은 아닙니다. Strands Agents나 Claude Agent SDK 같은 에이전트 프레임워크를 컨테이너에 넣어 Runtime에서 실행할 수도 있습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig02-bma-02_three-ways.png" alt="AgentCore Runtime에서 에이전트를 실행하는 세 가지 방식의 실행 루프 위치와 모델 호출 권한" width="1000" height="563" loading="lazy"></div><figcaption><b>그림 2.</b> AgentCore Runtime에서 에이전트를 실행하는 세 가지 방식의 실행 루프 위치와 모델 호출 권한</figcaption></figure>
+<p>세부 차이는 표 3과 같습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>AgentCore Runtime + Strands Agents</th><th>AgentCore Runtime + BMA</th><th>AgentCore Runtime + Claude Agent SDK</th></tr>
+</thead>
+<tbody>
+<tr><td>컨테이너에<br> 넣는 것</td><td>에이전트 코드, Strands SDK, AgentCore SDK의 <code>BedrockAgentCoreApp</code> 엔트리포인트</td><td>lifecycle 서버, Codex exec server, 도구와 Skills</td><td>에이전트 코드, Claude Agent SDK, Claude Code CLI(Node.js), AgentCore SDK의 <code>BedrockAgentCoreApp</code> 엔트리포인트</td></tr>
+<tr><td>사용할 수 있는<br> 모델</td><td>Amazon Bedrock(기본), OpenAI, Anthropic 등 여러 제공자</td><td>BMA가 지원하는 OpenAI 모델(<code>bedrock-mantle</code>)</td><td>Amazon Bedrock의 Claude 모델(<code>CLAUDE_CODE_USE_BEDROCK=1</code>)</td></tr>
+<tr><td>대화 상태 관리</td><td>애플리케이션이 관리, AgentCore Memory 연동 가능</td><td>BMA 세션이 여러 턴에 걸쳐 유지</td><td>SDK의 세션 기능으로 관리</td></tr>
+<tr><td>기본 제공 도구</td><td>직접 정의한 함수 도구, MCP 도구</td><td>작업 공간의 명령 실행, STDIO MCP, Skills</td><td>파일 읽기와 쓰기, 명령 실행, 웹 검색, MCP, Skills, 하위 에이전트</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> AgentCore Runtime에서 에이전트를 실행하는 세 가지 방식 비교 (AgentCore Developer Guide, Strands Agents 문서, Claude Agent SDK 문서 기준, 2026년 10월 28일 확인. Claude Agent SDK의 Bedrock 설정은 AWS 샘플 저장소 기준이며 BMA는 프리뷰입니다)</p>
+<p>Strands Agents와 Claude Agent SDK는 실행 루프가 고객 컨테이너 안에 있어 루프의 동작을 코드로 세밀하게 바꿀 수 있습니다. 대신 대화 상태 저장, 컨텍스트 정리, 모델 호출 권한도 컨테이너 쪽에서 챙겨야 합니다. BMA는 루프와 세션을 BMA가 운영하기 때문에, 실행 환경에는 도구에 필요한 권한만 주면 됩니다.</p>
+<p>어떤 방식을 고를지는 다음 기준으로 판단하면 됩니다.</p>
+<ul>
+<li>Strands Agents: 모델을 자유롭게 고르고 실행 루프를 코드로 직접 제어하고 싶을 때</li>
+<li>BMA: 루프와 세션 운영을 BMA에 맡기고 OpenAI 모델을 사용하고 싶을 때</li>
+<li>Claude Agent SDK: Claude Code의 도구와 작업 방식을 그대로 에이전트에 가져오고 싶을 때</li>
+</ul>
+<p>각 방식의 배포 방법은 <a href="https://strandsagents.com/latest/documentation/docs/user-guide/deploy/deploy_to_bedrock_agentcore/" target="_blank" rel="noopener">Strands Agents 배포 문서</a>, <a href="https://code.claude.com/docs/en/agent-sdk/overview" target="_blank" rel="noopener">Claude Agent SDK 문서</a>, <a href="https://github.com/aws-samples/sample-deploy-ClaudeAgentSDK-based-agents-to-AgentCore-Runtime" target="_blank" rel="noopener">AWS 샘플 저장소</a>에 나와 있습니다.</p>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>예시: AI Document Studio의 아키텍처와 흐름</h2></header><div class="prose">
+<p>지금부터는 BMA로 만든 실제 앱을 예로 들어 구성과 흐름을 살펴봅니다. AI Document Studio는 엑셀, CSV, 텍스트 파일이나 메모를 올리고 원하는 결과를 적으면 차트, 다이어그램, 편집할 수 있는 PowerPoint와 Word 문서를 만들어 주는 데모 앱입니다.</p>
+<h3>2.1 전체 아키텍처</h3>
+<p>AI Document Studio 아키텍처는 단순합니다. 브라우저의 요청은 서울 엣지의 CloudFront를 거쳐 버지니아 북부의 Lambda Web Function, Studio Worker, BMA(openai.gpt-6.1-sol), 문서 전용 Runtime으로 이어집니다. MCP 도구가 만든 차트와 문서 파일은 S3에 저장됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig03-bma-03_architecture.png" alt="AI Document Studio 아키텍처" width="1000" height="563" loading="lazy"></div><figcaption><b>그림 3.</b> AI Document Studio 아키텍처 (2026년 10월 27일 us-east-1 배포 기준. 번호 1~6은 요청 처리 순서입니다)</figcaption></figure>
+<p>그림 3의 구성 요소는 다섯 가지이며 각자 맡은 일이 하나씩입니다.</p>
+<ul>
+<li>화면과 API: Node.js 24로 작성한 Lambda Web Function 하나가 맡고 앞에 Amazon CloudFront를 둡니다.</li>
+<li>작업 처리: Studio worker(Lambda)가 BMA 세션을 만들고 메시지를 보냅니다.</li>
+<li>에이전트: BMA가 <code>openai.gpt-6.1-sol</code> 모델로 실행 루프와 세션 상태를 맡습니다.</li>
+<li>실행 환경: 문서 전용 AgentCore Runtime에서 문서 MCP 도구 6개와 Skills 3개가 실행됩니다.</li>
+<li>저장소: 비공개 Amazon S3 버킷에 입력 파일, 작업 상태, 결과 파일을 둡니다.</li>
+</ul>
+<h3>2.2 요청 하나가 처리되는 흐름</h3>
+<p>그림 3의 번호 1~6을 따라가면 요청 하나가 처리되는 순서를 알 수 있습니다.</p>
+<p>1. 사용자의 요청이 서울 엣지의 CloudFront를 거쳐 Web Function에 도착합니다.</p>
+<p>2. Web Function이 입력 파일과 작업 상태를 S3에 저장합니다.</p>
+<p>3. Web Function이 worker를 비동기로 호출하고 곧바로 응답합니다.</p>
+<p>4. worker가 작업마다 새 BMA 세션을 만들고 요청을 보냅니다.</p>
+<p>5. BMA가 문서 Runtime을 실행하고 MCP 도구가 차트와 문서 파일을 만들어 S3에 저장합니다.</p>
+<p>6. 진행 단계는 SSE(Server-Sent Events, 서버가 브라우저로 데이터를 계속 흘려보내는 방식)로 화면에 표시되고 완료된 파일은 인증된 다운로드로 받습니다.</p>
+<p>이 흐름에서 애플리케이션 코드가 하는 일은 파일 저장, 세션 생성, 진행 상황 전달 세 가지입니다. 어떤 도구를 어떤 순서로 몇 번 호출할지는 4~5번 사이에서 BMA의 Codex 하네스가 정합니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>BMA로 구현할 때 편한 점</h2></header><div class="prose">
+<h3>3.1 실행 루프 대신 세션 요청 하나</h3>
+<p>worker가 보내는 세션 생성 요청은 첫 세션 예제와 같은 구조이고 <code>agent</code> 안에 <code>tools</code> 항목을 더했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>"agent": {
+  "model": "openai.gpt-6.1-sol",
+  "instructions": "...",
+  "tools": [{
+    "type": "mcp",
+    "server_label": "document_studio",
+    "transport": {
+      "type": "stdio",
+      "command": "/opt/studio/venv/bin/python",
+      "args": ["-m", "studio.document_tools.mcp_server", "--job-id", "&lt;작업 ID&gt;"],
+      "env_vars": ["APP_REGION", "STUDIO_BUCKET", "AWS_CONTAINER_CREDENTIALS_FULL_URI"]
+    },
+    "allowed_tools": ["inspect_inputs", "read_table", "read_text",
+                      "create_chart", "create_diagram", "create_documents"]
+  }]
+}</code></pre></div>
+<p><em><code>instructions</code>와 <code>env_vars</code>는 일부만 표시했고 <code>required</code>, <code>cwd</code> 같은 필드는 생략했습니다.</em></p>
+<p>눈여겨볼 항목은 네 가지입니다.</p>
+<ul>
+<li><code>transport.type: "stdio"</code>: MCP 서버가 Runtime 안에서 프로그램으로 실행되고 표준 입출력으로 통신합니다. 별도 서버를 띄울 필요가 없습니다.</li>
+<li><code>--job-id</code>: MCP 서버를 작업 하나에 묶습니다. 이 서버는 지정한 작업의 파일만 읽습니다.</li>
+<li><code>env_vars</code>: 환경 변수의 이름만 적습니다. 자격증명은 Runtime이 원래 가진 것을 그대로 사용합니다.</li>
+<li><code>allowed_tools</code>: 모델이 호출할 수 있는 도구를 6개로 한정합니다.</li>
+</ul>
+<p>첫 메시지는 세션을 만든 뒤 입력 이벤트(<code>agent.session.input.message</code>)로 따로 보냅니다. worker에는 도구 결과를 모델에 다시 넣는 반복, 대화 기록 저장, 긴 컨텍스트 정리 코드가 없습니다. 도구를 바꾸고 싶을 때도 MCP 서버와 <code>allowed_tools</code>만 고치면 됩니다.</p>
+<h3>3.2 컨테이너 이미지로 준비하는 실행 환경과 진행 표시</h3>
+<p>문서 Runtime은 컨테이너 이미지 하나로 준비합니다. 이미지에는 공식 lifecycle 서버(수정하지 않고 그대로 사용), Linux ARM64용 Codex 0.164.0, 문서 MCP 서버와 Python 렌더러, Skills 3개가 들어갑니다. 배포는 CloudFormation 앱 스택이 Runtime, IAM 역할, Web Function, 버킷을 함께 만듭니다. Runtime은 BMA가 필요할 때 실행되어 호출이 없으면 15분 뒤 종료됩니다.</p>
+<p>Skills(차트, 다이어그램, PowerPoint와 Word 구성)에는 “빈 칸을 0으로 바꾸지 않는다” 같은 작성 규칙을 적어 두어, 절차를 바꿀 때 코드 대신 파일만 고치면 됩니다. 다만 Skills는 권한을 주거나 막지 못하므로 안전 장치는 도구 제한과 IAM 권한이 맡습니다.</p>
+<p>진행 표시는 worker가 1.5초마다 세션 아이템을 읽어 마지막 MCP 도구 호출로 “차트 작성”, “문서 작성” 같은 단계를 정해 S3에 저장하면, Web Function이 이를 화면에 전달하는 방식입니다. 새로 고침을 해도 저장된 기록을 다시 읽을 뿐 생성 요청을 다시 보내지 않고 S3 조건부 쓰기로 같은 작업이 두 번 실행되지 않게 했습니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>BMA가 AI Document Studio에 준 장점</h2></header><div class="prose">
+<h3>4.1 모델과 도구의 역할 분담</h3>
+<p>BMA에서는 모델이 호출할 수 있는 도구를 <code>allowed_tools</code>로 정하므로, 모델이 할 일과 코드가 할 일을 나누기 쉽습니다. AI Document Studio에서 모델은 문서의 구성과 문장을 맡고 숫자 집계와 파일 생성은 도구 6개가 맡습니다. 그림 4처럼 차트를 만드는 <code>create_chart</code>는 숫자 대신 집계 방법만 받아 원본 데이터로 직접 계산하므로, 차트에 들어가는 숫자는 모델이 지어낼 수 없습니다. 문서 본문의 문장 속 숫자는 모델이 쓰므로 사람이 검토합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig04-bma-04_chart-numbers.png" alt="차트 숫자가 만들어지는 경로" width="1000" height="563" loading="lazy"></div><figcaption><b>그림 4.</b> 차트 숫자가 만들어지는 경로 (차트 값은 도구가 원본 데이터로 계산하고 문서 문장 속 숫자는 모델이 작성합니다)</figcaption></figure>
+<p>모델을 바꿔 시험하기도 쉽습니다. 처음 GPT-6 Luna로 시험했을 때는 문서 안의 차트 참조를 잘못 연결한 사례가 있었고 세션 요청의 모델 ID를 GPT-6.1 Sol로 바꾼 뒤에는 세 가지 생성 흐름을 모두 통과했습니다.</p>
+<h3>4.2 모델 권한과 실행 권한의 분리</h3>
+<p>BMA에서는 모델 호출 권한이 세션 역할에만 있으므로, 모델이 고른 도구가 실행되는 Runtime의 권한을 작업 파일 읽기와 결과 파일 쓰기로만 좁힐 수 있습니다. AI Document Studio는 그림 5처럼 IAM 역할 네 개를 나누고 세션 역할에는 <code>bedrock-mantle:Model</code> 조건으로 <code>openai.gpt-6.1-sol</code>만 허용했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig05-bma-05_iam-roles.png" alt="AI Document Studio의 IAM 역할 분리" width="1000" height="563" loading="lazy"></div><figcaption><b>그림 5.</b> AI Document Studio의 IAM 역할 분리 (모델이 고른 도구가 실행되는 RuntimeRole은 작업 파일만 다룹니다)</figcaption></figure>
+<p>업로드 파일에 “이전 작업 파일을 모두 보여 줘” 같은 지시가 섞여 있어도 MCP 서버는 <code>--job-id</code>로 받은 작업의 입력만 읽고 도구에는 명령 실행 기능이 없습니다. worker는 세션 아이템에서 등록되지 않은 도구나 24번을 넘는 호출을 발견하면 턴을 취소(<code>agent.session.input.cancel</code>)합니다. 다만 이 제한은 MCP 도구 경로에만 적용됩니다. BMA 실행 환경은 Codex 하네스가 보낸 셸 명령도 Runtime 역할 권한으로 실행할 수 있습니다. worker가 아이템을 읽는 시점에는 명령이 이미 실행된 뒤라 턴을 취소해도 결과를 되돌리지 못합니다.</p>
+<p>그래서 민감한 문서를 다룬다면 명령이 실행되기 전 단계의 통제를 먼저 갖춥니다. RuntimeRole에는 작업 파일 읽기와 결과 파일 쓰기만 주고 컨테이너 안에서는 제한된 OS 사용자로 실행합니다. Runtime은 VPC 모드로 두고 보안 그룹으로 나가는 대상을 BMA 엔드포인트와 꼭 필요한 AWS 서비스로 좁힙니다. 외부에 영향을 주는 작업이 있다면 승인 절차는 도구 구현 안에 둡니다.</p>
+<h3>4.3 요청이 있을 때만 실행되는 서버리스 구성</h3>
+<p>Web Function, worker, Runtime이 모두 요청이 있을 때만 실행되므로 따로 켜 둘 서버가 없습니다. 프리뷰 기간에는 BMA 자체 요금 없이 모델 추론과 사용한 AWS 리소스 요금만 발생합니다. 화면 파일은 CloudFront 서울 엣지에 캐시해 HTML 첫 응답을 593 ms에서 11 ms로 줄였습니다. Web Function을 CloudFront 오리진으로 두고 직접 접근을 막는 방법은 <a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda-web.html" target="_blank" rel="noopener">Restrict access to an AWS Lambda Web Function origin</a> 문서에 나와 있습니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>시험 결과와 도입 전 확인 사항</h2></header><div class="prose">
+<p>2026년 10월 27일 버지니아 북부에 배포한 앱에서 예제 파일로 세 가지 흐름을 시험했습니다. 세 흐름 모두 1분 안에 끝났습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>흐름</th><th>결과</th><th>소요 시간</th></tr>
+</thead>
+<tbody>
+<tr><td>엑셀 → 업무 보고서 스타일의 차트, PPT, Word</td><td>통과</td><td>53.03초</td></tr>
+<tr><td>같은 엑셀 → 발표 자료 스타일</td><td>통과</td><td>32.45초</td></tr>
+<tr><td>메모 → AWS 운영 데스크 스타일의 흐름도, PPT, Word</td><td>통과</td><td>40.43초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 실제 문서 생성 시험 결과 (2026년 10월 27일, openai.gpt-6.1-sol, us-east-1. 소요 시간은 요청부터 완료까지)</p>
+<figure class="fig"><div class="canvas"><img src="bma-openai-assets/fig06-bma-06_result-screen.png" alt="월별 매출 엑셀로 차트, PowerPoint, Word를 만든 결과 화면" width="720" height="768" loading="lazy"></div><figcaption><b>그림 6.</b> 월별 매출 엑셀로 차트, PowerPoint, Word를 만든 결과 화면</figcaption></figure>
+<p>세 흐름에서 파일 15개를 만들었고 PowerPoint 안의 편집 가능한 차트 값은 원본 엑셀의 여섯 값과 정확히 일치했습니다. 완료 전에 새로 고침을 해도 생성 요청이 다시 발생하지 않았습니다. 네 역할의 IAM 권한 평가 10건과 로컬 테스트 113개도 통과했습니다. 데모의 비용과 실행 시간을 예측할 수 있도록 파일은 한 번에 1개(최대 5 MiB), 작업 시간은 300초 이내로 제한했습니다.</p>
+<p>실제 업무에 도입하기 전에는 다음 세 가지를 확인해 보시기 바랍니다.</p>
+<ul>
+<li>프리뷰 제약: 하위 에이전트(Subagent)와 코드 방식의 도구 호출(Code mode)은 아직 지원되지 않고 세션 입력은 텍스트만 가능합니다. 정식 출시 때 API와 IAM 권한 이름을 다시 확인해야 합니다.</li>
+<li>데이터 처리 위치: 화면은 서울 엣지에서 빠르게 보이지만 파일 분석과 문서 생성은 <code>us-east-1</code>에서 일어납니다. 국내 리전 처리가 필요한 업무라면 이 흐름을 먼저 검토합니다.</li>
+<li>사용자 인증: 데모는 신뢰하는 사용자 몇 명이 이용 키 하나를 함께 사용합니다. 회사 전체에 제공한다면 사용자별 로그인과 작업 분리를 먼저 추가합니다.</li>
+</ul>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>마치며</h2></header><div class="prose">
+<p>BMA를 사용하면 OpenAI 에이전트의 실행 루프, 대화 상태, 컨텍스트 관리를 직접 만들지 않아도 됩니다. 세션을 하나 만들면서 모델, 지침, 도구, 실행 환경을 지정하고 메시지를 보내면 되며 AgentCore CLI 템플릿으로 15분 안팎이면 첫 세션을 실행해 볼 수 있습니다.</p>
+<p>직접 만든 에이전트와 비교한 BMA의 장점은 네 가지입니다.</p>
+<ul>
+<li>빠른 시작: 실행 루프와 대화 저장소를 만들지 않고도 세션 요청 하나와 AgentCore CLI 템플릿으로 첫 에이전트를 실행해 볼 수 있습니다.</li>
+<li>익숙한 개발 방식: OpenAI Python SDK를 그대로 사용하고 접속 주소와 인증만 AWS 방식으로 바꿉니다. OpenAI API 키를 따로 관리하지 않아도 됩니다.</li>
+<li>AWS 보안과 감사: 에이전트마다 IAM 역할을 지정하고 모델 권한은 세션 역할에, 실행 권한은 실행 환경에 나눠 둡니다. 지원되는 API 활동은 AWS CloudTrail에 기록됩니다.</li>
+<li>적은 운영 부담: 실행 환경을 AgentCore Runtime에 두면 필요할 때만 실행되고 세션마다 분리되므로, 서버를 켜 두고 관리할 필요가 없습니다.</li>
+</ul>
+<p>AI Document Studio에서도 애플리케이션 코드는 파일 저장, 세션 생성, 진행 상황 전달만 맡았고 개발자는 어떤 도구를 두고 어떤 권한을 줄지에 집중할 수 있었습니다. BMA의 장점은 익숙한 OpenAI SDK 코드를 그대로 두고 AWS의 IAM, CloudTrail, AgentCore Runtime 위에서 에이전트를 운영한다는 점입니다. 이 글의 구성과 예시가 여러분의 BMA 기반 에이전트 검토에 실질적인 참고가 되기를 바랍니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>When you build an agent yourself, the code around the model call often ends up longer than the code that calls the model. You have to write the loop that runs the tools the model requests and feeds the results back to the model. You have to store conversations that span multiple turns and trim the context as it grows. The application even had to provide the isolated environment where commands run, along with its permissions.</p>
+<p><a href="https://aws.amazon.com/ko/bedrock/managed-agents-openai/" target="_blank" rel="noopener">Amazon Bedrock Managed Agents, powered by OpenAI</a> (BMA) is a managed service in which AWS takes over this work and operates it for you. AWS and OpenAI built BMA together on the OpenAI Agents API, and it was <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/09/bedrock-managed-agents-preview/" target="_blank" rel="noopener">released in preview</a> on September 29, 2026. All a developer has to do is create a session that specifies the model, instructions, tools, and execution environment, and then send messages.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Amazon Bedrock Managed Agents at a glance</h2></header><div class="prose">
+<h3>1.1 What BMA takes over</h3>
+<p>BMA's role comes down to one sentence: "the agent's thinking happens inside BMA, and its hands work in the execution environment in your account." The execution loop that calls the model and decides what to do next runs inside BMA, and commands and tools run in the execution environment in your account.</p>
+<p>This execution loop is called the Codex harness. It is the loop taken from OpenAI's Codex, and it repeats a cycle of asking the model what to do next, running the tool the model chose, and passing the result back to the model. Table 1 compares this with building it yourself.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Capability</th><th>When you build it yourself</th><th>When you use BMA</th></tr>
+</thead>
+<tbody>
+<tr><td>Execution loop</td><td>You write the loop that extracts tool calls, runs them, and feeds the results back</td><td>The Codex harness handles tool selection and iteration</td></tr>
+<tr><td>Conversation state</td><td>Messages and tool results are kept in the application's data store</td><td>The session retains messages, tool calls, and intermediate results</td></tr>
+<tr><td>Long context</td><td>You implement summarization or truncation yourself</td><td>The harness compacts older parts of the conversation (compaction)</td></tr>
+<tr><td>Reusable procedures</td><td>Prompt templates are managed in code</td><td>Skills written as files are placed in the execution environment</td></tr>
+<tr><td>Permissions and auditing</td><td>Handled with the application's credentials</td><td>An IAM role assigned to each agent, with supported API activity logged in AWS CloudTrail</td></tr>
+<tr><td>Authentication</td><td>You manage an OpenAI API key</td><td>Requests are signed with AWS credentials, and no OpenAI API key is required</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Differences between building an agent yourself and using BMA (based on the BMA preview announcement and the Amazon Bedrock User Guide)</p>
+<p>Figure 1 shows how a single request is processed. When the agent needs to run a command or work with files, BMA sends that work to the execution environment in your account. In the execution environment, a process called <code>codex exec-server</code> stays connected to BMA, waits, and runs only the commands it receives.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig01-bma-01_how-bma-works.png" alt="How BMA works" width="1000" height="563" loading="lazy"></div><figcaption><b>Figure 1.</b> How BMA works (based on the BMA documentation in the Amazon Bedrock User Guide and the AgentCore Developer Guide)</figcaption></figure>
+<p>Table 2 lists the terms used throughout this post.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Term</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Session</td><td>A single conversation with a specified model, instructions, tools, IAM role, and execution environment. It remembers content across multiple messages</td></tr>
+<tr><td>Turn</td><td>The unit of work that processes one message. It includes tool calls and answer generation</td></tr>
+<tr><td>Item,<br> Event</td><td>An item is a conversation result that is kept, and an event is a signal that reports progress in real time</td></tr>
+<tr><td>Session role</td><td>The IAM role that BMA uses when it performs model inference and runs the Runtime on your behalf</td></tr>
+<tr><td>Execution<br> environment</td><td>The compute in your account where commands and tools run</td></tr>
+<tr><td>Exec server</td><td>The <code>codex exec-server</code> process that connects the execution environment to BMA</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Key BMA terms (based on the BMA preview documentation in the Amazon Bedrock User Guide)</p>
+<p>BMA is offered through Regional endpoints (<code>https://bedrock-mantle.{region}.api.aws</code>). The preview is available in three Regions: US East (N. Virginia), US West (Oregon), and US East (Ohio). During the preview, there is no charge for BMA itself, and you pay only for model inference and the AWS resources the agent uses.</p>
+<h3>1.2 Two execution environments</h3>
+<p>You choose one of two execution environments.</p>
+<ul>
+<li>Self-hosted: You run the exec server yourself on a server or container that you already operate.</li>
+<li>AgentCore Runtime: You deploy a container that includes the exec server to Amazon Bedrock AgentCore Runtime.</li>
+</ul>
+<p>If you are new to BMA, I recommend starting with AgentCore Runtime. BMA starts the Runtime when it is needed, so you don't have to keep a server running. Each session gets its own dedicated microVM (a lightweight virtual machine), which keeps sessions isolated from each other, and the AgentCore CLI also provides a project template and deployment commands.</p>
+<h3>1.3 Running your first session</h3>
+<p>The fastest way to try BMA is the BMA template in the AgentCore CLI. According to the official documentation, it takes about 15 minutes from creating the project to sending a follow-up message. You need Node.js 20 or later, uv (a Python package manager), AWS credentials, and access to the model you plan to use.</p>
+<p>The commands below follow <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-bma.html" target="_blank" rel="noopener">the procedure in the AWS documentation</a>, and I pinned the installation to CLI version 0.31, where this syntax works. If you install without a version, you get 1.0.x, which is the npm <code>latest</code> tag, and <code>create</code> in 1.0.x does not accept the <code>--framework</code> option. If you use 1.0.x, check the BMA template options in <code>agentcore create --help</code> first.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># 1. Create the project: BedrockManagedAgents framework template
+npm install -g @aws/agentcore@0.31
+export AWS_REGION=us-east-1
+agentcore create --name MyManagedAgent --framework BedrockManagedAgents
+cd MyManagedAgent
+
+# 2. Deploy: CodeBuild builds the image in your account and creates the Runtime
+agentcore deploy
+agentcore status          # Find the Runtime ARN in the output
+
+# 3. Run a session (replace the ARN with the actual value from the status output)
+RUNTIME_ARN="arn:aws:bedrock-agentcore:us-east-1:&lt;account ID&gt;:runtime/&lt;Runtime ID&gt;"
+cd app/MyManagedAgent
+uv run client.py --runtime "$RUNTIME_ARN"
+
+# 4. Send a follow-up message to the same session (use the session ID from the step 3 output)
+SESSION_ID="&lt;session ID&gt;"
+uv run client.py --runtime "$RUNTIME_ARN" --session-id "$SESSION_ID" \
+  --input "Run cat acr-report.txt and show the output."</code></pre></div>
+<p>When you run step 3, the session ID, the commands the agent ran and their output, and the final answer are printed in order. Step 4 sends a follow-up message with the same session ID to check whether the agent remembers its work from the previous turn. When you finish testing, run <code>agentcore remove all</code> and then <code>agentcore deploy</code>. These commands delete the Runtime, the execution role, and the project stack, but they do not delete every resource. The following resources remain.</p>
+<ul>
+<li>The CloudWatch Logs log groups for the Runtime, the image build, and the build Lambda function</li>
+<li>The KMS key for the Amazon ECR repository (deleted after a 30-day waiting period)</li>
+<li>The <code>CDKToolkit</code> stack created during the first deployment</li>
+<li>The account-wide CloudWatch Transaction Search setting (additional charges may apply)</li>
+</ul>
+<p>The session role that the sample client creates itself is not part of the stack either, so check it separately in IAM.</p>
+<p>The sample client uses the OpenAI Python SDK as is. Only two things change. You point the base URL (<code>base_url</code>) at the BMA endpoint, and in place of the API key you pass a function that creates a short-lived token from your AWS credentials.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>client = OpenAI(api_key=lambda: provide_token(region=region),
+                base_url=f"https://bedrock-mantle.{region}.api.aws/openai/v1")
+events = client.beta.agents.sessions.create(
+    agent={"model": BMA_MODEL_ID, "instructions": "Use the available tools to complete the task."},
+    environment={"type": "aws_bedrock_agentcore", "runtime_arn": args.runtime},   # some fields omitted
+    input=args.input, stream=True)</code></pre></div>
+<p>The session creation request carries the model and instructions (<code>agent</code>), the execution environment (<code>environment</code>), and the first message (<code>input</code>). The fields omitted from the code include the session role (<code>role_arn</code>), which is required in the preview. AI Document Studio, introduced later in this post, uses the same structure and adds MCP tools to <code>agent</code>. Model Context Protocol (MCP) is a standard protocol that agents use to call external tools.</p>
+<h3>1.4 Choosing a model and Region</h3>
+<p>To use GPT-6.1 Sol with BMA, specify the model ID <code>openai.gpt-6.1-sol</code> on the <code>bedrock-mantle</code> endpoint in the <code>us-east-1</code> Region.</p>
+<p>GPT-6.1 Sol was released on September 29, 2026. It is a model for work where performance and cost both have to be considered, and it is suited to complex document understanding and multi-step workflows. On the <code>bedrock-runtime</code> endpoint, the same model is offered only through cross-Region inference profile IDs such as <code>us.openai.gpt-6.1-sol</code> and <code>global.openai.gpt-6.1-sol</code>. BMA works only on <code>bedrock-mantle</code> and does not support cross-Region inference profiles. For that reason, you use the in-Region model ID, the one without the <code>us.</code> or <code>global.</code> prefix.</p>
+<p>Check the model ID with the model list API (<code>/v1/models</code>), test that a BMA session is actually created, and then pin the ID in your code. Not every model that appears in the list can be used with BMA right away. For reference, the examples in the BMA documentation use <code>openai.gpt-5.6-luna</code> as the default model.</p>
+<h3>1.5 Three ways to run an agent on AgentCore Runtime</h3>
+<p>BMA is not the only way to run an agent on AgentCore Runtime. You can also package an agent framework such as Strands Agents or the Claude Agent SDK in a container and run it on the Runtime.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig02-bma-02_three-ways.png" alt="Where the execution loop runs and where model invocation permissions sit in the three ways to run an agent on AgentCore Runtime" width="1000" height="563" loading="lazy"></div><figcaption><b>Figure 2.</b> Where the execution loop runs and where model invocation permissions sit in the three ways to run an agent on AgentCore Runtime</figcaption></figure>
+<p>Table 3 shows the differences in detail.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>AgentCore Runtime + Strands Agents</th><th>AgentCore Runtime + BMA</th><th>AgentCore Runtime + Claude Agent SDK</th></tr>
+</thead>
+<tbody>
+<tr><td>What goes in<br> the container</td><td>Agent code, the Strands SDK, and the <code>BedrockAgentCoreApp</code> entrypoint from the AgentCore SDK</td><td>The lifecycle server, the Codex exec server, and tools and Skills</td><td>Agent code, the Claude Agent SDK, the Claude Code CLI (Node.js), and the <code>BedrockAgentCoreApp</code> entrypoint from the AgentCore SDK</td></tr>
+<tr><td>Models you<br> can use</td><td>Multiple providers, including Amazon Bedrock (default), OpenAI, and Anthropic</td><td>OpenAI models that BMA supports (<code>bedrock-mantle</code>)</td><td>Claude models in Amazon Bedrock (<code>CLAUDE_CODE_USE_BEDROCK=1</code>)</td></tr>
+<tr><td>Conversation state management</td><td>Managed by the application, with optional AgentCore Memory integration</td><td>The BMA session persists across multiple turns</td><td>Managed with the SDK's session feature</td></tr>
+<tr><td>Built-in tools</td><td>Function tools you define, and MCP tools</td><td>Command execution in the workspace, STDIO MCP, and Skills</td><td>File reads and writes, command execution, web search, MCP, Skills, and subagents</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Comparison of the three ways to run an agent on AgentCore Runtime (based on the AgentCore Developer Guide, the Strands Agents documentation, and the Claude Agent SDK documentation, checked on October 28, 2026. The Bedrock configuration for the Claude Agent SDK is based on the AWS samples repository, and BMA is in preview)</p>
+<p>With Strands Agents and the Claude Agent SDK, the execution loop lives inside your container, so you can change the loop's behavior in fine detail through code. In return, the container side also has to take care of storing conversation state, trimming context, and holding model invocation permissions. With BMA, BMA operates the loop and the session, so the execution environment needs only the permissions that the tools require.</p>
+<p>You can decide which approach to choose using the following criteria.</p>
+<ul>
+<li>Strands Agents: When you want to choose models freely and control the execution loop directly in code</li>
+<li>BMA: When you want to hand loop and session operations over to BMA and use OpenAI models</li>
+<li>Claude Agent SDK: When you want to bring the tools and working style of Claude Code into your agent as they are</li>
+</ul>
+<p>For how to deploy each approach, see the <a href="https://strandsagents.com/latest/documentation/docs/user-guide/deploy/deploy_to_bedrock_agentcore/" target="_blank" rel="noopener">Strands Agents deployment documentation</a>, the <a href="https://code.claude.com/docs/en/agent-sdk/overview" target="_blank" rel="noopener">Claude Agent SDK documentation</a>, and the <a href="https://github.com/aws-samples/sample-deploy-ClaudeAgentSDK-based-agents-to-AgentCore-Runtime" target="_blank" rel="noopener">AWS samples repository</a>.</p>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Example: AI Document Studio architecture and flow</h2></header><div class="prose">
+<p>From here, this post uses a real app built with BMA as an example and looks at its components and flow. AI Document Studio is a demo app that creates charts, diagrams, and editable PowerPoint and Word documents when you upload an Excel, CSV, or text file or a memo and describe the result you want.</p>
+<h3>2.1 Overall architecture</h3>
+<p>The AI Document Studio architecture is simple. A browser request passes through CloudFront at the Seoul edge and continues in N. Virginia to the Lambda Web Function, the Studio Worker, BMA (openai.gpt-6.1-sol), and the dedicated document Runtime. The charts and document files that the MCP tools create are stored in S3.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig03-bma-03_architecture.png" alt="AI Document Studio architecture" width="1000" height="563" loading="lazy"></div><figcaption><b>Figure 3.</b> AI Document Studio architecture (based on the us-east-1 deployment of October 27, 2026. Numbers 1 to 6 show the order in which a request is processed)</figcaption></figure>
+<p>Figure 3 has five components, and each one has a single job.</p>
+<ul>
+<li>UI and API: A single Lambda Web Function written in Node.js 24 handles both, with Amazon CloudFront in front of it.</li>
+<li>Job processing: The Studio worker (Lambda) creates the BMA session and sends messages.</li>
+<li>Agent: BMA handles the execution loop and session state with the <code>openai.gpt-6.1-sol</code> model.</li>
+<li>Execution environment: 6 document MCP tools and 3 Skills run on a dedicated document AgentCore Runtime.</li>
+<li>Storage: A private Amazon S3 bucket holds the input files, job state, and result files.</li>
+</ul>
+<h3>2.2 How a single request is processed</h3>
+<p>Following numbers 1 to 6 in Figure 3 shows the order in which a single request is processed.</p>
+<p>1. The user's request reaches the Web Function through CloudFront at the Seoul edge.</p>
+<p>2. The Web Function stores the input file and the job state in S3.</p>
+<p>3. The Web Function invokes the worker asynchronously and responds right away.</p>
+<p>4. The worker creates a new BMA session for each job and sends the request.</p>
+<p>5. BMA starts the document Runtime, and the MCP tools create the chart and document files and store them in S3.</p>
+<p>6. Progress stages are shown on the screen through SSE (Server-Sent Events, a method in which the server keeps streaming data to the browser), and you get the finished files through an authenticated download.</p>
+<p>In this flow, the application code does three things: store files, create the session, and relay progress. Between steps 4 and 5, BMA's Codex harness decides which tools to call, in what order, and how many times.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>What gets easier when you build with BMA</h2></header><div class="prose">
+<h3>3.1 One session request instead of an execution loop</h3>
+<p>The session creation request that the worker sends has the same structure as the first session example, with a <code>tools</code> entry added inside <code>agent</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>"agent": {
+  "model": "openai.gpt-6.1-sol",
+  "instructions": "...",
+  "tools": [{
+    "type": "mcp",
+    "server_label": "document_studio",
+    "transport": {
+      "type": "stdio",
+      "command": "/opt/studio/venv/bin/python",
+      "args": ["-m", "studio.document_tools.mcp_server", "--job-id", "&lt;job ID&gt;"],
+      "env_vars": ["APP_REGION", "STUDIO_BUCKET", "AWS_CONTAINER_CREDENTIALS_FULL_URI"]
+    },
+    "allowed_tools": ["inspect_inputs", "read_table", "read_text",
+                      "create_chart", "create_diagram", "create_documents"]
+  }]
+}</code></pre></div>
+<p><em><code>instructions</code> and <code>env_vars</code> are shown only in part, and fields such as <code>required</code> and <code>cwd</code> are omitted.</em></p>
+<p>Four items are worth a closer look.</p>
+<ul>
+<li><code>transport.type: "stdio"</code>: The MCP server runs as a program inside the Runtime and communicates over standard input and output. There is no need to run a separate server.</li>
+<li><code>--job-id</code>: Binds the MCP server to a single job. This server reads only the files of the specified job.</li>
+<li><code>env_vars</code>: Lists only the names of environment variables. The credentials are the ones the Runtime already has, used as is.</li>
+<li><code>allowed_tools</code>: Limits the tools the model can call to 6.</li>
+</ul>
+<p>The first message is sent separately as an input event (<code>agent.session.input.message</code>) after the session is created. The worker has no code for the loop that feeds tool results back to the model, for storing conversation history, or for trimming long context. When you want to change the tools, you only need to edit the MCP server and <code>allowed_tools</code>.</p>
+<h3>3.2 An execution environment prepared as a container image, and progress display</h3>
+<p>The document Runtime is prepared as a single container image. The image contains the official lifecycle server (used as is, without modification), Codex 0.164.0 for Linux ARM64, the document MCP server and Python renderer, and 3 Skills. For deployment, a CloudFormation app stack creates the Runtime, the IAM roles, the Web Function, and the bucket together. The Runtime starts when BMA needs it and shuts down after 15 minutes without invocations.</p>
+<p>The Skills (charts, diagrams, and PowerPoint and Word composition) hold authoring rules such as "do not replace empty cells with 0", so changing a procedure means editing a file instead of code. However, Skills cannot grant or block permissions, so the safeguards are the tool restrictions and IAM permissions.</p>
+<p>For progress display, the worker reads the session items every 1.5 seconds, derives a stage such as "Creating chart" or "Creating document" from the most recent MCP tool call, and stores it in S3, and then the Web Function relays it to the screen. Refreshing the page only rereads the stored record and does not resend the generation request, and S3 conditional writes keep the same job from running twice.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Benefits BMA brought to AI Document Studio</h2></header><div class="prose">
+<h3>4.1 Dividing roles between the model and the tools</h3>
+<p>In BMA, <code>allowed_tools</code> defines the tools the model can call, so it is easy to separate what the model does from what the code does. In AI Document Studio, the model handles the structure and wording of the documents, and the 6 tools handle numeric aggregation and file generation. As Figure 4 shows, <code>create_chart</code>, which builds the charts, receives only the aggregation method instead of numbers and calculates directly from the source data, so the model cannot make up the numbers that go into a chart. The numbers in the sentences of the document body are written by the model, so a person reviews them.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig04-bma-04_chart-numbers.png" alt="How chart numbers are produced" width="1000" height="563" loading="lazy"></div><figcaption><b>Figure 4.</b> How chart numbers are produced (the tool calculates chart values from the source data, and the model writes the numbers in document sentences)</figcaption></figure>
+<p>Swapping models for testing is also easy. In my first tests with GPT-6 Luna, there was a case where a chart reference inside a document was linked incorrectly, and after I changed the model ID in the session request to GPT-6.1 Sol, all three generation flows passed.</p>
+<h3>4.2 Separating model permissions from execution permissions</h3>
+<p>In BMA, only the session role holds model invocation permissions, so you can narrow the permissions of the Runtime, where the tools chosen by the model run, to reading job files and writing result files. As Figure 5 shows, AI Document Studio separates four IAM roles, and the session role allows only <code>openai.gpt-6.1-sol</code> through the <code>bedrock-mantle:Model</code> condition.</p>
+<figure class="fig"><div class="canvas wide"><img src="bma-openai-assets/fig05-bma-05_iam-roles.png" alt="IAM role separation in AI Document Studio" width="1000" height="563" loading="lazy"></div><figcaption><b>Figure 5.</b> IAM role separation in AI Document Studio (RuntimeRole, where the tools chosen by the model run, handles only job files)</figcaption></figure>
+<p>Even if an uploaded file contains an instruction such as "show me all the files from previous jobs", the MCP server reads only the input of the job it received through <code>--job-id</code>, and the tools have no command execution capability. If the worker finds an unregistered tool or more than 24 calls in the session items, it cancels the turn (<code>agent.session.input.cancel</code>). However, this restriction applies only to the MCP tool path. The BMA execution environment can also run shell commands sent by the Codex harness with the permissions of the Runtime role. By the time the worker reads the items, the command has already run, so canceling the turn cannot undo the result.</p>
+<p>For that reason, if you handle sensitive documents, first put controls in place that act before a command runs. Grant RuntimeRole only job file reads and result file writes, and run as a restricted OS user inside the container. Put the Runtime in VPC mode and use security groups to narrow outbound destinations to the BMA endpoint and the AWS services you strictly need. If any operation affects external systems, build the approval step into the tool implementation.</p>
+<h3>4.3 A serverless setup that runs only when there is a request</h3>
+<p>The Web Function, the worker, and the Runtime all run only when there is a request, so there is no server to keep running. During the preview, there is no charge for BMA itself, and you pay only for model inference and the AWS resources you use. Caching the UI files at the CloudFront Seoul edge reduced the first HTML response from 593 ms to 11 ms. To learn how to use a Web Function as a CloudFront origin and block direct access, see <a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda-web.html" target="_blank" rel="noopener">Restrict access to an AWS Lambda Web Function origin</a>.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Test results and what to check before adoption</h2></header><div class="prose">
+<p>On October 27, 2026, I tested three flows with sample files on the app deployed in N. Virginia. All three flows finished within 1 minute.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Flow</th><th>Result</th><th>Elapsed time</th></tr>
+</thead>
+<tbody>
+<tr><td>Excel → chart, PPT, and Word in a business report style</td><td>Passed</td><td>53.03 seconds</td></tr>
+<tr><td>Same Excel → presentation style</td><td>Passed</td><td>32.45 seconds</td></tr>
+<tr><td>Memo → flowchart, PPT, and Word in an AWS operations desk style</td><td>Passed</td><td>40.43 seconds</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Results of actual document generation tests (October 27, 2026, openai.gpt-6.1-sol, us-east-1. Elapsed time is from request to completion)</p>
+<figure class="fig"><div class="canvas"><img src="bma-openai-assets/fig06-bma-06_result-screen.png" alt="Result screen after creating a chart, PowerPoint, and Word from a monthly sales Excel file" width="720" height="768" loading="lazy"></div><figcaption><b>Figure 6.</b> Result screen after creating a chart, PowerPoint, and Word from a monthly sales Excel file</figcaption></figure>
+<p>The three flows produced 15 files, and the editable chart values inside the PowerPoint file exactly matched the six values in the source Excel file. Refreshing the page before completion did not trigger another generation request. The 10 IAM permission evaluations across the four roles and the 113 local tests also passed. To keep the demo's cost and run time predictable, I limited uploads to 1 file at a time (up to 5 MiB) and job time to 300 seconds.</p>
+<p>Before you adopt this for real work, check the following three points.</p>
+<ul>
+<li>Preview constraints: Subagents and code-based tool calling (code mode) are not supported yet, and session input is text only. At general availability, you need to check the API and IAM permission names again.</li>
+<li>Data processing location: The UI loads quickly from the Seoul edge, but file analysis and document generation happen in <code>us-east-1</code>. If your work requires processing in a Region in Korea, review this flow first.</li>
+<li>User authentication: In the demo, a few trusted users share a single access key for the app. If you offer it across your company, add per-user sign-in and job isolation first.</li>
+</ul>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Closing</h2></header><div class="prose">
+<p>With BMA, you don't have to build the execution loop, conversation state, and context management of an OpenAI agent yourself. You create a session that specifies the model, instructions, tools, and execution environment and send a message, and with the AgentCore CLI template you can run your first session in about 15 minutes.</p>
+<p>Compared with an agent you build yourself, BMA has four advantages.</p>
+<ul>
+<li>Fast start: Without building an execution loop or a conversation store, you can run your first agent with a single session request and the AgentCore CLI template.</li>
+<li>Familiar development model: You use the OpenAI Python SDK as is and change only the base URL and authentication to the AWS way. You don't need to manage an OpenAI API key separately.</li>
+<li>AWS security and auditing: You assign an IAM role to each agent and keep model permissions on the session role and execution permissions on the execution environment. Supported API activity is logged in AWS CloudTrail.</li>
+<li>Low operational burden: When the execution environment is on AgentCore Runtime, it runs only when needed and is isolated per session, so there is no server to keep running and manage.</li>
+</ul>
+<p>In AI Document Studio as well, the application code handled only file storage, session creation, and progress relay, and the developer was able to focus on which tools to provide and which permissions to grant. The advantage of BMA is that you keep your familiar OpenAI SDK code as it is and operate the agent on AWS IAM, CloudTrail, and AgentCore Runtime. I hope the setup and examples in this post serve as a practical reference when you evaluate BMA-based agents.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/09/bedrock-managed-agents-preview/" target="_blank" rel="noopener">Amazon Bedrock Managed Agents, powered by OpenAI, is now available in preview - What's New (2026-09-29)</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai.html" target="_blank" rel="noopener">Amazon Bedrock Managed Agents, powered by OpenAI (preview) - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-prerequisites.html" target="_blank" rel="noopener">Set up permissions and prerequisites - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-agentcore-runtime.html" target="_blank" rel="noopener">Run your agent on Amazon Bedrock AgentCore Runtime - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-sessions.html" target="_blank" rel="noopener">Work with sessions, events, and results - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-skills-tools.html" target="_blank" rel="noopener">Add skills and tools - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-security.html" target="_blank" rel="noopener">Security and IAM roles - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-api-reference.html" target="_blank" rel="noopener">BMA preview REST API reference - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-managed-agents-openai-quotas-limitations.html" target="_blank" rel="noopener">Preview availability and limitations - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-bma.html" target="_blank" rel="noopener">Get started with Amazon Bedrock Managed Agents (with OpenAI) on AgentCore Runtime - Amazon Bedrock AgentCore Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-lifecycle-settings.html" target="_blank" rel="noopener">Configure lifecycle settings - Amazon Bedrock AgentCore Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-6-1-sol.html" target="_blank" rel="noopener">GPT-6.1 Sol - Amazon Bedrock 모델 카드</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/10/cloudfront-lambda-web-functions-origin/" target="_blank" rel="noopener">Amazon CloudFront now supports AWS Lambda Web Functions as an origin - What's New (2026-10-12)</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda-web.html" target="_blank" rel="noopener">Restrict access to an AWS Lambda Web Function origin - Amazon CloudFront Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/web-functions.html" target="_blank" rel="noopener">AWS Lambda Web Functions - AWS Lambda Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/web-functions-runtimes.html" target="_blank" rel="noopener">Runtimes - AWS Lambda Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/bma-openai/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-11-04 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/bma-openai/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-11-04. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">본문의 설정과 한도는 2026년 10월 28일 기준 BMA 프리뷰 문서와 필자의 배포 설정을 바탕으로 합니다. 프리뷰 기능과 API, 모델 제공 리전은 정식 출시 전에 바뀔 수 있습니다. 시험 결과는 2026년 10월 27일 버지니아 북부(us-east-1)에 배포한 AI Document Studio로 측정한 값이며, 응답 시간 측정은 서울 리전 EC2 한 대 기준입니다. 입력 파일, 요청 내용, 시점에 따라 결과가 달라질 수 있습니다.</span><span class="l-en">The settings and limits in this post are based on the BMA preview documentation as of October 28, 2026, and on the author's deployment configuration. Preview features, APIs, and the Regions where models are available can change before general availability. The test results were measured on October 27, 2026, with AI Document Studio deployed in N. Virginia (us-east-1), and response times were measured from a single EC2 instance in the Seoul Region. Results can vary depending on the input files, the request, and the time of the test.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

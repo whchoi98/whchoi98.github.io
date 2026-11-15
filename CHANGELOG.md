@@ -26,6 +26,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add KO/EN language toggle chrome and bilingual posts (Korean/English pages embedded in each report)
 - Add archify interactive architecture maps plus inline archmap figures for all posts
 - Add Mac terminal style code blocks with copy buttons in report documents
+- Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
+- Add the post "Amazon Bedrock Managed Agents: How to run OpenAI agents on AWS" (KO/EN), republished from the AWS Tech Blog with a link to the original
+- Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
@@ -73,6 +76,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - KO/EN 언어 토글 크롬 및 이중 언어 게시물 추가 (각 리포트에 한/영 페이지 내장)
 - 전체 게시물에 archify 인터랙티브 아키텍처 맵과 인라인 archmap figure 추가
 - 리포트 문서에 복사 버튼이 있는 Mac 터미널 스타일 코드블록 추가
+- `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
+- 게시물 추가: "Amazon Bedrock Managed Agents: OpenAI 에이전트를 AWS에서 운영하는 방법" (KO/EN) - AWS 기술 블로그 글을 원문 링크와 함께 옮겨 실음
+- 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
