@@ -21,7 +21,7 @@ Determine the scope of review:
 For each changed file, apply the code-review skill criteria:
 - Project guidelines compliance (report 패턴, KO/EN 동등성, CSS 변수, git add -A 금지)
 - Bug detection (Liquid errors, front matter mistakes, broken links, JS logic)
-- Code quality (duplication, accessibility, techblogs QA compliance)
+- Code quality (duplication, accessibility, techblogs check_post.py compliance)
 
 ## Step 3: Score and Filter
 
@@ -49,5 +49,5 @@ Cannot evaluate project guidelines without CLAUDE.md. Suggest:
 Focus on high-risk files first:
 1. Site chrome changes (_layouts/, _includes/, assets/) - affect every page
 2. _config.yml changes - exclude list and category metadata
-3. New report HTML (run techblogs QA instead of line-by-line review)
+3. New report HTML (run the techblogs check_post.py instead of line-by-line review)
 4. Documentation changes (lower priority)

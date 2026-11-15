@@ -15,10 +15,10 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll build -d _
 ```
 
 - Harness tests pass: `bash tests/run-all.sh`
-- New/changed reports pass techblogs QA:
+- New/changed reports pass the techblogs check (`TECHBLOGS` = the `skills/techblogs` folder of the my-plugins plugin):
 
 ```bash
-python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<category>/<slug>-report.html
+python3 "$TECHBLOGS/scripts/check_post.py" docs/techblog/<category>/<slug>-report.html --blog .
 ```
 
 - Confirm internal docs are NOT in `_site/` (exclude list intact):

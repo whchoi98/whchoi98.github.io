@@ -49,7 +49,7 @@ ccw-hands-on-lab/ - Claude Code Workshop 핸즈온 랩 (자립형 HTML 아카이
 - 리포트 HTML은 한국어와 영어를 한 파일에 담는다. `<link rel="canonical">`은 게시물 URL을 가리키고, 다른 곳에 먼저 게시한 글을 옮겨 실은 경우에는 원문 URL을 가리킨다
 - 리포트의 디자인(나눔스퀘어, D2Coding, 최대 1440px 한 컬럼)은 스킬의 템플릿이 정한다. 글꼴 파일은 `assets/fonts/`에서 받는다
 - 글 목록(홈, 카테고리, 태그)은 `date` 최신순으로 5개씩 보이고 "더 보기"로 5개씩 펼친다 (`assets/js/main.js` setupPager)
-- 2026-11-15 이전 게시물은 구 형식(자립형 HTML + archify `<slug>-archmap.html`, `<slug>-archmap.png`)이다
+- 구 형식 게시물(자립형 HTML + archify archmap)은 2026-11-15에 모두 제거했다. 게시물은 글쓴이가 AWS 기술 블로그에 먼저 게시한 글을 옮겨 실은 것이며 `date`는 원문 게시일이다
 
 ### 이중 언어 (KO/EN)
 - 사이트 크롬은 `.l-ko`/`.l-en` 스팬 + `html.lang-en` 클래스 토글로 전환 (`assets/js/main.js`)
@@ -62,7 +62,7 @@ ccw-hands-on-lab/ - Claude Code Workshop 핸즈온 랩 (자립형 HTML 아카이
 - 본문은 경어체(~합니다), 코드/명령/고유명사는 원문 유지
 
 ### 코드블록
-- 리포트 HTML 내 코드블록은 언어 이름과 복사 버튼이 있는 코드 상자를 쓴다 (구 형식 게시물은 mac 터미널 스타일)
+- 리포트 HTML 내 코드블록은 언어 이름과 복사 버튼이 있는 코드 상자를 쓴다
 
 ### Git
 - **`git add -A` 금지** - 항상 파일을 명시적으로 지정해 스테이징한다

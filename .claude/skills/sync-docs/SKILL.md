@@ -24,7 +24,7 @@ Output quality report with grades (A-F) before making changes.
 
 ### 2. Root CLAUDE.md Sync
 - Update Overview, Tech Stack, Conventions, Key Commands
-- Verify commands are copy-paste ready (jekyll build/serve, qa.py, tests/run-all.sh)
+- Verify commands are copy-paste ready (jekyll build/serve, check_post.py, tests/run-all.sh)
 
 ### 3. Architecture Doc Sync
 - Update docs/architecture.md to reflect current layouts, categories, and pipeline

@@ -42,10 +42,10 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll serve
 
 ### 게시물 작성 → 검증 → 게시 흐름
 
-1. **작성**: techblogs 형식으로 `docs/techblog/<카테고리>/<slug>-report.html` 작성 (자립형 HTML, KO/EN 이중 페이지)
-2. **다이어그램**: archify로 `<slug>-archmap.html` 생성, PNG를 리포트에 인라인 삽입
-3. **front matter**: `<slug>.md` 생성 (`layout: report`, `report_src`, `title`/`title_en`, `date`, `category`, `tags`, `excerpt`/`excerpt_en`)
-4. **QA**: `python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<카테고리>/<slug>-report.html` - ERROR 0 필수
+1. **작성**: `my-plugins:techblogs` 스킬로 이 저장소 밖의 작업 폴더에 `meta.json`, `ko.body.html`, `en.body.html`, `images/`를 만든다 (한국어와 영어는 같은 구조)
+2. **빌드**: 스킬의 `build_post.py`가 `<slug>-report.html`, `<slug>.md`(front matter: `layout: report`, `report_src`, `title`/`title_en`, `date`, `category`, `tags`, `excerpt`/`excerpt_en`), `<slug>-assets/`를 만든다. 리포트 HTML은 직접 고치지 않는다
+3. **검사**: 스킬의 `check_post.py <slug>-report.html --blog .` - ERROR 0 필수
+4. **배치**: 스킬의 `place_post.py`가 `docs/techblog/<카테고리>/`에 복사한다
 5. **빌드 검증**: `bundle exec jekyll build` 성공 확인, `_site/`에 내부 문서가 없는지 확인
 6. **게시**: 파일을 명시적으로 `git add` (절대 `git add -A` 금지) → Conventional Commits 메시지로 커밋 → `git push origin main` → GitHub Actions가 Pages에 배포
 
@@ -55,9 +55,9 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll serve
 - main push = 배포. push 전 로컬 빌드 검증 필수
 
 ## Key Concepts
-- **report 패턴**: 게시물 본문은 md가 아니라 자립형 HTML. md는 front matter 컨테이너
+- **report 패턴**: 게시물 본문은 md가 아니라 스킬이 빌드한 리포트 HTML. md는 front matter 컨테이너, 그림은 `<slug>-assets/`
 - **iframe 격리**: report 레이아웃이 리포트 HTML을 iframe으로 렌더링 (CSS 충돌 방지)
-- **이중 언어**: 사이트 크롬은 `.l-ko`/`.l-en` 스팬 토글, 리포트는 문서 내 KO/EN 페이지 내장
+- **이중 언어**: 사이트 크롬은 `.l-ko`/`.l-en` 스팬 토글, 리포트는 한국어와 영어 본문을 한 파일에 담음
 - **exclude 목록**: 내부 문서(CLAUDE.md, docs/decisions 등)는 `_config.yml` exclude로 공개 사이트에서 배제
 
 ## Troubleshooting
@@ -69,4 +69,4 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll serve
 ## Resources
 - Jekyll 문서: https://jekyllrb.com/docs/
 - Keep a Changelog: https://keepachangelog.com/
-- techblogs 스킬: `~/.claude/skills/techblogs/`
+- techblogs 스킬: my-plugins 플러그인의 `skills/techblogs/` (github.com/whchoi98/my-plugins)

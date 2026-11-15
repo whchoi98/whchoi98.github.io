@@ -15,7 +15,6 @@ docs/techblog/
     <slug>.md               - 게시물 front matter (layout: report)
     <slug>-report.html      - techblogs 리포트 (한국어와 영어를 한 파일에)
     <slug>-assets/          - 리포트가 가리키는 그림
-    <slug>-archmap.html/png - 구 형식 게시물의 archify 아키텍처 맵 (2026-11-15 이전)
 docs/workshop/              - 워크샵 문서 50여 개 (layout: doc, 사이드바 네비)
 ```
 

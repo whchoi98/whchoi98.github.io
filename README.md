@@ -16,22 +16,23 @@ AWS Solutions Architect's tech blog and workshop portal built on a custom Jekyll
 ## Overview
 
 whchoi98.github.io is a static tech blog and hands-on workshop portal, served by GitHub Pages and built with a fully custom Jekyll theme.
-Posts are self-contained "techblogs"-format HTML analysis documents rendered through an iframe-isolating report layout, so each document keeps its own typography, theme toggle, and code styling independent of the site chrome.
+Posts are bilingual report pages built by the `my-plugins:techblogs` skill and rendered through an iframe-isolating report layout, so each document keeps its own typography, theme, and code styling independent of the site chrome.
 The site covers AWS, AIML, containers, networking, and Claude Code engineering, in both Korean and English.
 
 ## Features
 
-- **Report pattern** — Each post is a front-matter-only Markdown file plus a self-contained report HTML; the `report` layout renders it in an isolated iframe with breadcrumb, print, and prev/next navigation.
-- **Dual language (KO/EN)** — Site chrome switches instantly via `.l-ko`/`.l-en` span pairs and an `html.lang-en` toggle; report documents embed both Korean and English pages internally.
-- **archify architecture maps** — Every post ships an interactive architecture map HTML and a PNG figure embedded inline in the report.
-- **Mac terminal code blocks** — Report code blocks use a mac-terminal style with traffic-light buttons and a copy button.
+- **Report pattern** — Each post is a front-matter-only Markdown file, a report HTML and an image folder (`<slug>-assets/`), all built by the `my-plugins:techblogs` skill; the `report` layout renders the report in an isolated iframe with breadcrumb, print, and prev/next navigation.
+- **Dual language (KO/EN)** — Site chrome switches instantly via `.l-ko`/`.l-en` span pairs and an `html.lang-en` toggle; report documents hold both the Korean and the English text in one file.
+- **Report design** — One column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, light and dark themes, a horizontal section menu, tables and figures in white boxes, and code boxes with a language label and a copy button.
+- **Republished posts** — Posts first published on the AWS Tech Blog keep the original publication date, link to the original at the top and the bottom, and point their canonical link at it.
+- **Five at a time** — Post lists (home, category, tags) show the newest five posts and a "show more" button reveals five more.
 - **Readability charter** — One claim per paragraph, short sentences, numbers in comparison blocks, hedged claims for n=1 data; facts are preserved over rhetoric.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  Draft[Report HTML] --> QA[qa.py] --> FM[Front matter md] --> Build[jekyll build] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
+  Work[Work folder: meta.json, ko/en body, images] --> BuildPost[build_post.py] --> Check[check_post.py] --> Place[place_post.py] --> Build[jekyll build] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture document.
@@ -73,9 +74,9 @@ whchoi98.github.io/
   _config.yml        # Site config, category registry, build exclude list
   _layouts/          # 8 layouts (default, home, post, report, tags, listing, about, doc)
   _includes/         # topbar.html (nav + theme/language toggles)
-  assets/            # main.css, main.js, category SVG icons
+  assets/            # main.css, main.js, category SVG icons, fonts for the reports
   docs/
-    techblog/        # Posts: <slug>.md + <slug>-report.html + archmap per category
+    techblog/        # Posts: <slug>.md + <slug>-report.html + <slug>-assets/ per category
     workshop/        # 50+ hands-on workshop documents
     architecture.md  # Internal architecture doc (excluded from build)
     decisions/       # ADRs (excluded from build)
@@ -94,8 +95,8 @@ whchoi98.github.io/
 # Harness test suite (hooks, secret patterns, site structure)
 bash tests/run-all.sh
 
-# techblogs QA for a single report
-python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<category>/<slug>-report.html
+# Check a single report (TECHBLOGS = the skills/techblogs folder of the my-plugins plugin)
+python3 "$TECHBLOGS/scripts/check_post.py" docs/techblog/<category>/<slug>-report.html --blog .
 ```
 
 ## Contributing
@@ -129,22 +130,23 @@ No open-source license file is provided. All content copyright the author (whcho
 ## 개요
 
 whchoi98.github.io는 GitHub Pages로 서비스되고 완전 커스텀 Jekyll 테마로 빌드되는 정적 기술 블로그 겸 핸즈온 워크샵 포털입니다.
-게시물은 자립형 "techblogs" 형식 HTML 분석 문서이며, iframe 격리 방식의 report 레이아웃으로 렌더링되어 각 문서가 사이트 크롬과 독립적으로 자체 타이포그래피, 테마 토글, 코드 스타일을 유지합니다.
+게시물은 `my-plugins:techblogs` 스킬이 빌드한 한영 리포트 페이지이며, iframe 격리 방식의 report 레이아웃으로 렌더링되어 각 문서가 사이트 크롬과 독립적으로 자체 타이포그래피, 테마, 코드 스타일을 유지합니다.
 AWS, AIML, 컨테이너, 네트워킹, Claude Code 엔지니어링을 한국어와 영어로 다룹니다.
 
 ## 주요 기능
 
-- **Report 패턴** — 게시물은 front matter 전용 Markdown 파일과 자립형 리포트 HTML의 쌍입니다. `report` 레이아웃이 격리된 iframe으로 렌더링하고 브레드크럼, 인쇄, 이전/다음 네비게이션을 제공합니다.
-- **이중 언어 (KO/EN)** — 사이트 크롬은 `.l-ko`/`.l-en` 스팬 쌍과 `html.lang-en` 토글로 즉시 전환됩니다. 리포트 문서는 내부에 한국어/영어 페이지를 모두 내장합니다.
-- **archify 아키텍처 맵** — 모든 게시물에 인터랙티브 아키텍처 맵 HTML과 리포트에 인라인 삽입되는 PNG figure가 포함됩니다.
-- **Mac 터미널 코드블록** — 리포트 코드블록은 신호등 버튼과 복사 버튼이 있는 mac 터미널 스타일을 사용합니다.
+- **Report 패턴** — 게시물은 front matter 전용 Markdown 파일, 리포트 HTML, 그림 폴더(`<slug>-assets/`)로 이뤄지며 모두 `my-plugins:techblogs` 스킬이 빌드합니다. `report` 레이아웃이 리포트를 격리된 iframe으로 렌더링하고 브레드크럼, 인쇄, 이전/다음 네비게이션을 제공합니다.
+- **이중 언어 (KO/EN)** — 사이트 크롬은 `.l-ko`/`.l-en` 스팬 쌍과 `html.lang-en` 토글로 즉시 전환됩니다. 리포트 문서는 한국어와 영어 본문을 한 파일에 담습니다.
+- **리포트 디자인** — 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 라이트와 다크 테마, 가로 이동 메뉴, 흰 상자의 표와 그림, 언어 이름과 복사 버튼이 있는 코드 상자를 사용합니다.
+- **옮겨 실은 글** — AWS 기술 블로그에 먼저 게시한 글은 원문 게시일을 유지하고, 머리와 끝에 원문 링크를 두며, canonical 링크가 원문을 가리킵니다.
+- **5개씩 보기** — 글 목록(홈, 카테고리, 태그)은 최신 글 5편을 보여 주고 "더 보기"로 5편씩 펼칩니다.
 - **가독성 헌장** — 한 문단 하나의 주장, 짧은 문장, 수치는 비교 블록으로, n=1 데이터는 헤지 표현으로. 수사보다 사실 보존이 우선입니다.
 
 ## 아키텍처
 
 ```mermaid
 flowchart LR
-  Draft[Report HTML] --> QA[qa.py] --> FM[Front matter md] --> Build[jekyll build] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
+  Work[Work folder: meta.json, ko/en body, images] --> BuildPost[build_post.py] --> Check[check_post.py] --> Place[place_post.py] --> Build[jekyll build] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
 ```
 
 전체 아키텍처 문서는 [docs/architecture.md](docs/architecture.md)를 참조합니다.
@@ -186,9 +188,9 @@ whchoi98.github.io/
   _config.yml        # 사이트 설정, 카테고리 레지스트리, 빌드 exclude 목록
   _layouts/          # 레이아웃 8종 (default, home, post, report, tags, listing, about, doc)
   _includes/         # topbar.html (네비 + 테마/언어 토글)
-  assets/            # main.css, main.js, 카테고리 SVG 아이콘
+  assets/            # main.css, main.js, 카테고리 SVG 아이콘, 리포트용 글꼴
   docs/
-    techblog/        # 게시물: 카테고리별 <slug>.md + <slug>-report.html + archmap
+    techblog/        # 게시물: 카테고리별 <slug>.md + <slug>-report.html + <slug>-assets/
     workshop/        # 핸즈온 워크샵 문서 50여 개
     architecture.md  # 내부 아키텍처 문서 (빌드 제외)
     decisions/       # ADR (빌드 제외)
@@ -207,8 +209,8 @@ whchoi98.github.io/
 # 하네스 테스트 스위트 (훅, 시크릿 패턴, 사이트 구조)
 bash tests/run-all.sh
 
-# 단일 리포트 techblogs QA
-python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<category>/<slug>-report.html
+# 단일 리포트 검사 (TECHBLOGS = my-plugins 플러그인의 skills/techblogs 폴더)
+python3 "$TECHBLOGS/scripts/check_post.py" docs/techblog/<category>/<slug>-report.html --blog .
 ```
 
 ## 기여 방법

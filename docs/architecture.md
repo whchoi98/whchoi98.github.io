@@ -18,7 +18,7 @@ The primary flow: author writes a report HTML, QA validates it, a push to main t
 ## Components
 
 ### Content Layer
-- **docs/techblog/<category>/** -- One directory per category (aiml, aws-core, cloud-security, container, observability, networking, database, data-analytics). Each post is a triple: `<slug>.md` (front matter only: layout report, report_src, title/title_en, date, category, tags, excerpt/excerpt_en), `<slug>-report.html` (self-contained analysis document), and `<slug>-archmap.html` + `.png` (archify architecture map).
+- **docs/techblog/<category>/** -- One directory per category (aiml, aws-core, cloud-security, container, observability, networking, database, data-analytics). Each post is a triple: `<slug>.md` (front matter only: layout report, report_src, title/title_en, date, category, tags, excerpt/excerpt_en), `<slug>-report.html` (the bilingual report page), and `<slug>-assets/` (the images the report refers to). All three are built by the `my-plugins:techblogs` skill; the report HTML is never edited by hand.
 - **docs/workshop/** -- 50+ hands-on workshop documents rendered with the `doc` layout (sidebar navigation). Layout is applied via `_config.yml` defaults, not per-file front matter.
 - **index.md / tags.md / about.md** -- Root pages using `home`, `tags`, and `about` layouts.
 - **docs/decisions|runbooks|reference/, docs/architecture.md, docs/onboarding.md** -- Internal docs, excluded from the Jekyll build by `_config.yml` exclude.
@@ -36,22 +36,21 @@ The primary flow: author writes a report HTML, QA validates it, a push to main t
 - **Local build** -- `PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll build -d _site` for pre-push verification.
 
 ### Authoring Pipeline Layer
-- **Write** -- techblogs skill produces the self-contained report HTML (stat blocks, TL;DR, callouts, mac-terminal code blocks, embedded theme toggle).
-- **Validate** -- `python3 ~/.claude/skills/techblogs/scripts/qa.py <report.html>` enforces structural/style rules (exit 1 on ERROR).
-- **Translate** -- KO/EN dual pages are embedded in the same report HTML; front matter carries `title_en`/`excerpt_en`.
-- **Diagram** -- archify skill generates the interactive archmap HTML and PNG export embedded as an inline figure.
+- **Write** -- the `my-plugins:techblogs` skill works in a folder outside this repository (`meta.json`, `ko.body.html`, `en.body.html`, `images/`) and `build_post.py` fills the skill's template: masthead, horizontal section menu, sections, tables and figures in boxes, code boxes with a copy button, reference table. Fonts come from `assets/fonts/`.
+- **Validate** -- `python3 "$TECHBLOGS/scripts/check_post.py" <report.html> --blog .` enforces the template, the Korean and English element pairs, caption numbers, image files and the front matter (exit 1 on ERROR). `TECHBLOGS` is the skill folder.
+- **Translate** -- the Korean and the English text sit in the same report HTML with the same structure; front matter carries `title_en`/`excerpt_en`.
+- **Place** -- `place_post.py` copies the three outputs into `docs/techblog/<category>/` and runs `jekyll build`. A post republished from another site keeps the original date, links to the original and points its canonical link at it.
 
 ## Full Architecture Diagram
 
 ```mermaid
 flowchart TB
   subgraph authoring[Authoring Pipeline]
-    W[techblogs skill: write report HTML] --> Q[qa.py validation]
-    Q --> T[KO/EN dual-page embedding]
-    A[archify: archmap HTML + PNG] --> T
+    W[techblogs skill: work folder] --> Q[build_post.py and check_post.py]
+    Q --> T[place_post.py: md + report HTML + assets]
   end
   subgraph content[Content Layer]
-    P[docs/techblog: post md + report HTML + archmap]
+    P[docs/techblog: post md + report HTML + assets folder]
     K[docs/workshop: 50+ docs]
     R[index.md / tags.md / about.md]
   end
@@ -82,7 +81,7 @@ Publishing a post - the critical path:
 
 ```mermaid
 flowchart LR
-  Draft[Report HTML] --> QA[qa.py] --> FM[Front matter md] --> Build[jekyll build verify] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
+  Work[Work folder] --> BuildPost[build_post.py] --> Check[check_post.py] --> Place[place_post.py] --> Build[jekyll build verify] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
 ```
 
 ## Infrastructure
@@ -124,7 +123,7 @@ whchoi98.github.io는 완전 커스텀 테마의 Jekyll 4.3 정적 블로그이�
 ## 구성요소
 
 ### Content Layer
-- **docs/techblog/<카테고리>/** -- 카테고리별 디렉토리 (aiml, aws-core, cloud-security, container, observability, networking, database, data-analytics). 게시물은 3종 세트입니다: `<slug>.md`(front matter 전용: layout report, report_src, title/title_en, date, category, tags, excerpt/excerpt_en), `<slug>-report.html`(자립형 분석 문서), `<slug>-archmap.html` + `.png`(archify 아키텍처 맵).
+- **docs/techblog/<카테고리>/** -- 카테고리별 디렉토리 (aiml, aws-core, cloud-security, container, observability, networking, database, data-analytics). 게시물은 3종 세트입니다: `<slug>.md`(front matter 전용: layout report, report_src, title/title_en, date, category, tags, excerpt/excerpt_en), `<slug>-report.html`(한영 리포트 페이지), `<slug>-assets/`(리포트가 가리키는 그림). 세 가지 모두 `my-plugins:techblogs` 스킬이 빌드하며, 리포트 HTML은 직접 고치지 않습니다.
 - **docs/workshop/** -- `doc` 레이아웃(사이드바 네비게이션)으로 렌더링되는 핸즈온 워크샵 문서 50여 개. 레이아웃은 파일별 front matter가 아닌 `_config.yml` defaults로 적용됩니다.
 - **index.md / tags.md / about.md** -- `home`, `tags`, `about` 레이아웃을 쓰는 루트 페이지.
 - **docs/decisions|runbooks|reference/, docs/architecture.md, docs/onboarding.md** -- 내부 문서. `_config.yml` exclude로 Jekyll 빌드에서 제외됩니다.
@@ -142,22 +141,21 @@ whchoi98.github.io는 완전 커스텀 테마의 Jekyll 4.3 정적 블로그이�
 - **로컬 빌드** -- push 전 검증용: `PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll build -d _site`
 
 ### Authoring Pipeline Layer
-- **작성** -- techblogs 스킬이 자립형 리포트 HTML을 생성합니다 (통계 블록, TL;DR, 콜아웃, mac 터미널 코드블록, 테마 토글 내장).
-- **검증** -- `python3 ~/.claude/skills/techblogs/scripts/qa.py <report.html>`이 구조/스타일 규칙을 강제합니다 (ERROR 시 exit 1).
-- **번역** -- KO/EN 이중 페이지를 같은 리포트 HTML에 내장하고, front matter가 `title_en`/`excerpt_en`을 보유합니다.
-- **다이어그램** -- archify 스킬이 인터랙티브 archmap HTML과 PNG를 생성하고, PNG는 인라인 figure로 리포트에 삽입됩니다.
+- **작성** -- `my-plugins:techblogs` 스킬이 이 저장소 밖의 작업 폴더(`meta.json`, `ko.body.html`, `en.body.html`, `images/`)에서 일하고, `build_post.py`가 스킬의 템플릿을 채웁니다. 머리, 가로 이동 메뉴, 절, 상자 안의 표와 그림, 복사 버튼이 있는 코드 상자, 참고 자료 표로 구성됩니다. 글꼴은 `assets/fonts/`에서 받습니다.
+- **검증** -- `python3 "$TECHBLOGS/scripts/check_post.py" <report.html> --blog .`가 템플릿 일치, 한국어와 영어의 구성 요소 짝, 캡션 번호, 그림 파일, front matter를 검사합니다 (ERROR 시 exit 1). `TECHBLOGS`는 스킬 폴더입니다.
+- **번역** -- 한국어와 영어 본문을 같은 구조로 한 리포트 HTML에 담고, front matter가 `title_en`/`excerpt_en`을 보유합니다.
+- **배치** -- `place_post.py`가 결과물 세 가지를 `docs/techblog/<카테고리>/`에 복사하고 `jekyll build`를 실행합니다. 다른 곳에 먼저 게시한 글은 원문 게시일을 유지하고 원문 링크를 두며 canonical 링크가 원문을 가리킵니다.
 
 ## 전체 아키텍처 다이어그램
 
 ```mermaid
 flowchart TB
   subgraph authoring[Authoring Pipeline]
-    W[techblogs skill: write report HTML] --> Q[qa.py validation]
-    Q --> T[KO/EN dual-page embedding]
-    A[archify: archmap HTML + PNG] --> T
+    W[techblogs skill: work folder] --> Q[build_post.py and check_post.py]
+    Q --> T[place_post.py: md + report HTML + assets]
   end
   subgraph content[Content Layer]
-    P[docs/techblog: post md + report HTML + archmap]
+    P[docs/techblog: post md + report HTML + assets folder]
     K[docs/workshop: 50+ docs]
     R[index.md / tags.md / about.md]
   end
@@ -188,7 +186,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-  Draft[Report HTML] --> QA[qa.py] --> FM[Front matter md] --> Build[jekyll build verify] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
+  Work[Work folder] --> BuildPost[build_post.py] --> Check[check_post.py] --> Place[place_post.py] --> Build[jekyll build verify] --> Push[git push main] --> Actions[GitHub Actions] --> Pages([GitHub Pages])
 ```
 
 ## 인프라

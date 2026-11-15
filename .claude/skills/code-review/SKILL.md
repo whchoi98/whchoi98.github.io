@@ -11,9 +11,9 @@ By default, review unstaged changes from `git diff`. The user may specify differ
 ## Review Criteria
 
 ### Project Guidelines Compliance (CLAUDE.md)
-- report 패턴 준수: 게시물 md는 `layout: report` + `report_src`, 본문은 자립형 HTML
+- report 패턴 준수: 게시물 md는 `layout: report` + `report_src`, 본문은 `my-plugins:techblogs` 스킬이 빌드한 리포트 HTML(직접 수정 금지), 그림은 `<slug>-assets/`
 - KO/EN 이중 언어 동등성: `title`/`title_en`, `excerpt`/`excerpt_en`, `.l-ko`/`.l-en` 쌍
-- 코드블록은 mac 터미널 스타일(리포트 HTML 내부)
+- 코드블록은 언어 이름과 복사 버튼이 있는 코드 상자(리포트 HTML 내부)
 - 색상은 CSS 변수 사용 (하드코딩 색상은 라이트/다크 한쪽을 깨뜨림)
 - `git add -A` 사용 흔적이 있으면 지적
 - 내부 문서가 공개 경로로 새지 않는지 (_config.yml exclude 확인)
@@ -28,7 +28,7 @@ By default, review unstaged changes from `git diff`. The user may specify differ
 ### Code Quality
 - CSS/JS 중복, 불필요한 복잡도
 - 접근성 (skip link, aria, noscript 폴백)
-- techblogs QA 통과 여부 (`python3 ~/.claude/skills/techblogs/scripts/qa.py <report.html>`)
+- techblogs 검사 통과 여부 (`python3 "$TECHBLOGS/scripts/check_post.py" <report.html> --blog .`, TECHBLOGS는 my-plugins 플러그인의 skills/techblogs 폴더)
 
 ## Confidence Scoring
 

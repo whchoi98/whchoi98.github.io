@@ -18,15 +18,15 @@ Validates hooks (existence, permissions, syntax, registration, behavior),
 secret-scan patterns (true/false positives), and site structure
 (_config.yml exclude list, layouts, CLAUDE.md sections, settings.json).
 
-## Step 2: techblogs QA Sweep
+## Step 2: techblogs Check Sweep
 
-Run QA on every report document:
+Run the check on every report document. `TECHBLOGS` is the `skills/techblogs` folder of the my-plugins plugin:
 
 ```bash
-find docs/techblog -name '*-report.html' -exec python3 ~/.claude/skills/techblogs/scripts/qa.py {} \;
+find docs/techblog -name '*-report.html' -exec python3 "$TECHBLOGS/scripts/check_post.py" {} --blog . \;
 ```
 
-qa.py exits 1 on any ERROR; WARN items are judgement calls - read them and decide.
+check_post.py exits 1 on any ERROR; WARN items are judgement calls - read them and decide.
 
 ## Step 3: Report
 
@@ -53,7 +53,7 @@ chmod +x tests/run-all.sh         # Fix permissions
 | "invalid JSON" | Malformed settings.json | `python3 -m json.tool .claude/settings.json` |
 | "not executable" | Permission reset by git | `chmod +x` on affected files |
 | "bash syntax error" | Bad edit in script | `bash -n <file>` to locate error |
-| qa.py ERROR | Report violates techblogs rules | Fix the report HTML per the message |
+| check_post.py ERROR | Report violates techblogs rules | Fix the work folder (not the report HTML) per the message and rebuild with the skill |
 
 ### If many tests fail at once
 Likely a structural change broke multiple assumptions:
