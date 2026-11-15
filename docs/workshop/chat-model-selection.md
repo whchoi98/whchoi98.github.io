@@ -18,7 +18,7 @@ last_modified_date: "2026-03-19"
 
 ***
 
-Kiro는 개발 업무 전반을 지원하기 위해 Auto, Claude Sonnet 4.0, Claude Sonnet 4.5, Claude Haiku 4.5, Claude Opus 4.5 등 다양한 고성능 AI Agent(에이전트) 모델을 제공합니다. 각 모델은 업무 특성, 사용 패턴, 비용 구조에 따라 상이한 강점을 갖고 있습니다.
+Kiro는 개발 업무 전반을 지원하기 위해 Auto, Claude Sonnet 4.0, Claude Sonnet 4.5, Claude Haiku 4.5, Claude Opus 4.5 등 다양한 고성능 AI Agent(에이전트) 모델을 제공합니다. 각 모델은 업무 특성, 사용 패턴, 비용 구조에 따라 강점이 다릅니다.
 
 ***
 
@@ -30,10 +30,10 @@ Auto는 Kiro의 기본 모델 라우팅(Model Routing) 엔진으로, 여러 최�
 
 주요 장점
 
-* 비용 효율성(Cost-effective) – Sonnet 4 직접 사용 대비 약 23% 비용 절감
-* 지능형 라우팅(Smart Routing) – 작업 특성에 최적화된 모델을 자동 선택
-* 일관된 품질(Consistent Quality) – 다양한 작업에서 Sonnet 4 수준의 출력 제공
-* 플랜 효율성(Plan Efficiency) – 사용 한도를 가장 효율적으로 활용
+* 비용 효율성(Cost-effective): Sonnet 4 직접 사용 대비 약 23% 비용 절감
+* 지능형 라우팅(Smart Routing): 작업 특성에 최적화된 모델을 자동 선택
+* 일관된 품질(Consistent Quality): 다양한 작업에서 Sonnet 4 수준의 출력 제공
+* 플랜 효율성(Plan Efficiency): 사용 한도를 가장 효율적으로 활용
 
 Auto가 사용하는 모델은?
 
@@ -47,9 +47,9 @@ Auto는 Claude Sonnet 4를 포함한 최상위급 LLM(best-in-class LLM) 조합�
 
 주요 장점
 
-* 예측 가능한 동작(Predictable Behavior) – 모든 요청에 동일 모델 적용
-* 직접 접근(Direct Access) – 라우팅·최적화 계층 없음
-* 완전한 제어(Full Control) – 모델 선택 투명성 보장
+* 예측 가능한 동작(Predictable Behavior): 모든 요청에 동일 모델 적용
+* 직접 접근(Direct Access): 라우팅과 최적화 계층 없음
+* 완전한 제어(Full Control): 모델 선택 투명성 보장
 
 ***
 
@@ -59,9 +59,9 @@ Auto는 Claude Sonnet 4를 포함한 최상위급 LLM(best-in-class LLM) 조합�
 
 주요 장점
 
-* 최첨단 코딩 성능(Coding Excellence) – SWE-bench Verified 기준 최고 수준
-* 고급 에이전트 기능(Agent Capabilities) – 수 시간의 장기 자율 작업 수행 및 효과적 도구 활용
-* 향상된 추론 능력(Enhanced Reasoning) – 시스템 설계·보안 엔지니어링·계획 능력 강화
+* 최첨단 코딩 성능(Coding Excellence): SWE-bench Verified 기준 최고 수준
+* 고급 에이전트 기능(Agent Capabilities): 수 시간의 장기 자율 작업 수행 및 효과적 도구 활용
+* 향상된 추론 능력(Enhanced Reasoning): 시스템 설계, 보안 엔지니어링, 계획 능력 강화
 
 ***
 
@@ -71,9 +71,9 @@ Anthropic의 최상위급 지능을 제공하는 모델로, 복잡한 전문 업
 
 주요 장점
 
-* 최대 지능(Maximum Intelligence) – 추론·코딩·문제 해결에서 단계적 성능 향상
-* 실용적 성능(Practical Performance) – 이전 Opus 대비 더 접근 가능한 가격
-* 복합 추론 능력(Complex Reasoning) – 다중 시스템 간 트레이드오프와 모호성 처리 능력 우수
+* 최대 지능(Maximum Intelligence): 추론, 코딩, 문제 해결에서 단계적 성능 향상
+* 실용적 성능(Practical Performance): 이전 Opus 대비 더 접근 가능한 가격
+* 복합 추론 능력(Complex Reasoning): 다중 시스템 간 트레이드오프와 모호성 처리 능력 우수
 
 이용 가능 여부
 
@@ -88,16 +88,16 @@ Anthropic의 최상위급 지능을 제공하는 모델로, 복잡한 전문 업
 
 주요 장점
 
-* 준-프런티어 지능(Near-frontier Intelligence) – 추론·코딩에서 Sonnet 4 수준에 근접
-* 매우 빠른 속도(Blazing Speed) – Sonnet 4 대비 2배 이상 속도
-* 비용 효율성(Cost-effective) – Sonnet 4 대비 1/3 수준의 비용
-* 확장된 사고 능력(Extended Thinking) – 최초의 고급 추론 지원 Haiku 모델
+* 준-프런티어 지능(Near-frontier Intelligence): 추론과 코딩에서 Sonnet 4 수준에 근접
+* 빠른 속도(Blazing Speed): Sonnet 4 대비 2배 이상 속도
+* 비용 효율성(Cost-effective): Sonnet 4 대비 1/3 수준의 비용
+* 확장된 사고 능력(Extended Thinking): 최초의 고급 추론 지원 Haiku 모델
 
 ***
 
 ## 2. 모델별 비용 비교
 
-모델별 크레딧 소모 방식은 다음과 같습니다:
+다음은 모델별 크레딧 소모 방식을 정리한 표입니다.
 
 <table data-header-hidden><thead><tr><th width="189.58203125"></th><th width="231.70703125"></th><th></th></tr></thead><tbody><tr><td>모델(Model)</td><td>크레딧 사용량(Credit Usage)</td><td>예시 작업 비용(Example Task Cost)</td></tr><tr><td>Claude Haiku 4.5</td><td>0.4x</td><td>4 credits</td></tr><tr><td>Auto</td><td>1.0x</td><td>10 credits</td></tr><tr><td>Claude Sonnet 4.0</td><td>1.3x</td><td>13 credits</td></tr><tr><td>Claude Sonnet 4.5</td><td>1.3x</td><td>13 credits</td></tr><tr><td>Claude Opus 4.5</td><td>2.2x</td><td>22 credits</td></tr></tbody></table>
 
@@ -117,7 +117,7 @@ Anthropic의 최상위급 지능을 제공하는 모델로, 복잡한 전문 업
 #### Auto를 고려할 때
 
 * 비용 효율성 극대화 필요
-* 일반적인 개발 작업(코딩·디버깅·설계 등)
+* 일반적인 개발 작업(코딩, 디버깅, 설계 등)
 * 다양한 유형의 작업을 병행
 * 플랜 사용량 최적화가 중요
 
@@ -135,9 +135,9 @@ Anthropic의 최상위급 지능을 제공하는 모델로, 복잡한 전문 업
 #### Claude Opus 4.5를 고려할 때
 
 * 최상위급 지능(Maximum Intelligence)이 필요한 경우
-* 전문적·고난도 소프트웨어 엔지니어링
+* 전문적인 고난도 소프트웨어 엔지니어링
 * 장기 실행형 고급 에이전트
-* 품질이 핵심인 고위험·고가치 작업
+* 품질이 핵심인 고위험, 고가치 작업
 
 ***
 
@@ -159,7 +159,7 @@ kiro-cli settings chat.defaultModel claude-sonnet4
 
 * 기본값은 Auto로 설정
 * 속도가 중요하면 Haiku 활용
-* 복잡한 에이전트·코딩 워크로드에는 Sonnet
+* 복잡한 에이전트와 코딩 워크로드에는 Sonnet
 * 최고 난도 작업에는 Opus
 * 사용량 모니터링을 정기적으로 수행
 * 동일 작업에 다양한 모델을 테스트하여 최적점을 찾기

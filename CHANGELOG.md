@@ -32,6 +32,8 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Clean up 32 workshop documents: no middle dots, em dashes or en dashes outside code, arrows in sentences written out, and AI-tell phrasing removed (stock lead-ins, vague position references, translationese); code blocks, links, numbers and heading words are unchanged, and 23 headings swap a dash for a colon
+- Wrap option names that sat in running text in code marks so that `--name`, `--path`, `--resume` and `--directory` no longer render with an en dash
 - Render the home page in NanumSquare, the font of the report pages (Bold for titles, card titles and the menu, Regular for descriptions)
 - Move the category cards on the home page to the top, above the featured post
 - Replace the middle dots in the site chrome (date and reading time, list labels, category counts, footer, view counts) with "|" or a comma
@@ -91,6 +93,8 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 워크샵 문서 32개 정리: 코드 밖의 가운뎃점, 엠 대시, 엔 대시 제거, 문장 속 화살표를 말로 풀고 AI 티 나는 표현(상투적 도입구, 모호한 위치 참조, 번역투) 수정. 코드 블록, 링크, 숫자, 제목의 낱말은 그대로이며 제목 23개의 대시가 쌍점으로 바뀜
+- 본문에 그대로 적혀 엔 대시로 그려지던 옵션 이름(`--name`, `--path`, `--resume`, `--directory`)을 코드 표기로 감쌈
 - 홈 화면을 글 리포트와 같은 나눔스퀘어로 표시 (제목, 카드 제목, 메뉴는 Bold, 설명 글은 Regular)
 - 홈의 카테고리 카드를 대표 글 위, 맨 위로 이동
 - 사이트 공통 화면(날짜와 읽는 시간, 목록 라벨, 분류별 편수, 바닥글, 조회수)의 가운뎃점을 "|"나 쉼표로 변경

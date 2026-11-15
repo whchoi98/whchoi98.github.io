@@ -53,7 +53,7 @@ kiro-cli
 
 ## 2. Use Cases / 활용 사례
 
-Kiro CLI는 다음과 같은 상황에서 특히 효과적입니다.
+Kiro CLI는 다음 상황에서 특히 효과적입니다.
 
 #### • 인터랙티브 개발(Interactive Development)
 
@@ -73,7 +73,7 @@ MCP(Manifold Control Protocol) 서버를 통해 외부 도구 및 서비스와 K
 
 #### • 지능형 지원(Intelligent Assistance)
 
-컨텍스트(Context)를 이해하는 AI 기반 제안, 자동 완성, 코딩 가이드 등을 통해 개발 효율을 높일 수 있습니다.
+컨텍스트(Context)를 이해하는 AI 기반 제안, 자동 완성, 코딩 가이드 등으로 개발 효율을 높일 수 있습니다.
 
 #### • 워크플로우 최적화(Workflow Optimization)
 
@@ -84,4 +84,4 @@ MCP(Manifold Control Protocol) 서버를 통해 외부 도구 및 서비스와 K
 * Kiro CLI는 AI 기반 개발을 터미널에서 직접 사용할 수 있는 도구입니다.
 * `curl ... | bash` 명령으로 간단히 설치할 수 있습니다.
 * kiro-cli 실행 후 즉시 Kiro와 상호작용하며 개발을 시작할 수 있습니다.
-* 다양한 자동화·통합·지능형 지원 기능을 통해 개발 생산성을 크게 높일 수 있습니다.
+* 다양한 자동화, 통합, 지능형 지원 기능으로 개발 생산성을 크게 높일 수 있습니다.

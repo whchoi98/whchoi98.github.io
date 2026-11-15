@@ -18,13 +18,13 @@ last_modified_date: "2026-03-19"
 
 Tangent Mode는 대화의 흐름을 보존한 채, 임시로 다른 주제를 탐색할 수 있도록 설계된 대화 분기 기능입니다.
 
-사용자는 Tangent Mode로 진입하여 보조 질문·개념 확인·짧은 탐색을 수행한 뒤, 언제든지 원래 대화 지점으로 복귀할 수 있습니다.
+사용자는 Tangent Mode로 진입하여 보조 질문, 개념 확인, 짧은 탐색을 수행한 뒤 언제든지 원래 대화 지점으로 복귀할 수 있습니다.
 
 ***
 
 ## 1. 개요
 
-Tangent Mode는 “대화 체크포인트(checkpoint)“를 생성하여 다음을 가능하게 합니다:
+Tangent Mode는 “대화 체크포인트(checkpoint)“를 생성하므로 다음 작업을 할 수 있습니다:
 
 * 메인 대화 흐름 보존
 * 임시적인 측면 질문(side-topic) 수행
@@ -37,7 +37,7 @@ Tangent Mode는 “대화 체크포인트(checkpoint)“를 생성하여 다음�
 
 ## 2. Tangent Mode 활성화
 
-Tangent Mode는 실험적 기능이므로 다음 중 하나를 통해 활성화해야 합니다.
+Tangent Mode는 실험적 기능이므로 다음 방법 중 하나로 활성화해야 합니다.
 
 ### 방법 1: Experiment 메뉴
 
@@ -70,7 +70,7 @@ kiro-cli settings chat.enableTangentMode true
 Created a conversation checkpoint (↯). Use ctrl+t or /tangent to restore.
 ```
 
-프롬프트는 다음과 같이 변경됩니다.
+다음은 변경된 프롬프트입니다.
 
 ```
 ↯ > 
@@ -115,7 +115,7 @@ Restored conversation from checkpoint (↯) with last conversation entry preserv
 
 ## 4. 사용 예
 
-### Example 1 – 대안 탐색
+### Example 1: 대안 탐색
 
 메인 질문:
 
@@ -139,7 +139,7 @@ Restored conversation from checkpoint (↯) with last conversation entry preserv
 
 ***
 
-### Example 2 – CLI 도움 요청
+### Example 2: CLI 도움 요청
 
 메인 대화 중 CLI 도움 필요:
 
@@ -157,7 +157,7 @@ Restored conversation from checkpoint (↯) with last conversation entry preserv
 
 ***
 
-### Example 3 – 요구사항 정리
+### Example 3: 요구사항 정리
 
 메인:
 
@@ -173,7 +173,7 @@ Tangent에서 명확화:
 
 ***
 
-### Example 4 – Tail 모드 사용
+### Example 4: Tail 모드 사용
 
 유용한 Tangent Q\&A를 보존하고 싶은 경우:
 
@@ -218,8 +218,8 @@ kiro-cli settings introspect.tangentMode true
 
 ### 적합하지 않은 시나리오
 
-* 주제가 전혀 다른 장시간 대화 → 새 세션 시작 권장
-* 메인 컨텍스트에 반드시 포함되어야 하는 대화 → Tangent 불필요
+* 주제가 전혀 다른 장시간 대화: 새 세션 시작 권장
+* 메인 컨텍스트에 반드시 포함되어야 하는 대화: Tangent 불필요
 
 ***
 

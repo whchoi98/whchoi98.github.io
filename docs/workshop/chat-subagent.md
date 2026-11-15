@@ -22,7 +22,7 @@ last_modified_date: "2026-03-19"
 
 Subagent(서브에이전트)는 사용자를 대신하여 복잡한 작업을 자율적으로 수행(Autonomous execution) 할 수 있도록 설계된 전문화된 에이전트(Specialized agents) 입니다.
 
-각 Subagent는 독립적인 컨텍스트(Context), 도구 접근 권한(Tool access), 의사결정 능력(Decision-making capabilities) 을 보유하며, 다단계 작업에 특히 적합합니다.
+각 Subagent는 독립적인 컨텍스트(Context), 도구 접근 권한(Tool access), 의사결정 능력(Decision-making capabilities) 을 보유하며 다단계 작업에 특히 적합합니다.
 
 ***
 
@@ -40,7 +40,7 @@ Subagent는 자체 컨텍스트를 기반으로 독립적으로 작업을 수행
 
 #### 1.2.3 핵심 도구 접근(Core tool access)
 
-Subagent는 다음과 같은 핵심 도구에 접근할 수 있습니다.
+Subagent는 다음 핵심 도구에 접근할 수 있습니다.
 
 * 파일 읽기(Read)
 * 명령 실행(Execute commands)
@@ -115,21 +115,21 @@ Subagent는 별도의 런타임 환경(Separate runtime environment) 에서 실�
 
 #### 1.6.1 사용 가능한 도구(Available tools)
 
-* read – 파일 및 디렉터리 읽기
-* write – 파일 생성 및 편집
-* shell – Bash 명령 실행
+* read: 파일 및 디렉터리 읽기
+* write: 파일 생성 및 편집
+* shell: Bash 명령 실행
 * MCP 도구(Model Context Protocol tools)
 
 #### 1.6.2 사용 불가 도구(Not available)
 
-* web\_search – 웹 검색
-* web\_fetch – URL 콘텐츠 가져오기
-* introspect – CLI 정보 조회
-* thinking – 추론 도구
-* todo\_list – 작업 목록 관리
-* use\_aws – AWS 명령
-* grep – 파일 내용 검색
-* glob – 패턴 기반 파일 검색
+* web\_search: 웹 검색
+* web\_fetch: URL 콘텐츠 가져오기
+* introspect: CLI 정보 조회
+* thinking: 추론 도구
+* todo\_list: 작업 목록 관리
+* use\_aws: AWS 명령
+* grep: 파일 내용 검색
+* glob: 패턴 기반 파일 검색
 
 ***
 
@@ -137,7 +137,7 @@ Subagent는 별도의 런타임 환경(Separate runtime environment) 에서 실�
 
 커스텀 에이전트 구성에 Subagent에서 지원되지 않는 도구가 포함되어 있더라도,
 
-해당 도구만 비활성화된 상태로 제외 되고, Subagent 자체는 사용 가능한 도구 범위 내에서 정상적으로 동작합니다.
+해당 도구만 비활성화된 상태로 제외 되고 Subagent 자체는 사용 가능한 도구 범위 내에서 정상적으로 동작합니다.
 
 ***
 

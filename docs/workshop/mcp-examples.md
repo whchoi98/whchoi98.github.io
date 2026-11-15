@@ -16,22 +16,22 @@ last_modified_date: "2026-03-19"
 
 ---
 
-본 가이드는 Model Context Protocol(MCP) 서버의 대표적인 예시, 제공 기능, 및 Kiro와의 설정 방법을 설명합니다.
+본 가이드는 Model Context Protocol(MCP) 서버의 대표적인 예시, 제공 기능 및 Kiro와의 설정 방법을 설명합니다.
 
 {: .warning }
 경고\
 MCP 서버는 반드시 신뢰할 수 있는 출처의 것만 추가해야 합니다.또한 해당 서버의 라이선스 및 문서를 반드시 검토하십시오.\
-Kiro는 서드파티 MCP 서버 또는 외부 패키지에 대해 책임지지 않습니다.
+Kiro는 서드파티 MCP 서버 또는 외부 패키지를 책임지지 않습니다.
 
 ***
 
 ## 1. AWS Documentation Server
 
-AWS Documentation MCP 서버는 AWS 공식 문서에 대한 검색·조회·추천 기능을 제공합니다.
+AWS Documentation MCP 서버는 AWS 공식 문서의 검색, 조회, 추천 기능을 제공합니다.
 
 ### 1.1. 기능
 
-* AWS 서비스 전체 문서에 대한 검색(Search)
+* AWS 서비스 전체 문서 검색(Search)
 * AWS 문서 페이지를 Markdown 형식으로 읽기(Read)
 * 특정 문서에 기반한 콘텐츠 추천(Recommendations)
 
@@ -123,12 +123,12 @@ uv python install 3.10
 
 ## 2. GitHub MCP Server
 
-GitHub MCP 서버는 Kiro가 GitHub 리포지토리·이슈·PR과 상호작용할 수 있도록 해줍니다.
+GitHub MCP 서버는 Kiro가 GitHub 리포지토리, 이슈, PR과 상호작용할 수 있도록 해줍니다.
 
 ### 2.1. 기능
 
-* 리포지토리 파일·커밋·브랜치 조회
-* 이슈 및 PR 생성·관리
+* 리포지토리 파일, 커밋, 브랜치 조회
+* 이슈 및 PR 생성과 관리
 * 코드/텍스트 기반 검색
 
 ***
@@ -143,8 +143,8 @@ GitHub는 공식 Docker 기반 MCP 서버 사용을 권장합니다.
 
 #### 1. Docker 설치
 
-* macOS/Windows → Docker Desktop
-* Linux → Docker Engine
+* macOS/Windows: Docker Desktop
+* Linux: Docker Engine
 
 #### 2. GitHub Personal Access Token 생성
 
@@ -202,7 +202,7 @@ GitHub → Settings → Developer settings → Personal access tokens
 
 GitHub MCP 서버는 기능을 toolset 단위로 구성합니다.
 
-도커 환경에서는 다음과 같이 특정 toolset만 활성화할 수 있습니다:
+다음은 도커 환경에서 특정 toolset만 활성화하는 명령입니다:
 
 ```
 docker run -i --rm \
@@ -249,7 +249,7 @@ docker run -i --rm \
 
 #### Development Tools
 
-* Docker MCP Server: 컨테이너·이미지 관리
+* Docker MCP Server: 컨테이너와 이미지 관리
 * Kubernetes MCP Server: 클러스터 관리
 
 ***

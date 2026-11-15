@@ -35,10 +35,10 @@ last_modified_date: "2026-03-19"
 #### 해결 방법
 
 * JSON Validator 또는 Linter로 구문 검사
-* 다음과 같은 일반적인 JSON 오류 확인:
+* 다음 일반적인 JSON 오류 확인:
   * 배열 또는 객체 항목 간 쉼표 누락
   * 마지막 요소 뒤의 트레일링 콤마
-  * 괄호/중괄호 불일치
+  * 괄호와 중괄호 불일치
   * 문자열 내 따옴표 미이스케이프
 * `/agent schema` 명령으로 스키마 검증 수행
 
@@ -50,9 +50,9 @@ last_modified_date: "2026-03-19"
 
 #### 증상
 
-* 알 수 없는 필드(unknown field)에 대한 경고
+* 알 수 없는 필드(unknown field) 경고
 * 설정과 다른 동작 수행
-* required 필드 누락에 대한 오류
+* required 필드 누락 오류
 
 #### 해결 방법
 
@@ -92,7 +92,7 @@ last_modified_date: "2026-03-19"
 
 #### 해결 방법
 
-* 동일 이름의 로컬/글로벌 에이전트 중복 여부 확인
+* 동일 이름의 로컬과 글로벌 에이전트 중복 여부 확인
 * 로컬 에이전트가 항상 우선됨
 * `/agent list` 로 실제 로드된 파일 확인
 * 충돌 파일 삭제 또는 이름 변경
@@ -188,11 +188,11 @@ last_modified_date: "2026-03-19"
 
 문제를 체계적으로 진단하기 위해 다음 순서로 테스트하는 것이 좋습니다:
 
-1. JSON 구문 검사 — Validator 사용
-2. 스키마 검증 — `/agent schema`
-3. 로드 확인 — `/agent list`
-4. 에이전트 전환 — `/agent swap [name]`
-5. 도구 동작 확인 — 각 tool 호출 테스트
+1. JSON 구문 검사: Validator 사용
+2. 스키마 검증: `/agent schema`
+3. 로드 확인: `/agent list`
+4. 에이전트 전환: `/agent swap [name]`
+5. 도구 동작 확인: 각 tool 호출 테스트
 6. 리소스 및 hook 확인
 7. 실제 워크플로우 실행 테스트<br>
 

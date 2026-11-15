@@ -20,7 +20,7 @@ last_modified_date: "2026-03-19"
 
 Hooks는 에이전트(agent) 생명주기(lifecycle) 및 도구(tool) 실행 과정의 특정 시점에 사용자 정의 명령(custom commands)을 실행할 수 있도록 하는 기능입니다.
 
-이를 통해 다음과 같은 고급 동작을 구현할 수 있습니다:
+이를 통해 다음 고급 동작을 구현할 수 있습니다:
 
 * 보안 검증(Security Validation)
 * 로깅 및 감사(Audit Logging)
@@ -28,7 +28,7 @@ Hooks는 에이전트(agent) 생명주기(lifecycle) 및 도구(tool) 실행 과
 * 추가 컨텍스트 수집(Context Gathering)
 * 사용자 정의 후처리(Post-processing)
 
-Hooks는 Kiro의 에이전트 기능을 조직·프로젝트 요구사항에 맞게 확장하는 핵심 메커니즘입니다.
+Hooks는 Kiro의 에이전트 기능을 조직과 프로젝트 요구사항에 맞게 확장하는 핵심 메커니즘입니다.
 
 ***
 
@@ -40,7 +40,7 @@ Hooks는 에이전트 설정(agent configuration) 파일 내에서 정의됩니�
 
 ## 1. Hook Event Structure
 
-모든 Hook은 STDIN을 통해 JSON 형식의 이벤트(payload)를 전달받습니다.
+모든 Hook은 STDIN으로 JSON 형식의 이벤트(payload)를 전달받습니다.
 
 ### 1.1. 기본 이벤트 구조 예시
 
@@ -65,7 +65,7 @@ Hooks는 에이전트 설정(agent configuration) 파일 내에서 정의됩니�
 
 ## 3. 도구 매칭 규칙
 
-matcher 필드를 통해 특정 도구에만 Hook이 적용되도록 지정할 수 있습니다.
+matcher 필드로 특정 도구에만 Hook이 적용되도록 지정할 수 있습니다.
 
 #### matcher 예시
 
@@ -124,7 +124,7 @@ matcher 필드를 통해 특정 도구에만 Hook이 적용되도록 지정할 �
 
 ### 4.3. PreToolUse
 
-도구 실행 직전에 실행되며, 유효성 검사 및 보안 확인에 적합합니다.
+도구 실행 직전에 실행되며 유효성 검사 및 보안 확인에 적합합니다.
 
 _유일하게 도구 실행을 차단할 수 있는 Hook입니다._
 
@@ -154,7 +154,7 @@ _유일하게 도구 실행을 차단할 수 있는 Hook입니다._
 
 ### 4.4. PostToolUse
 
-도구 실행 완료 후 실행되며, 실행 결과(tool\_response)에 접근할 수 있습니다.
+도구 실행 완료 후 실행되며 실행 결과(tool\_response)에 접근할 수 있습니다.
 
 #### Event Example
 

@@ -18,11 +18,11 @@ last_modified_date: "2026-03-19"
 
 ## 1. 아키텍쳐 분석하기
 
-이 랩은 현재 계정에 대한 아키텍쳐를 Kiro CLI를 활용해서 AWS 모범사례에 맞추어 분석을 하고, 리포트를 생성하는 랩입니다.
+이 랩은 현재 계정의 아키텍쳐를 Kiro CLI를 활용해서 AWS 모범사례에 맞추어 분석하고 리포트를 생성하는 랩입니다.
 
 ### 1.1. 랩 목표
 
-이 랩을 통해 다음과 같은 내용을 학습할 수 있습니다:
+다음은 이 랩에서 학습할 수 있는 내용입니다:
 
 1. Kiro CLI를 사용하여 아키텍쳐 전체 분석 하는 방법
 2. 효과적인 프롬프트와 Context를 사용하는 방법
@@ -221,13 +221,13 @@ Architect를 위한 프로파일을 생성합니다.
 /profile create architect
 ```
 
-앞서 생성한 EC2 운영자를 위한 context를 ec2ops 프로파일에 연결 구성합니다.
+rules 디렉토리에 생성한 EC2 운영자를 위한 context를 ec2ops 프로파일에 연결 구성합니다.
 
 ```
 /context add ~/projects/architect/rules/architect.md
 ```
 
-아래 명령을 통해서 정상적으로 context가 입력되었는지 확인합니다.
+아래 명령으로 context가 정상적으로 입력되었는지 확인합니다.
 
 ```
 /context show
@@ -444,7 +444,7 @@ home/ec2-user/amazonqcli_lab/aws-arch-analysis/prompt 의 4단계를 수행해�
 
 ### 1.4. Step3: 생성된 리포트를 상세하게 분석하기 
 
-아래와 같은  HTML 리포트가 생성됩니다. 각 리포트들은 링크가 연결되므로 각 리포트들을 확인해 봅니다.
+다음 HTML 리포트가 생성됩니다. 각 리포트들은 링크가 연결되므로 각 리포트들을 확인해 봅니다.
 
 HTML 보고서 (11개):
 

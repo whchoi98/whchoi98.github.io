@@ -21,9 +21,9 @@ last_modified_date: "2026-03-19"
 ### 1.1. Steering 이란?
 
 \
-Steering은 `.kiro/steering/` 디렉터리에 저장된 Markdown 파일을 통해 프로젝트 지식(Project Knowledge)을 Kiro가 지속적으로 학습하고 유지하도록 하는 기능입니다.
+Steering은 `.kiro/steering/` 디렉터리에 저장된 Markdown 파일로 프로젝트 지식(Project Knowledge)을 Kiro가 지속적으로 학습하고 유지하도록 하는 기능입니다.
 
-이를 통해 매 대화마다 동일한 프로젝트 규칙이나 관례를 반복 설명할 필요 없이, Kiro가 귀하의 팀이 정의한 패턴, 라이브러리, 표준, 아키텍처 원칙을 일관되게 준수하도록 합니다.
+이를 통해 매 대화마다 동일한 프로젝트 규칙이나 관례를 반복 설명할 필요 없이, Kiro가 팀이 정의한 패턴, 라이브러리, 표준, 아키텍처 원칙을 일관되게 준수하도록 합니다.
 
 ***
 
@@ -81,7 +81,7 @@ Global Steering과 Workspace Steering에 동일한 항목이 정의된 경우:
 
 > Workspace Steering이 우선 적용됩니다.
 
-이는 전체 workspace에서 공통적으로 적용되는 규칙을 Global Steering으로 관리하면서도, 특정 프로젝트만의 예외 처리는 Workspace Steering에서 재정의할 수 있도록 하기 위함입니다.
+이는 전체 workspace에서 공통적으로 적용되는 규칙을 Global Steering으로 관리하면서도 특정 프로젝트만의 예외 처리는 Workspace Steering에서 재정의할 수 있도록 하기 위함입니다.
 
 ***
 
@@ -103,19 +103,19 @@ Global Steering은 팀 단위 중앙 관리에도 사용할 수 있습니다.
 
 Kiro는 기본적으로 다음의 세 가지 Steering 파일을 기초 프로젝트 맥락(Baseline Context)으로 인식합니다.
 
-#### 1.  Product Overview — product.md
+#### 1.  Product Overview: product.md
 
 제품 목적, 주요 사용자, 핵심 기능, 비즈니스 목표 등을 정의합니다.
 
 Kiro가 기술적 제안을 할 때 비즈니스 목적과 일치하도록 돕습니다.
 
-#### 2. Technology Stack — tech.md
+#### 2. Technology Stack: tech.md
 
 프로젝트에서 사용하는 프레임워크, 라이브러리, 개발 도구, 기술 제약 등을 기술합니다.
 
 Kiro는 새로운 제안을 할 때 항상 지정된 스택을 우선적으로 고려합니다.
 
-#### 3. Project Structure — structure.md
+#### 3. Project Structure: structure.md
 
 파일 구조, 디렉터리 조직, 네이밍 규칙, 아키텍처 결정 등을 설명합니다.
 
@@ -165,9 +165,9 @@ Kiro는 `AGENTS.md` 표준도 Steering 파일과 동일한 방식으로 지원�
 
 예:
 
-* api-rest-conventions.md – REST API 표준
-* testing-unit-patterns.md – 유닛 테스트 패턴
-* components-form-validation.md – Form 컴포넌트 검증 규칙
+* api-rest-conventions.md: REST API 표준
+* testing-unit-patterns.md: 유닛 테스트 패턴
+* components-form-validation.md: Form 컴포넌트 검증 규칙
 
 ### 6.2. 명확한 파일명 사용
 
@@ -177,11 +177,11 @@ Kiro는 `AGENTS.md` 표준도 Steering 파일과 동일한 방식으로 지원�
 
 “무엇” 뿐만 아니라, “왜” 그런 선택을 했는지도 설명하십시오.
 
-이는 Kiro의 의사결정 품질을 크게 향상시킵니다.
+이는 Kiro의 의사결정 품질을 향상시킵니다.
 
 ### 6.4. 예시(Examples) 포함
 
-코드 스니펫, before/after 예시는 Kiro의 패턴 학습에 매우 효과적입니다.
+코드 스니펫, before/after 예시는 Kiro의 패턴 학습에 효과적입니다.
 
 ### 6.5. 보안(Security)
 
@@ -197,7 +197,7 @@ Steering 파일은 코드베이스 일부이므로 민감한 정보(API 키, 비
 
 ## 7. 공통 Steering 파일 전략 
 
-#### API Standards — api-standards.md
+#### API Standards: api-standards.md
 
 * REST 규칙
 * 오류 응답 구조
@@ -205,7 +205,7 @@ Steering 파일은 코드베이스 일부이므로 민감한 정보(API 키, 비
 * 버전 관리 전략
 * 요청/응답 예시
 
-#### Testing Approach — testing-standards.md
+#### Testing Approach: testing-standards.md
 
 * 유닛 테스트 패턴
 * 통합 테스트 전략
@@ -213,21 +213,21 @@ Steering 파일은 코드베이스 일부이므로 민감한 정보(API 키, 비
 * 커버리지 기대치
 * 테스트 파일 구문/구조 규칙
 
-#### Code Style — code-conventions.md
+#### Code Style: code-conventions.md
 
 * naming 규칙
 * import 순서
 * 디렉터리 구조
 * 권장 코드 패턴 및 반패턴(anti-patterns)
 
-#### Security Guidelines — security-policies.md
+#### Security Guidelines: security-policies.md
 
 * 인증 정책
 * 입력 검증, 데이터 sanitization
 * 보안 취약점 방지 전략
 * 애플리케이션 특화 보안 모범 사례
 
-#### Deployment Process — deployment-workflow.md
+#### Deployment Process: deployment-workflow.md
 
 * 빌드 절차
 * 환경 구성

@@ -16,7 +16,7 @@ last_modified_date: "2026-03-19"
 
 ---
 
-Kiro CLI는 고급 기능을 빠르게 실험하고 사용자 피드백을 수집하기 위해 여러 실험적 기능(Experimental Features)을 제공합니다. 이 기능들은 활성화 여부를 선택적으로 설정할 수 있으며, /experiment 명령을 통해 손쉽게 관리할 수 있습니다.
+Kiro CLI는 고급 기능을 빠르게 실험하고 사용자 피드백을 수집하기 위해 여러 실험적 기능(Experimental Features)을 제공합니다. 이 기능들은 활성화 여부를 선택적으로 설정할 수 있으며 /experiment 명령으로 손쉽게 관리할 수 있습니다.
 
 ***
 
@@ -27,7 +27,7 @@ Experimental 기능은 예고 없이 변경되거나 제거될 수 있습니다.
 사용 경험이 완전하지 않을 수 있습니다.\
 프로덕션 환경 사용 시 주의가 필요합니다.
 
-이 기능들은 새로운 기능의 안정성 및 유용성을 평가하기 위한 목적이며, 문제 발생 시 kiro issue 명령을 통해 피드백을 제공해 주시기 바랍니다.
+이 기능들은 새로운 기능의 안정성 및 유용성을 평가하기 위한 목적이며 문제 발생 시 kiro issue 명령을 통해 피드백을 제공해 주시기 바랍니다.
 
 ***
 
@@ -104,7 +104,7 @@ Kiro가 자동으로 TODO 리스트를 생성하고 관리하는 기능입니다
 #### 기능
 
 * Kiro가 맥락에 따라 자동 TODO 생성
-* TODO 조회·관리·삭제 지원
+* TODO 조회, 관리, 삭제 지원
 * 기존 TODO 리스트 이어서 사용
 * 세션 간 지속됨
 
@@ -180,8 +180,8 @@ kiro-cli settings chat.enableCheckpoint true
 #### Color Indicators
 
 * Green: 50% 미만
-* Yellow: 50–89%
-* Red: 90–100%
+* Yellow: 50~89%
+* Red: 90~100%
 
 #### 활성화 방법
 
@@ -193,7 +193,7 @@ kiro-cli settings chat.enableContextUsageIndicator true
 
 ### 2.7. Delegate
 
-Kiro가 비동기(background) 작업을 실행하고, 병렬 에이전트 세션을 관리할 수 있도록 합니다.
+Kiro가 비동기(background) 작업을 실행하고 병렬 에이전트 세션을 관리할 수 있도록 합니다.
 
 #### 기능
 
@@ -218,7 +218,7 @@ API 엔드포인트(API endpoints)의 성능을 분석하기 위한 백그라운
 
 ## 3. 설정 통합
 
-실험적 기능 설정은 모두 Kiro CLI 설정에 저장되며, 세션 간 지속됩니다.
+실험적 기능 설정은 모두 Kiro CLI 설정에 저장되며 세션 간 지속됩니다.
 
 ```
 # 모든 실험 설정 보기
@@ -240,11 +240,11 @@ kiro-cli settings chat.enableDelegate true
 
 모든 실험 기능 명령은 fuzzy search(Ctrl+S)에서도 사용할 수 있습니다:
 
-* `/experiment` — 실험 기능 관리
-* `/knowledge` — Knowledge Base 관련 명령
-* `/todo` — TODO 관리 명령
-* `/tangent` — Tangent Mode
-* `/checkpoint` — Checkpoint 기능
+* `/experiment`: 실험 기능 관리
+* `/knowledge`: Knowledge Base 관련 명령
+* `/todo`: TODO 관리 명령
+* `/tangent`: Tangent Mode
+* `/checkpoint`: Checkpoint 기능
 
 ***
 

@@ -16,9 +16,9 @@ last_modified_date: "2026-03-19"
 
 ---
 
-Kiro CLI의 TODO List 기능은 복잡한 작업을 자동으로 구조화하고, 단계별 진행 상황을 추적하며, 사용자가 여러 세션에 걸쳐 동일한 작업을 지속할 수 있도록 지원합니다.
+Kiro CLI의 TODO List 기능은 복잡한 작업을 자동으로 구조화하고 단계별 진행 상황을 추적하며 사용자가 여러 세션에 걸쳐 동일한 작업을 지속할 수 있도록 지원합니다.
 
-Kiro는 필요한 경우 TODO 리스트를 스스로 생성하고, 사용자는 /todo 명령을 통해 관리할 수 있습니다.
+Kiro는 필요한 경우 TODO 리스트를 스스로 생성하고 사용자는 /todo 명령으로 관리할 수 있습니다.
 
 ***
 
@@ -38,7 +38,7 @@ kiro-cli settings chat.enableTodoList true
 
 ### 2.1 Automatic TODO 생성
 
-Kiro는 다음과 같은 상황에서 자동으로 TODO 리스트를 생성합니다:
+Kiro는 다음 상황에서 자동으로 TODO 리스트를 생성합니다:
 
 * 사용자가 다단계 작업을 요청한 경우
 * 큰 문제를 작은 단계로 분해해야 할 때
@@ -85,7 +85,7 @@ Kiro는 다음 작업을 수행할 수 있습니다:
 /todo view
 ```
 
-인터페이스는 다음과 같이 상태를 표시합니다:
+다음은 인터페이스가 표시하는 상태입니다:
 
 *  완료된 리스트 (green)
 * 미완료 리스트 (red, 진행도 표시)
@@ -264,7 +264,7 @@ kiro-cli settings chat.enableTodoList true
 
 ## 9. Tool vs Command 구분
 
-<table data-header-hidden><thead><tr><th width="160.3359375"></th><th width="395.88671875"></th><th></th></tr></thead><tbody><tr><td>구분</td><td>목적</td><td>사용 주체</td></tr><tr><td>todo tool</td><td>Kiro가 TODO 리스트를 생성·수정·완료 시 자동 실행</td><td>Kiro</td></tr><tr><td>/todo command</td><td>사용자 측 리스트 조회·관리·삭제</td><td>사용자</td></tr></tbody></table>
+<table data-header-hidden><thead><tr><th width="160.3359375"></th><th width="395.88671875"></th><th></th></tr></thead><tbody><tr><td>구분</td><td>목적</td><td>사용 주체</td></tr><tr><td>todo tool</td><td>Kiro가 TODO 리스트를 생성, 수정, 완료 시 자동 실행</td><td>Kiro</td></tr><tr><td>/todo command</td><td>사용자 측 리스트 조회, 관리, 삭제</td><td>사용자</td></tr></tbody></table>
 
 ***
 

@@ -16,20 +16,20 @@ last_modified_date: "2026-03-19"
 
 ---
 
-에이전트 구성 파일(Agent Configuration File)에는 다음과 같은 섹션을 포함할 수 있습니다:
+에이전트 구성 파일(Agent Configuration File)에는 다음 섹션을 포함할 수 있습니다:
 
-* name — 에이전트 이름(선택 사항, 생략 시 파일명에서 유추)
-* description — 에이전트 역할 및 목적 설명
-* prompt — 고수준 컨텍스트(System Prompt 역할)
-* mcpServers — 에이전트가 접근할 수 있는 MCP 서버
-* tools — 에이전트가 사용할 수 있는 도구 목록
-* toolAliases — 도구 이름 충돌 해결을 위한 Alias 매핑
-* allowedTools — 사용자 승인 없이 실행 가능한 도구
-* toolsSettings — 개별 도구 설정
-* resources — 에이전트가 사용할 수 있는 리소스 파일
-* hooks — 특정 트리거 지점에서 실행될 명령
-* includeMcpJson — MCP 설정 파일의 서버 포함 여부
-* model — 에이전트가 사용할 모델 ID
+* name: 에이전트 이름(선택 사항, 생략 시 파일명에서 유추)
+* description: 에이전트 역할 및 목적 설명
+* prompt: 고수준 컨텍스트(System Prompt 역할)
+* mcpServers: 에이전트가 접근할 수 있는 MCP 서버
+* tools: 에이전트가 사용할 수 있는 도구 목록
+* toolAliases: 도구 이름 충돌 해결을 위한 Alias 매핑
+* allowedTools: 사용자 승인 없이 실행 가능한 도구
+* toolsSettings: 개별 도구 설정
+* resources: 에이전트가 사용할 수 있는 리소스 파일
+* hooks: 특정 트리거 지점에서 실행될 명령
+* includeMcpJson: MCP 설정 파일의 서버 포함 여부
+* model: 에이전트가 사용할 모델 ID
 
 ***
 
@@ -82,8 +82,8 @@ last_modified_date: "2026-03-19"
 #### 파일 경로 처리 규칙
 
 * 상대 경로: 에이전트 설정 파일 기준으로 해석
-  * "file://./prompt.md" → 동일 디렉토리
-  * "file://../shared/prompt.md" → 상위 디렉토리
+  * "file://./prompt.md": 동일 디렉토리
+  * "file://../shared/prompt.md": 상위 디렉토리
 * 절대 경로: 그대로 사용
   * "file:///Users/dev/prompts/agent.md"
 
@@ -112,10 +112,10 @@ last_modified_date: "2026-03-19"
 
 각 서버 설정 항목:
 
-* command (필수) — MCP 서버 실행 명령
-* args (선택) — 실행 시 전달할 인자
-* env (선택) — 서버에 적용할 환경 변수
-* timeout (선택) — 요청 타임아웃(ms), 기본값 120000
+* command (필수): MCP 서버 실행 명령
+* args (선택): 실행 시 전달할 인자
+* env (선택): 서버에 적용할 환경 변수
+* timeout (선택): 요청 타임아웃(ms), 기본값 120000
 
 ***
 
@@ -201,11 +201,11 @@ last_modified_date: "2026-03-19"
 
 #### 패턴 매칭 (Wildcard) 지원
 
-* "@server/read\_\*" → read\_file, read\_config 등
-* "@git-\*/status" → git-mcp/status 등
-* "@server/\*\_get" → \*\_get 도구
-* "@git-\*/\*" → git-\* 서버의 모든 도구
-* Built-in 도구 prefix 매칭: "r\*" → read
+* "@server/read\_\*": read\_file, read\_config 등
+* "@git-\*/status": git-mcp/status 등
+* "@server/\*\_get": \*\_get 도구
+* "@git-\*/\*": git-\* 서버의 모든 도구
+* Built-in 도구 prefix 매칭: "r\*"는 read에 매칭
 
 {: .note }
 주의: allowedTools는 "\*" 로 전체 허용을 지원하지 않습니다. (보안 이유)
@@ -251,7 +251,7 @@ last_modified_date: "2026-03-19"
 
 * 단일 파일
 * Glob 패턴
-* 상대/절대 경로
+* 상대 경로와 절대 경로
 
 ***
 

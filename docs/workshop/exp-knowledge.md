@@ -18,7 +18,7 @@ last_modified_date: "2026-03-19"
 
 `/knowledge` 명령은 Kiro CLI에 영구적인 지식 저장소(Persistent Knowledge Base) 기능을 제공합니다.
 
-이를 통해 사용자는 파일·문서·코드 기반의 컨텍스트를 장기적으로 저장하고, 의미 기반 검색을 통해 여러 세션에 걸쳐 일관된 분석 및 질의 응답을 수행할 수 있습니다.
+이를 통해 사용자는 파일, 문서, 코드 기반의 컨텍스트를 장기적으로 저장하고 의미 기반 검색으로 여러 세션에 걸쳐 일관된 분석 및 질의 응답을 수행할 수 있습니다.
 
 ***
 
@@ -84,8 +84,8 @@ kiro-cli settings chat.enableKnowledge true
 
 | Parameter  | Description   |
 | ---------- | ------------- |
-| --name, -n | 지식 엔트리 이름     |
-| --path, -p | 파일 또는 디렉터리 경로 |
+| `--name`, `-n` | 지식 엔트리 이름     |
+| `--path`, `-p` | 파일 또는 디렉터리 경로 |
 
 #### Examples
 
@@ -106,7 +106,7 @@ kiro-cli settings chat.enableKnowledge true
 
 장점
 
-* 매우 빠른 인덱싱
+* 빠른 인덱싱
 * 즉시 검색 가능
 * 낮은 CPU 및 메모리 사용량
 * 로그, 설정 파일, 대규모 코드베이스에 적합
@@ -124,7 +124,7 @@ kiro-cli settings chat.enableKnowledge true
 
 장점
 
-* 문맥·의미 이해
+* 문맥과 의미 이해
 * 자연어 질의 지원
 * 키워드 없이도 관련 개념 탐색
 * 문서 및 기술 자료에 최적
@@ -132,7 +132,7 @@ kiro-cli settings chat.enableKnowledge true
 단점
 
 * 인덱싱 속도 느림
-* CPU·메모리 사용량 증가
+* CPU와 메모리 사용량 증가
 
 ***
 
@@ -140,18 +140,18 @@ kiro-cli settings chat.enableKnowledge true
 
 | Use Case                | Recommended | Reason          |
 | ----------------------- | ----------- | --------------- |
-| Log files               | Fast        | 대량 로그·키워드 기반 탐색 |
+| Log files               | Fast        | 대량 로그, 키워드 기반 탐색 |
 | Config files            | Fast        | 파라미터/키 값 검색     |
 | Large codebases         | Fast        | 심볼/함수 검색 최적     |
 | Technical documentation | Best        | 자연어 기반 검색 가능    |
-| Research papers         | Best        | 개념·문맥 중심 탐색     |
+| Research papers         | Best        | 개념과 문맥 중심 탐색    |
 | Mixed documents         | Best        | 풍부한 검색 품질       |
 
 ***
 
 ## 5. Pattern Filtering
 
-지식 저장소 구축 시 포함/제외 파일 패턴을 지정할 수 있습니다.
+지식 저장소 구축 시 포함하거나 제외할 파일 패턴을 지정할 수 있습니다.
 
 #### Examples
 

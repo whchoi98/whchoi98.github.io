@@ -34,7 +34,7 @@ Code Intelligence는 언어 서버 프로토콜(Language Server Protocol, LSP) �
 
 또한 프로젝트 루트의 .kiro/settings/lsp.json 파일에 커스텀 LSP 구성(Custom LSP configuration) 을 추가함으로써, 사실상 모든 언어로 확장할 수 있습니다.
 
-`/code init` 명령을 실행한 이후에는 자연어 질의를 통해 다음과 같은 고급 코드 탐색 및 분석 작업을 수행할 수 있습니다.
+`/code init` 명령을 실행한 이후에는 자연어 질의로 다음 고급 코드 탐색 및 분석 작업을 수행할 수 있습니다.
 
 * 심볼 검색(Symbol search)
 * 참조 검색(Find references)
@@ -46,7 +46,7 @@ Code Intelligence는 언어 서버 프로토콜(Language Server Protocol, LSP) �
 
 ### 1.2 동작 방식(How it works)
 
-Kiro CLI는 백그라운드에서 LSP 서버 프로세스(Language Server processes) 를 실행하며, 이들은 표준 입출력(stdio) 을 통해 JSON-RPC 방식으로 통신합니다.
+Kiro CLI는 백그라운드에서 LSP 서버 프로세스(Language Server processes) 를 실행하며 이들은 표준 입출력(stdio) 을 통해 JSON-RPC 방식으로 통신합니다.
 
 워크스페이스를 초기화하면 다음 과정을 거칩니다.
 
@@ -60,13 +60,13 @@ Kiro CLI는 백그라운드에서 LSP 서버 프로세스(Language Server proces
 * 타입(Types)
 * 참조(References)
 
-사용자가 자연어로 질의하면, Kiro는 이를 LSP 프로토콜 요청으로 변환하여 해당 서버에 전달하고, 결과를 사람이 읽기 쉬운 형식으로 가공하여 반환합니다.
+사용자가 자연어로 질의하면, Kiro는 이를 LSP 프로토콜 요청으로 변환하여 해당 서버에 전달하고 결과를 사람이 읽기 쉬운 형식으로 가공하여 반환합니다.
 
 ***
 
 ### 1.3 LSP 활성화 절차(Enabling LSP integration)
 
-Kiro CLI에서 LSP 서버를 사용하기 위한 기본 절차는 다음과 같습니다.
+다음은 Kiro CLI에서 LSP 서버를 사용하기 위한 기본 절차입니다.
 
 1. 언어 서버(Language servers) 설치
 2. LSP 통합 활성화(Enable LSP integration)
@@ -98,7 +98,7 @@ Kiro CLI에서 LSP 서버를 사용하기 위한 기본 절차는 다음과 같�
 
 Code Intelligence 설정은 전역(Global)이 아닌 워크스페이스(Project) 단위 로 관리됩니다.
 
-각 프로젝트는 독립적인 LSP 설정을 가집니다.
+프로젝트마다 LSP 설정이 독립적입니다.
 
 프로젝트 루트에서 다음 명령을 실행합니다.
 
@@ -153,7 +153,7 @@ Available LSPs:
 
 ### 1.6 언어 서버 활용(Using Language Servers)
 
-언어 서버는 자연어 기반 질의를 통해 다음과 같은 의미 기반 코드 인텔리전스(Semantic code intelligence) 기능을 제공합니다.
+언어 서버는 자연어 기반 질의를 통해 다음 의미 기반 코드 인텔리전스(Semantic code intelligence) 기능을 제공합니다.
 
 * 심볼 탐색
 * 정의 위치 이동
@@ -259,14 +259,14 @@ Available LSPs:
 | Workspace is still initializing | LSP 서버 초기화 중   | 대기 후 재시도, 필요 시 /code init -f |
 | LSP initialization failed       | 서버 오류          | /code logs -l로 로그 확인         |
 | No symbols found                | 인덱싱 중 또는 문법 오류 | 파일 오류 확인, 검색어 확장             |
-| No definition found             | 위치가 심볼이 아님     | 행·열 위치 재확인                   |
+| No definition found             | 위치가 심볼이 아님     | 행과 열 위치 재확인                 |
 
 ***
 
 ### 1.9 모범 사례(Best Practices)
 
 * 프로젝트당 1회 초기화
-* 정확한 위치(행·열) 사용
+* 정확한 위치(행과 열) 사용
 * 리네이밍 전 dry\_run 활용
 * 진단 오류 먼저 해결
 * 검색어는 구체적으로 사용

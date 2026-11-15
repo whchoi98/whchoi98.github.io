@@ -18,7 +18,7 @@ last_modified_date: "2026-03-19"
 
 이 페이지는 다양한 워크플로우를 위한 커스텀 에이전트 구성 예시를 제공합니다.
 
-각 에이전트는 실제 개발 환경에서 바로 활용 가능한 형태로 구성되어 있으며, 사용자의 요구에 맞추어 확장하거나 수정할 수 있습니다.
+각 에이전트는 실제 개발 환경에서 바로 활용 가능한 형태로 구성되어 있으며 사용자의 요구에 맞추어 확장하거나 수정할 수 있습니다.
 
 ***
 
@@ -26,7 +26,7 @@ last_modified_date: "2026-03-19"
 
 AWS 인프라 관리 및 개발 업무에 특화된 커스텀 에이전트입니다.
 
-AWS 관련 도구 사용을 사전 승인하고, 관련 문서를 자동 컨텍스트에 포함하여 생산성을 높입니다.
+AWS 관련 도구 사용을 사전 승인하고 관련 문서를 자동 컨텍스트에 포함하여 생산성을 높입니다.
 
 ```
 {
@@ -167,7 +167,7 @@ Git 통합을 포함하여 코드 리뷰, 테스트, 문서 업데이트 등에 
 
 * 코드 리뷰 및 분석
 * 테스트 코드 생성 및 업데이트
-* Git 브랜치·Diff 관리
+* Git 브랜치와 Diff 관리
 * 문서 및 의존성 파일 업데이트
 
 ***
@@ -337,7 +337,7 @@ Docker, Database, Build/Testing 등의 워크플로우에 맞춰 강화할 수 �
 
 * Docker 컨테이너 상태 점검 및 로그 조회
 * 데이터베이스 조회 및 마이그레이션 관리
-* 빌드/테스트 자동화
+* 빌드와 테스트 자동화
 * API 문서 관리 및 업데이트
 * 배포 파이프라인 디버깅
 
@@ -371,11 +371,11 @@ OAuth 인증이 필요한 서버인 경우, /mcp 명령을 통해 인증 요청�
 
 효율적인 커스텀 에이전트를 만들기 위한 모범 사례:
 
-* Start simple — 최소 구성으로 시작해 필요에 따라 확장
-* Use descriptive names — 목적이 명확한 이름 지정
-* Include relevant context — 프로젝트 문서, 설정 파일 자동 로드
-* Pre-approve safe tools — 자주 쓰는 저위험 도구를 allowedTools에 추가
-* Use hooks strategically — 시스템 상태·Git 브랜치·프로세스 등 동적 정보 반영
-* Limit tool scope — toolsSettings로 도구 접근 범위 최소화
-* Test thoroughly — 에이전트 동작을 충분히 검증
-* Document for teams — 협업을 위해 용도·권한·컨텍스트 명확히 기술
+* Start simple: 최소 구성으로 시작해 필요에 따라 확장
+* Use descriptive names: 목적이 명확한 이름 지정
+* Include relevant context: 프로젝트 문서, 설정 파일 자동 로드
+* Pre-approve safe tools: 자주 쓰는 저위험 도구를 allowedTools에 추가
+* Use hooks strategically: 시스템 상태, Git 브랜치, 프로세스 등 동적 정보 반영
+* Limit tool scope: toolsSettings로 도구 접근 범위 최소화
+* Test thoroughly: 에이전트 동작을 충분히 검증
+* Document for teams: 협업을 위해 용도, 권한, 컨텍스트 명확히 기술

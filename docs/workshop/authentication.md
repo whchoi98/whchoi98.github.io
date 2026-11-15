@@ -24,11 +24,11 @@ Kiro CLI는 다양한 인증 공급자(Authentication Providers)를 지원하여
 
 ### 1.1. Supported Authentication Providers / 지원되는 인증 제공자
 
-• GitHub : GitHub 계정으로 즉시 로그인할 수 있으며, 개발 환경과 자연스럽게 통합됩니다.
+• GitHub : GitHub 계정으로 즉시 로그인할 수 있으며 개발 환경과 자연스럽게 통합됩니다.
 
 • Google :  Google 자격 증명으로 빠르게 로그인할 수 있습니다.
 
-• AWS Builder ID : 개별 개발자에게 적합한 경량 인증 방식으로 간편하게 가입·로그인이 가능합니다.
+• AWS Builder ID : 개별 개발자에게 적합한 경량 인증 방식으로 간편하게 가입과 로그인이 가능합니다.
 
 • AWS IAM Identity Center : 엔터프라이즈 환경에서 사용하는 조직 기반 인증 방식으로, SSO(Single Sign-On)를 포함한 기업용 인증 체계를 제공합니다.
 
@@ -36,7 +36,7 @@ Kiro CLI는 다양한 인증 공급자(Authentication Providers)를 지원하여
 
 ### 1.2. 정보(Info)
 
-Kiro 유료 구독(Subscription)을 소셜 로그인(GitHub·Google) 또는 AWS Builder ID를 통해 사용하는 사용자는 개인 구독자(individual subscribers) 로 분류됩니다.
+Kiro 유료 구독(Subscription)을 소셜 로그인(GitHub, Google) 또는 AWS Builder ID를 통해 사용하는 사용자는 개인 구독자(individual subscribers) 로 분류됩니다.
 
 Kiro Free Tier(무료 요금제) 및 개인 구독자의 일부 콘텐츠는 서비스 품질 개선(Service Improvement)에 활용될 수 있습니다.
 
@@ -96,11 +96,11 @@ kiro-cli logout
 
 ## 4. 인증 문제 해결
 
-로그인 과정에서 다음과 같은 문제가 발생할 수 있습니다:
+로그인 과정에서 다음 문제가 발생할 수 있습니다:
 
 * 브라우저가 열리지 않음
 * 인증 후 리디렉션 실패
 * 로그인 오류 메시지 발생
-* 헤드리스(WSL·CLI-only) 환경에서 코드 인증 실패
+* 헤드리스(WSL, CLI-only) 환경에서 코드 인증 실패
 
 이 경우, Kiro CLI에서 제공하는 트러블슈팅 가이드(Troubleshooting Guide) 를 참고하면 운영체제별 해결 방법과 일반적인 오류 해결책을 확인할 수 있습니다.

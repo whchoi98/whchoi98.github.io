@@ -18,7 +18,7 @@ last_modified_date: "2026-03-19"
 
 외부 MCP(Model Context Protocol) 서버를 개발 워크플로우와 통합할 때 보안(Security)은 가장 중요한 고려사항입니다.
 
-Kiro CLI의 MCP 보안 모델은 다음의 핵심 원칙에 기반하여 설계되어 있습니다.
+Kiro CLI의 MCP 보안 모델은 다음 핵심 원칙에 따라 설계되어 있습니다.
 
 * 명시적 허가(Explicit Permission): 모든 MCP 도구(tool)는 실행 전 사용자 승인을 요구합니다.
 * 로컬 실행(Local Execution): MCP 서버는 사용자 로컬 환경에서만 실행됩니다.
@@ -29,7 +29,7 @@ Kiro CLI의 MCP 보안 모델은 다음의 핵심 원칙에 기반하여 설계�
 
 ## 1. Security 고려 사항
 
-Kiro CLI에서 MCP 서버를 사용할 때 반드시 준수해야 할 보안 원칙은 다음과 같습니다.
+다음은 Kiro CLI에서 MCP 서버를 사용할 때 반드시 준수해야 할 보안 원칙입니다.
 
 ### 1.1. 신뢰 및 검증(Trust and Verification)
 
@@ -41,7 +41,7 @@ Kiro CLI에서 MCP 서버를 사용할 때 반드시 준수해야 할 보안 원
 
 * 최소 권한 원칙(Least Privilege Principle)을 적용하여 MCP 서버가 접근할 수 있는 권한을 최소화하십시오.
 * 파일 시스템 접근은 반드시 필요한 디렉터리로 한정하십시오.
-* 서버의 네트워크 접근 권한을 제한하고, 불필요한 외부 호출을 차단하십시오.
+* 서버의 네트워크 접근 권한을 제한하고 불필요한 외부 호출을 차단하십시오.
 * 민감한 인증 정보는 환경 변수(Environment Variables)를 통해 안전하게 전달하십시오.
 
 ### 1.3. 자격 증명 관리(Credential Management)
