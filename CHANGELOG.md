@@ -34,6 +34,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Post "Subagents and forks in Claude Code": the English page shows English versions of the four figures (`fig0N-*-en.png`), so the figures change with the language switch
+- The left card on the home page always shows the newest post, and its badge reads "New" instead of "Featured" (a `featured: true` in a post's front matter no longer takes the card)
+- Let the sentence under the home hero title use the full content width (it was capped at 56%); it sits on one line at 960px and wider in Korean and at 1024px and wider in English
 - Clean up 32 workshop documents: no middle dots, em dashes or en dashes outside code, arrows in sentences written out, and AI-tell phrasing removed (stock lead-ins, vague position references, translationese); code blocks, links, numbers and heading words are unchanged, and 23 headings swap a dash for a colon
 - Wrap option names that sat in running text in code marks so that `--name`, `--path`, `--resume` and `--directory` no longer render with an en dash
 - Render the home page in NanumSquare, the font of the report pages (Bold for titles, card titles and the menu, Regular for descriptions)
@@ -97,6 +100,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 게시물 "Claude Code의 Subagent와 fork": 영어 화면에서 그림 4장의 영어판(`fig0N-*-en.png`)을 표시. 언어를 전환하면 그림도 함께 바뀜
+- 홈 왼쪽 카드가 항상 최신 글을 보여 주고 배지를 "Featured"에서 "New"로 변경 (글의 front matter에 `featured: true`를 넣어도 카드를 차지하지 않음)
+- 홈 상단 제목 아래 문장이 본문 폭 전체를 쓰도록 변경 (기존 56% 제한 제거). 한국어는 화면 폭 960px 이상, 영어는 1024px 이상에서 한 줄로 표시
 - 워크샵 문서 32개 정리: 코드 밖의 가운뎃점, 엠 대시, 엔 대시 제거, 문장 속 화살표를 말로 풀고 AI 티 나는 표현(상투적 도입구, 모호한 위치 참조, 번역투) 수정. 코드 블록, 링크, 숫자, 제목의 낱말은 그대로이며 제목 23개의 대시가 쌍점으로 바뀜
 - 본문에 그대로 적혀 엔 대시로 그려지던 옵션 이름(`--name`, `--path`, `--resume`, `--directory`)을 코드 표기로 감쌈
 - 홈 화면을 글 리포트와 같은 나눔스퀘어로 표시 (제목, 카드 제목, 메뉴는 Bold, 설명 글은 Regular)

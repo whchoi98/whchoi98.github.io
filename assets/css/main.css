@@ -128,7 +128,7 @@ html.lang-en .seg-en { color: var(--segl-c); background: var(--segl-bg); }
 .hero { padding: 44px 0 52px; display: flex; flex-direction: column; gap: 16px; }
 .hero-eyebrow { font-weight: 700; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--orange); }
 .hero-title { margin: 0; font-weight: 800; font-size: 44px; line-height: 1.1; letter-spacing: -0.01em; color: #fff; max-width: 70%; }
-.hero-sub { margin: 0; font-size: 16px; line-height: 1.55; color: rgba(255,255,255,.75); max-width: 56%; }
+.hero-sub { margin: 0; font-size: 16px; line-height: 1.55; color: rgba(255,255,255,.75); }
 
 .post-hero { padding: 36px 0 44px; display: flex; flex-direction: column; gap: 14px; }
 .crumb { font-size: 13px; color: rgba(255,255,255,.6); }
@@ -397,7 +397,6 @@ html.dark .chip-lg.active { background: var(--orange); border-color: var(--orang
   .cat-grid { grid-template-columns: repeat(3, 1fr); }
   .now-grid { grid-template-columns: 1fr; }
   .hero-title { font-size: 32px; max-width: 100%; }
-  .hero-sub { max-width: 100%; }
   .post-hero-title { font-size: 28px; max-width: 100%; }
 }
 @media (max-width: 640px) {

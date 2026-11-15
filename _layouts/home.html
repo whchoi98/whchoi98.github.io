@@ -2,8 +2,7 @@
 layout: default
 ---
 {% assign posts = site.pages | where_exp: "p", "p.layout == 'post' or p.layout == 'report'" | sort: "date" | reverse %}
-{% assign featured = posts | where: "featured", true | first %}
-{% unless featured %}{% assign featured = posts | first %}{% endunless %}
+{% assign newest = posts | first %}
 
 <header class="site-header">
   <div class="wrap">
@@ -31,24 +30,24 @@ layout: default
   </div>
 
   <div class="home-top">
-    <a href="{{ featured.url }}" class="card featured-card">
+    <a href="{{ newest.url }}" class="card featured-card">
       <div class="featured-cover">
-        <span class="featured-badge">Featured</span>
-        <img src="/assets/icons/{{ featured.icon | default: 'bedrock' }}.svg" alt="" class="featured-icon">
+        <span class="featured-badge">New</span>
+        <img src="/assets/icons/{{ newest.icon | default: 'bedrock' }}.svg" alt="" class="featured-icon">
       </div>
       <div class="featured-body">
-        <span class="featured-title">{% if featured.title_en %}<span class="l-ko">{{ featured.title }}</span><span class="l-en">{{ featured.title_en }}</span>{% else %}{{ featured.title }}{% endif %}</span>
-        <span class="featured-excerpt">{% if featured.excerpt_en %}<span class="l-ko">{{ featured.excerpt }}</span><span class="l-en">{{ featured.excerpt_en }}</span>{% else %}{{ featured.excerpt }}{% endif %}</span>
+        <span class="featured-title">{% if newest.title_en %}<span class="l-ko">{{ newest.title }}</span><span class="l-en">{{ newest.title_en }}</span>{% else %}{{ newest.title }}{% endif %}</span>
+        <span class="featured-excerpt">{% if newest.excerpt_en %}<span class="l-ko">{{ newest.excerpt }}</span><span class="l-en">{{ newest.excerpt_en }}</span>{% else %}{{ newest.excerpt }}{% endif %}</span>
         <div class="meta-row">
-          {% for t in featured.tags limit: 1 %}<span class="chip">{{ t }}</span>{% endfor %}
-          <span class="meta-text">{{ featured.date | date: "%Y.%m.%d" }} | {{ featured.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> | <span class="read-more"><span class="l-ko">읽기</span><span class="l-en">Read</span> →</span></span>
+          {% for t in newest.tags limit: 1 %}<span class="chip">{{ t }}</span>{% endfor %}
+          <span class="meta-text">{{ newest.date | date: "%Y.%m.%d" }} | {{ newest.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> | <span class="read-more"><span class="l-ko">읽기</span><span class="l-en">Read</span> →</span></span>
         </div>
       </div>
     </a>
     <div class="side-list">
       {% assign side = 0 %}
       {% for p in posts %}
-        {% if p.url != featured.url and side < 4 %}
+        {% if p.url != newest.url and side < 4 %}
           {% assign side = side | plus: 1 %}
           <a href="{{ p.url }}" class="card side-card">
             <img src="/assets/icons/{{ p.icon | default: 'bedrock' }}.svg" alt="" class="side-icon">
