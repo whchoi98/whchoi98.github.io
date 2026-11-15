@@ -58,6 +58,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Remove three posts (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- Fix the language switch in the top bar under the dark theme: the unselected language was dark text on the dark bar (contrast 1.27) and the selected one had no highlight, because the switch borrowed the theme switch's colors, which swap in the dark theme; it now has its own colors that do not change with the theme
 - Point the "All posts" link at the top right of the home page to the "All posts" list lower on the same page instead of the tags page
 - Unify tags that differed only in case or spelling (Prompt Caching, Cost Optimization, MCP)
 - Fix `ccw-hands-on-lab/assets/vendor/` (highlight.js and its license) being dropped by the Bundler `vendor/` gitignore rule, which left the lab pages' code highlighting 404 on the live site and out of the offline ZIP
@@ -124,6 +125,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 3편 제거 (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
+- 다크 테마에서 상단 언어 전환 버튼이 보이지 않던 문제 수정: 선택되지 않은 언어가 어두운 막대 위에 검은 글씨(대비 1.27)로 나오고 선택된 언어에는 강조 표시가 없었음. 언어 전환이 테마 전환용 색을 빌려 썼고 그 색이 다크 테마에서 서로 바뀌는 것이 원인이며, 테마에 따라 바뀌지 않는 전용 색으로 분리
 - 홈 오른쪽 위의 "모든 글" 링크가 태그 페이지가 아니라 같은 화면 아래의 "모든 글" 목록으로 가도록 수정
 - 대소문자와 표기만 다르던 태그 통일 (Prompt Caching, Cost Optimization, MCP)
 - Bundler용 `vendor/` gitignore 규칙에 걸려 커밋되지 않던 `ccw-hands-on-lab/assets/vendor/`(highlight.js와 라이선스) 수정 - 라이브 사이트에서 랩 페이지 코드 하이라이트가 404였고 오프라인 ZIP에서도 누락

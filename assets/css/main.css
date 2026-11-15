@@ -22,6 +22,10 @@
   --segl-c: #16191f;
   --segd-bg: transparent;
   --segd-c: rgba(255,255,255,.75);
+  /* 언어 토글: 상단 막대는 두 테마 모두 어두우므로 테마에 따라 바뀌지 않는다 */
+  --seg-on-bg: #fff;
+  --seg-on-c: #16191f;
+  --seg-off-c: rgba(255,255,255,.75);
   --navy: #0f1b2d;
   --orange: #ff9900;
   --sans: 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
@@ -103,12 +107,8 @@ a:hover { text-decoration: underline; }
 html.lang-en .l-ko { display: none; }
 html.lang-en .l-en { display: inline; }
 .lang-seg { display: flex; background: rgba(255,255,255,.08); border-radius: 999px; padding: 3px; }
-.seg-ko { color: var(--segd-c); background: var(--segd-bg); }
-.seg-en { color: var(--segl-c); background: var(--segl-bg); }
-html:not(.lang-en) .seg-ko { color: var(--segl-c); background: var(--segl-bg); }
-html:not(.lang-en) .seg-en { color: var(--segd-c); background: transparent; }
-html.lang-en .seg-ko { color: var(--segd-c); background: transparent; }
-html.lang-en .seg-en { color: var(--segl-c); background: var(--segl-bg); }
+.seg-ko, .seg-en { color: var(--seg-off-c); }
+html:not(.lang-en) .seg-ko, html.lang-en .seg-en { color: var(--seg-on-c); background: var(--seg-on-bg); }
 
 .theme-seg { display: flex; background: rgba(255,255,255,.08); border-radius: 999px; padding: 3px; }
 .seg {
