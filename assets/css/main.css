@@ -50,6 +50,15 @@ html.dark {
   --segd-c: #16191f;
 }
 
+/* ---------- 홈 화면 글꼴: 글 리포트와 같은 나눔스퀘어 (Regular 400, Bold 700) ----------
+   설치된 글꼴을 먼저 쓰고 없으면 assets/fonts/의 파일을 받는다. 800으로 지정한 제목은 Bold로 그려진다. */
+@font-face { font-family: "NanumSquareOTF_ac"; src: local("NanumSquareOTF_acR"), local("NanumSquareOTF_ac Regular"), local("NanumSquare_acR"), url("/assets/fonts/NanumSquare_acR.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "NanumSquareOTF_ac"; src: local("NanumSquareOTF_acB"), local("NanumSquareOTF_ac Bold"), local("NanumSquare_acB"), url("/assets/fonts/NanumSquare_acB.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+body.layout-home {
+  --sans: "NanumSquareOTF_ac", "NanumSquare_ac", "NanumSquare", 'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+}
+body.layout-home .topnav a, body.layout-home .seg, body.layout-home .more-btn, body.layout-home .featured-badge { font-weight: 700; }
+
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -155,7 +164,7 @@ a.card { text-decoration: none; }
 a.card:hover { text-decoration: none; transform: translateY(-2px); transition: transform 120ms; }
 a.featured-card { display: block; }
 
-.home-main { padding-top: 32px; }
+.home-main { padding-top: 32px; padding-bottom: 48px; }
 .home-top { display: grid; grid-template-columns: 1.4fr 1fr; gap: 28px; align-items: start; }
 .featured-card { overflow: hidden; }
 .featured-cover {
@@ -214,7 +223,7 @@ a.featured-card { display: block; }
 a.chip:hover { text-decoration: none; border-color: var(--t-link); }
 .chip-btn { cursor: pointer; font-family: inherit; }
 
-.cat-section { display: flex; flex-direction: column; gap: 14px; padding: 40px 0 36px; }
+.cat-section { display: flex; flex-direction: column; gap: 14px; padding: 0 0 32px; }  /* 홈 맨 위, 대표 글 앞 */
 .cat-section h2 { font-size: 16px; }
 .cat-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
 .cat-card { border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }

@@ -11,12 +11,25 @@ layout: default
     <div class="hero">
       <span class="hero-eyebrow">Tech blog | Cloud &amp; AIML</span>
       <h1 class="hero-title"><span class="l-ko">{{ site.tagline }}</span><span class="l-en">Build, validate, measure, document</span></h1>
-      <p class="hero-sub"><span class="l-ko">AWS, Kubernetes, Agentic AI를 직접 테스트한 기록을 실패 사례까지 포함해 정리합니다.</span><span class="l-en">Records of hands-on tests with AWS, Kubernetes, and agentic AI, including the failures.</span></p>
+      <p class="hero-sub"><span class="l-ko">AWS Core Service, Container/Serverless, Agentic AI와 도구에 대해 직접 테스트한 기록을 실패 사례까지 포함해 정리합니다.</span><span class="l-en">Records of hands-on tests with AWS core services, containers and serverless, and agentic AI and its tools, including the failures.</span></p>
     </div>
   </div>
 </header>
 
 <main class="wrap home-main">
+  <div class="cat-section">
+    <h2><span class="l-ko">카테고리</span><span class="l-en">Categories</span></h2>
+    <div class="cat-grid">
+      {% for c in site.blog_categories %}
+      <a href="{{ c.url }}" class="card cat-card">
+        <img src="/assets/icons/{{ c.icon }}.svg" alt="" class="cat-icon">
+        <span class="cat-name">{{ c.name }}</span>
+        <span class="cat-desc">{{ c.desc }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
   <div class="home-top">
     <a href="{{ featured.url }}" class="card featured-card">
       <div class="featured-cover">
@@ -72,18 +85,5 @@ layout: default
       {% endfor %}
     </div>
     <script>window.POST_COUNT = {{ posts | size }};</script>
-  </div>
-
-  <div class="cat-section">
-    <h2><span class="l-ko">카테고리</span><span class="l-en">Categories</span></h2>
-    <div class="cat-grid">
-      {% for c in site.blog_categories %}
-      <a href="{{ c.url }}" class="card cat-card">
-        <img src="/assets/icons/{{ c.icon }}.svg" alt="" class="cat-icon">
-        <span class="cat-name">{{ c.name }}</span>
-        <span class="cat-desc">{{ c.desc }}</span>
-      </a>
-      {% endfor %}
-    </div>
   </div>
 </main>
