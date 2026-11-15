@@ -10,7 +10,7 @@ permalink: /docs/workshop/
 # Workshop
 {: .fs-9 }
 
-AWS 서비스 핸즈온 실습 가이드 — Claude Code, Kiro CLI, EKS, Bedrock 등.
+AWS 서비스 핸즈온 실습 가이드입니다. Claude Code, Kiro CLI, EKS, Bedrock 등을 다룹니다.
 {: .fs-6 .fw-300 }
 
 ---

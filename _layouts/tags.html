@@ -24,7 +24,7 @@ layout: default
         <span class="post-card-excerpt">{% if p.excerpt_en %}<span class="l-ko">{{ p.excerpt }}</span><span class="l-en">{{ p.excerpt_en }}</span>{% else %}{{ p.excerpt }}{% endif %}</span>
         <div class="meta-row">
           {% for t in p.tags %}<button type="button" class="chip chip-btn" data-tag="{{ t }}">{{ t }}</button>{% endfor %}
-          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
+          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} | {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
         </div>
       </div>
     </div>

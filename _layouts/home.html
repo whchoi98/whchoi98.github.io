@@ -9,9 +9,9 @@ layout: default
   <div class="wrap">
     {% include topbar.html %}
     <div class="hero">
-      <span class="hero-eyebrow">Tech blog · Cloud &amp; AIML</span>
+      <span class="hero-eyebrow">Tech blog | Cloud &amp; AIML</span>
       <h1 class="hero-title"><span class="l-ko">{{ site.tagline }}</span><span class="l-en">Build, validate, measure, document</span></h1>
-      <p class="hero-sub"><span class="l-ko">AWS, Kubernetes, Agentic AI 환경에서 직접 측정한 결과를 실패 사례와 함께 기록합니다.</span><span class="l-en">Measured results from AWS, Kubernetes, and agentic AI environments, recorded together with the failures.</span></p>
+      <p class="hero-sub"><span class="l-ko">AWS, Kubernetes, Agentic AI를 직접 테스트한 기록을 실패 사례까지 포함해 정리합니다.</span><span class="l-en">Records of hands-on tests with AWS, Kubernetes, and agentic AI, including the failures.</span></p>
     </div>
   </div>
 </header>
@@ -28,7 +28,7 @@ layout: default
         <span class="featured-excerpt">{% if featured.excerpt_en %}<span class="l-ko">{{ featured.excerpt }}</span><span class="l-en">{{ featured.excerpt_en }}</span>{% else %}{{ featured.excerpt }}{% endif %}</span>
         <div class="meta-row">
           {% for t in featured.tags limit: 1 %}<span class="chip">{{ t }}</span>{% endfor %}
-          <span class="meta-text">{{ featured.date | date: "%Y.%m.%d" }} · {{ featured.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> · <span class="read-more"><span class="l-ko">읽기</span><span class="l-en">Read</span> →</span></span>
+          <span class="meta-text">{{ featured.date | date: "%Y.%m.%d" }} | {{ featured.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span> | <span class="read-more"><span class="l-ko">읽기</span><span class="l-en">Read</span> →</span></span>
         </div>
       </div>
     </a>
@@ -41,7 +41,7 @@ layout: default
             <img src="/assets/icons/{{ p.icon | default: 'bedrock' }}.svg" alt="" class="side-icon">
             <span class="side-text">
               <span class="side-title">{% if p.title_en %}<span class="l-ko">{{ p.title }}</span><span class="l-en">{{ p.title_en }}</span>{% else %}{{ p.title }}{% endif %}</span>
-              <span class="side-meta">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
+              <span class="side-meta">{{ p.date | date: "%Y.%m.%d" }} | {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
             </span>
           </a>
         {% endif %}
@@ -53,7 +53,7 @@ layout: default
   <div class="post-section" id="all-posts">
     <div class="post-section-head">
       <h2><span class="l-ko">모든 글</span><span class="l-en">All Posts</span></h2>
-      <span id="result-label" class="result-label">전체 {{ posts | size }}편 · 최신순</span>
+      <span id="result-label" class="result-label">전체 {{ posts | size }}편, 최신순</span>
     </div>
     <div id="no-results" class="card empty-card" hidden><span class="l-ko">검색 결과가 없습니다. 다른 키워드로 시도해 보세요.</span><span class="l-en">No results. Try a different keyword.</span></div>
     <div id="post-list" class="post-list">
@@ -65,7 +65,7 @@ layout: default
           <span class="post-card-excerpt">{% if p.excerpt_en %}<span class="l-ko">{{ p.excerpt }}</span><span class="l-en">{{ p.excerpt_en }}</span>{% else %}{{ p.excerpt }}{% endif %}</span>
           <div class="meta-row">
             {% for t in p.tags %}<a href="/tags/?tag={{ t | url_encode }}" class="chip">{{ t }}</a>{% endfor %}
-            <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
+            <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} | {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
           </div>
         </div>
       </div>

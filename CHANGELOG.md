@@ -32,8 +32,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Replace the middle dots in the site chrome (date and reading time, list labels, category counts, footer, view counts) with "|" or a comma
 - Let the introduction paragraphs on the About page use the full content width (they were capped at 720px)
-- Change the home hero title to "구축, 검증, 측정, 기록" ("Build, validate, measure, document" in English) and rewrite the line under it as a full sentence without middle dots
+- Change the home hero title to "구축, 검증, 측정, 기록" ("Build, validate, measure, document" in English) and rewrite the line under it as a full sentence without middle dots ("Records of hands-on tests ..."); the label above the title uses "|" instead of a middle dot
 - Rewrite README, `docs/architecture.md`, `docs/onboarding.md` and the project commands and skills for the new publishing flow (`build_post.py`, `check_post.py`, `place_post.py` of the `my-plugins:techblogs` skill replace `qa.py`)
 - Add a result-sample section to the six capstone lab pages linking the deployed sample apps on `whchoi.net` (clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)
 - Rebuild `ccw-hands-on-lab` from the 2026-09-19 "My Workshop" reader build with a shared `assets/` directory (common table of contents, search, dark mode, print view, reading history); archive the previous standalone build and legacy capstone labs A–D under `ccw-hands-on-lab/v1/`; update the workshop nav page (Capstone 2 row, v1 archive note)
@@ -88,8 +89,9 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 사이트 공통 화면(날짜와 읽는 시간, 목록 라벨, 분류별 편수, 바닥글, 조회수)의 가운뎃점을 "|"나 쉼표로 변경
 - About 페이지의 소개 문단이 본문 폭 전체를 쓰도록 변경 (기존 720px 제한 제거)
-- 홈 상단 제목을 "구축, 검증, 측정, 기록"(영어 "Build, validate, measure, document")으로 변경하고, 그 아래 문구를 가운뎃점 없는 한 문장으로 수정
+- 홈 상단 제목을 "구축, 검증, 측정, 기록"(영어 "Build, validate, measure, document")으로 변경하고, 그 아래 문구를 가운뎃점 없는 한 문장("직접 테스트한 기록을 ...")으로 수정. 제목 위 꼬리표의 가운뎃점은 "|"로 변경
 - README, `docs/architecture.md`, `docs/onboarding.md`, 프로젝트 명령과 스킬을 새 게시 흐름에 맞게 수정 (`my-plugins:techblogs` 스킬의 `build_post.py`, `check_post.py`, `place_post.py`가 `qa.py`를 대체)
 - 캡스톤 랩 페이지 6개에 `whchoi.net`의 배포 샘플 앱(clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)을 연결하는 결과 샘플 섹션 추가
 - `ccw-hands-on-lab`을 2026-09-19 "My Workshop" 리더 빌드로 재구성(공용 `assets/` 디렉토리, 공통 목차·검색·다크 모드·인쇄·읽기 기록); 이전 독립 실행형 빌드와 레거시 캡스톤 랩 A–D를 `ccw-hands-on-lab/v1/`에 보관; 워크샵 네비게이션 페이지 갱신(Capstone 2 행, v1 아카이브 안내)

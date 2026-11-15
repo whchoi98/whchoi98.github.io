@@ -81,8 +81,8 @@
       });
       if (label) {
         label.textContent = isEn()
-          ? (q ? shown + " results" : "All " + total + " posts · newest first")
-          : (q ? shown + "편 검색됨" : "전체 " + total + "편 · 최신순");
+          ? (q ? shown + " results" : "All " + total + " posts, newest first")
+          : (q ? shown + "편 검색됨" : "전체 " + total + "편, 최신순");
       }
       if (empty) empty.hidden = !(q && shown === 0);
       repage(list);
@@ -121,8 +121,8 @@
       var en = document.documentElement.classList.contains("lang-en");
       if (heading) {
         heading.textContent = en
-          ? (tag ? shown + ' posts tagged "' + tag + '"' : "All " + tagCards.length + " posts · " + names.length + " tags")
-          : (tag ? '"' + tag + '" 태그의 글 ' + shown + "편" : "전체 " + tagCards.length + "편 · " + names.length + "개 태그");
+          ? (tag ? shown + ' posts tagged "' + tag + '"' : "All " + tagCards.length + " posts, " + names.length + " tags")
+          : (tag ? '"' + tag + '" 태그의 글 ' + shown + "편" : "전체 " + tagCards.length + "편, " + names.length + "개 태그");
       }
       chipRow.querySelectorAll(".chip-lg").forEach(function (b) {
         b.classList.toggle("active", (b.getAttribute("data-tag") || null) === tag);

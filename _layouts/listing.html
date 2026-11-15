@@ -11,7 +11,7 @@ layout: default
     {% include topbar.html %}
     <div class="page-hero">
       <h1 class="page-hero-title">{{ page.title }}</h1>
-      <p class="page-hero-sub">{{ page.description }}{% if page.list_category %} · {{ posts | size }}편{% endif %}</p>
+      <p class="page-hero-sub">{{ page.description }}{% if page.list_category %} | {{ posts | size }}편{% endif %}</p>
     </div>
   </div>
 </header>
@@ -27,7 +27,7 @@ layout: default
         <span class="post-card-excerpt">{% if p.excerpt_en %}<span class="l-ko">{{ p.excerpt }}</span><span class="l-en">{{ p.excerpt_en }}</span>{% else %}{{ p.excerpt }}{% endif %}</span>
         <div class="meta-row">
           {% for t in p.tags %}<a href="/tags/?tag={{ t | url_encode }}" class="chip">{{ t }}</a>{% endfor %}
-          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} · {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
+          <span class="meta-text">{{ p.date | date: "%Y.%m.%d" }} | {{ p.minutes }}<span class="l-ko">분</span><span class="l-en"> min</span></span>
         </div>
       </div>
     </div>
