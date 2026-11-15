@@ -1,4 +1,4 @@
-/* whchoi98.github.io - 테마 토글 / 홈 검색 / 태그 필터 / 글 목차 */
+/* whchoi98.github.io - 테마 토글 / 글 목록 5개씩 보기 / 홈 검색 / 태그 필터 / 글 목차 */
 (function () {
   "use strict";
 
@@ -27,8 +27,43 @@
     if (s0) s0.placeholder = "Search - title, tags";
   }
 
-  /* ---------- 홈 검색 ---------- */
   function isEn() { return document.documentElement.classList.contains("lang-en"); }
+
+  /* ---------- 글 목록 5개씩 보기 ----------
+     모든 .post-list 는 최신순으로 PAGE 개만 보이고, "더 보기"가 PAGE 개씩 더 펼친다.
+     검색이나 태그 필터가 바뀌면 repage()로 처음 PAGE 개부터 다시 센다. */
+  var PAGE = 5;
+  var pagers = [];
+  function setupPager(listEl) {
+    var cards = Array.prototype.slice.call(listEl.querySelectorAll(".post-card"));
+    if (!cards.length) return;
+    var limit = PAGE;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "more-btn";
+    listEl.parentNode.insertBefore(btn, listEl.nextSibling);
+    function render() {
+      var visible = cards.filter(function (c) { return !c.hidden; });
+      cards.forEach(function (c) { c.classList.remove("paged-out"); });
+      visible.forEach(function (c, i) { c.classList.toggle("paged-out", i >= limit); });
+      var rest = Math.max(0, visible.length - limit);
+      var next = Math.min(PAGE, rest);
+      btn.hidden = rest === 0;
+      btn.textContent = isEn()
+        ? "Show " + next + " more (" + rest + " left)"
+        : "더 보기 " + next + "편 (남은 글 " + rest + "편)";
+    }
+    btn.addEventListener("click", function () { limit += PAGE; render(); });
+    document.addEventListener("langchange", render);
+    pagers.push({ el: listEl, reset: function () { limit = PAGE; render(); } });
+    render();
+  }
+  function repage(listEl) {
+    pagers.forEach(function (p) { if (p.el === listEl) p.reset(); });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".post-list"), setupPager);
+
+  /* ---------- 홈 검색 ---------- */
   var search = document.getElementById("home-search");
   var list = document.getElementById("post-list");
   if (search && list) {
@@ -50,6 +85,7 @@
           : (q ? shown + "편 검색됨" : "전체 " + total + "편 · 최신순");
       }
       if (empty) empty.hidden = !(q && shown === 0);
+      repage(list);
     };
     search.addEventListener("input", applySearch);
     document.addEventListener("langchange", applySearch);
@@ -91,6 +127,7 @@
       chipRow.querySelectorAll(".chip-lg").forEach(function (b) {
         b.classList.toggle("active", (b.getAttribute("data-tag") || null) === tag);
       });
+      repage(tagList);
       try {
         var url = tag ? "?tag=" + encodeURIComponent(tag) : location.pathname;
         history.replaceState(null, "", url);

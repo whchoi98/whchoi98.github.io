@@ -186,6 +186,14 @@ a.featured-card { display: block; }
 .result-label { font-size: 13px; color: var(--t-text2); }
 .post-list { display: flex; flex-direction: column; gap: 12px; }
 .post-card { padding: 20px 24px; display: flex; gap: 18px; align-items: flex-start; }
+/* 글 목록 5개씩 보기 (assets/js/main.js setupPager) */
+.post-card[hidden], .post-card.paged-out { display: none; }
+.more-btn {
+  display: block; margin: 16px auto 0; background: none; border: 1px solid var(--t-border); border-radius: 999px;
+  padding: 8px 18px; font-family: inherit; font-size: 13px; color: var(--t-text2); cursor: pointer;
+}
+.more-btn:hover { color: var(--t-link); border-color: var(--t-link); }
+.more-btn[hidden] { display: none; }
 .post-card-icon { width: 44px; height: 44px; border-radius: 8px; flex: none; margin-top: 2px; }
 .post-card-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
 .post-card-title { font-weight: 700; font-size: 17px; color: var(--t-text); }

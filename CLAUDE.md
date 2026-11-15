@@ -4,7 +4,7 @@
 
 whchoi98.github.io - AWS Solutions Architect의 기술 블로그 겸 워크샵 포털.
 Jekyll 4.3 커스텀 테마 정적 사이트로, GitHub Actions를 통해 GitHub Pages에 배포된다.
-기술 분석 게시물(techblogs 형식 자립형 HTML)과 핸즈온 워크샵 문서(50여 개)를 제공한다.
+기술 게시물(techblogs 스킬이 만든 한영 리포트 HTML)과 핸즈온 워크샵 문서(50여 개)를 제공한다.
 
 ## Tech Stack
 
@@ -24,8 +24,9 @@ assets/
   css/main.css    - 전체 스타일 (CSS 변수 테마)
   js/main.js      - 테마/언어 토글, 홈 검색, 태그 필터, 목차
   icons/          - 카테고리 SVG 아이콘 (bedrock, eks, lambda 등)
+  fonts/          - 리포트가 쓰는 글꼴 (NanumSquare_ac, D2Coding woff2, NOTICE.txt)
 docs/
-  techblog/<카테고리>/  - 게시물 md + 자립형 리포트 HTML + archmap HTML/PNG
+  techblog/<카테고리>/  - 게시물 md + 리포트 HTML + 그림 폴더(<slug>-assets)
   workshop/       - 워크샵 문서 (50여 개, doc 레이아웃)
 docs/decisions/   - ADR (빌드 제외)
 docs/runbooks/    - 운영 런북 (빌드 제외)
@@ -42,11 +43,13 @@ ccw-hands-on-lab/ - Claude Code Workshop 핸즈온 랩 (자립형 HTML 아카이
 ## Conventions
 
 ### 게시물 (report 패턴)
-- 새 게시물 = `docs/techblog/<카테고리>/<slug>.md` (front matter만) + `<slug>-report.html` (자립형 techblogs HTML)
+- 새 게시물 = `docs/techblog/<카테고리>/<slug>.md` (front matter만) + `<slug>-report.html` (한영 리포트) + `<slug>-assets/` (그림). 세 가지 모두 `my-plugins:techblogs` 스킬이 작업 폴더에서 빌드해 배치한다. 리포트 HTML을 직접 고치지 않는다
 - md front matter: `layout: report`, `report_src: /docs/techblog/.../<slug>-report.html`, `title`/`title_en`, `date`, `category`, `tags`, `icon`, `minutes`, `excerpt`/`excerpt_en`
-- report 레이아웃은 자립형 HTML을 iframe으로 격리 렌더링한다 (사이트 CSS와 문서 CSS 충돌 방지)
-- 리포트 HTML은 KO/EN 이중 페이지를 내장하고 `<link rel="canonical">`로 게시물 URL을 가리킨다
-- 아키텍처 다이어그램은 archify로 생성한 `<slug>-archmap.html` + `<slug>-archmap.png`을 같은 디렉토리에 둔다
+- report 레이아웃은 리포트 HTML을 iframe으로 격리 렌더링한다 (사이트 CSS와 문서 CSS 충돌 방지). 리포트의 `.page`, `.theme-bar`, `data-theme`, `data-lang`, 저장 키 `techblogs-theme`와 `techblogs-lang`에 의존한다
+- 리포트 HTML은 한국어와 영어를 한 파일에 담는다. `<link rel="canonical">`은 게시물 URL을 가리키고, 다른 곳에 먼저 게시한 글을 옮겨 실은 경우에는 원문 URL을 가리킨다
+- 리포트의 디자인(나눔스퀘어, D2Coding, 최대 1440px 한 컬럼)은 스킬의 템플릿이 정한다. 글꼴 파일은 `assets/fonts/`에서 받는다
+- 글 목록(홈, 카테고리, 태그)은 `date` 최신순으로 5개씩 보이고 "더 보기"로 5개씩 펼친다 (`assets/js/main.js` setupPager)
+- 2026-11-15 이전 게시물은 구 형식(자립형 HTML + archify `<slug>-archmap.html`, `<slug>-archmap.png`)이다
 
 ### 이중 언어 (KO/EN)
 - 사이트 크롬은 `.l-ko`/`.l-en` 스팬 + `html.lang-en` 클래스 토글로 전환 (`assets/js/main.js`)
@@ -59,7 +62,7 @@ ccw-hands-on-lab/ - Claude Code Workshop 핸즈온 랩 (자립형 HTML 아카이
 - 본문은 경어체(~합니다), 코드/명령/고유명사는 원문 유지
 
 ### 코드블록
-- 리포트 HTML 내 코드블록은 mac 터미널 스타일(신호등 버튼 + 복사 버튼)을 사용한다
+- 리포트 HTML 내 코드블록은 언어 이름과 복사 버튼이 있는 코드 상자를 쓴다 (구 형식 게시물은 mac 터미널 스타일)
 
 ### Git
 - **`git add -A` 금지** - 항상 파일을 명시적으로 지정해 스테이징한다
@@ -75,8 +78,11 @@ PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll build -d _
 # 로컬 서버 (미리보기)
 PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle exec jekyll serve
 
-# techblogs QA (리포트 HTML 구조/스타일 검증, ERROR 시 exit 1)
-python3 ~/.claude/skills/techblogs/scripts/qa.py docs/techblog/<카테고리>/<slug>-report.html
+# 의존 패키지 설치 (처음 한 번, vendor/bundle에 설치)
+PATH="$HOME/.local/share/gem/ruby/3.2.0/bin:$PATH" bundle config set --local path vendor/bundle && bundle install
+
+# 리포트 검사 (my-plugins:techblogs 스킬의 스크립트. TECHBLOGS는 그 스킬 폴더, ERROR 시 exit 1)
+python3 "$TECHBLOGS/scripts/check_post.py" docs/techblog/<카테고리>/<slug>-report.html --blog .
 
 # 랩 오프라인 ZIP 생성 (배포 워크플로가 jekyll build 전에 실행; 로컬 빌드 검증 전에도 실행, 산출물은 gitignore)
 bash scripts/build-lab-zip.sh

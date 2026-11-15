@@ -1,0 +1,14 @@
+Fonts served for the techblogs report pages (docs/techblog/**/<slug>-report.html)
+
+NanumSquare_acR.woff2, NanumSquare_acB.woff2
+  NanumSquare (NanumSquareOTF_ac Regular and Bold), Copyright (c) NAVER Corporation.
+  Converted from the OTF files in the official package (https://hangeul.naver.com/font) to WOFF2 without glyph changes.
+
+D2Coding.woff2
+  D2Coding, Copyright (c) NAVER Corporation.
+  Subset of D2Coding.ttf (Basic Latin, Latin-1, punctuation, arrows, box drawing, KS X 1001 Hangul) in WOFF2.
+
+Both font families are licensed under the SIL Open Font License, Version 1.1.
+License text: https://openfontlicense.org/open-font-license-official-text/
+NAVER font license page: https://help.naver.com/support/contents/contents.nhn?serviceNo=1074&categoryNo=3497
+The fonts are not sold by themselves; they are bundled with this site for display only.
