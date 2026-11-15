@@ -26,6 +26,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add KO/EN language toggle chrome and bilingual posts (Korean/English pages embedded in each report)
 - Add archify interactive architecture maps plus inline archmap figures for all posts
 - Add Mac terminal style code blocks with copy buttons in report documents
+- Add post (KO/EN): "Subagents and forks in Claude Code: what each one inherits and where its result goes" (`docs/techblog/aiml/claude-code-subagent-vs-fork`), with four figures
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
 - Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
@@ -87,6 +88,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - KO/EN 언어 토글 크롬 및 이중 언어 게시물 추가 (각 리포트에 한/영 페이지 내장)
 - 전체 게시물에 archify 인터랙티브 아키텍처 맵과 인라인 archmap figure 추가
 - 리포트 문서에 복사 버튼이 있는 Mac 터미널 스타일 코드블록 추가
+- 게시물 추가(한영): "Claude Code의 Subagent와 fork: 무엇을 물려받고 결과가 어디로 돌아오는가" (`docs/techblog/aiml/claude-code-subagent-vs-fork`), 그림 4장 포함
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
 - 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)
