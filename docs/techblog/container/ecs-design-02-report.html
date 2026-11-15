@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amazon ECS 실행 구조와 선택 기준 2부: 배포 전략과 네트워크, 설계 상한</title>
+<meta name="description" content="Amazon ECS의 배포 전략 6종과 네트워크 모드, 스토리지, 플랫폼 옵션을 살펴봅니다. 두 편에서 다룬 선택 기준을 상황별 선택 가이드와 설계 상한이 되는 서비스 쿼터로 정리합니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/ecs-design-02/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-09-04</span><span class="l-en">Published 2026-09-04</span></span><span>Container</span><span><span class="l-ko">읽는 시간 12분</span><span class="l-en">12 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/ecs-design-02/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/ecs-design-02/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">Amazon ECS 실행 구조와 선택 기준 2부: 배포 전략과 네트워크, 설계 상한</span><span class="l-en">Amazon ECS execution model and selection criteria, Part 2: Deployment strategies, networking, and design limits</span></h1>
+<p class="thesis"><span class="l-ko">Amazon ECS에서 새 리비전을 무엇으로 배포하고 네트워크와 스토리지, 플랫폼 옵션은 어떻게 선택할지에 답합니다. 점진적 트래픽 제어가 필요 없으면 기본값인 Rolling, 점진적인 전환이면 Linear나 Canary, 선검증 후 즉시 전환이면 내장 Blue/Green을 선택합니다. 설계할 때는 Service Connect namespace당 서비스 300개, Fargate On-Demand vCPU 초기값 6 같은 서비스 쿼터를 상한으로 확인해야 합니다.</span><span class="l-en">This post answers what to deploy a new revision with on Amazon ECS and how to choose networking, storage, and platform options. Choose rolling, the default, if you don't need gradual traffic control, linear or canary for a gradual shift, and built-in blue/green for validation first and then an immediate cutover. When you design, check service quotas as upper limits, such as 300 services per Service Connect namespace and an initial Fargate On-Demand vCPU value of 6.</span></p>
+<div class="tags"><span>#Amazon ECS</span><span>#AWS Fargate</span><span>#Amazon ECS Managed Instances</span><span>#Blue/Green Deployment</span><span>#Service Connect</span><span>#Amazon VPC Lattice</span><span>#Capacity Provider</span><span>#Service Quotas</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">6종으로 증가한 배포 전략</a><a href="#ko-s3">네트워크 형태</a><a href="#ko-s4">스토리지와 플랫폼 옵션</a><a href="#ko-s5">상황별 선택 가이드와 설계 상한</a><a href="#ko-s6">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Deployment strategies expanded to six</a><a href="#en-s3">Networking</a><a href="#en-s4">Storage and platform options</a><a href="#en-s5">Scenario-based selection guide and design limits</a><a href="#en-s6">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>이 글은 Amazon ECS 실행 구조와 선택 기준을 다루는 시리즈의 2부입니다. <a href="https://whchoi98.github.io/docs/techblog/container/ecs-design-01/" target="_blank" rel="noopener">1부</a>에서는 launch type은 호환되는 실행 환경을 표시하는 용도로만 사용하고 실제 실행은 용량 공급자(capacity provider)로 구성한다는 원칙에서 출발했습니다. 이 원칙을 바탕으로 Fargate와 ECS Managed Instances, EC2에 걸친 컴퓨트 선택과 Express Mode부터 예약 Task까지의 실행 형태를 살펴봤습니다.</p>
+<p>2부에서는 남은 선택지를 다룹니다. 6종으로 증가한 배포 전략에서 시작해 네트워크와 스토리지, 플랫폼 옵션을 살펴보고 마지막에 두 편에서 다룬 선택 기준을 종합해서 상황별 선택 가이드와 설계 상한이 되는 서비스 쿼터로 제안해 봅니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>6종으로 증가한 배포 전략</h2></header><div class="prose">
+<p>새 리비전(revision)을 내보내는 방법은 Rolling, CodeDeploy Blue/Green, External 3종에서 6종으로 증가했습니다. <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_service-options.html" target="_blank" rel="noopener">공식 문서의 구조</a>는 배포 컨트롤러 3종(ECS, CodeDeploy, External) 입니다. 이 중에서 ECS 컨트롤러가 ROLLING, BLUE_GREEN, LINEAR, CANARY 4개 전략을 포함합니다. 모두 고려하면 6가지 방식이고 기본값은 Rolling입니다. 표 1은 6종 각각의 트래픽 전환 방식과 로드밸런서 요구 사항, 그리고 어떤 상황에 적합한지를 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>전략</th><th>컨트롤러</th><th>전환 방식</th><th>로드밸런서 요구</th><th>적합 상황</th></tr>
+</thead>
+<tbody>
+<tr><td>Rolling</td><td>ECS</td><td>Task 점진 교체. minimumHealthyPercent 하한과 maximumPercent 상한으로 속도 제어</td><td>불필요</td><td>점진적 트래픽 제어가 불필요한 대부분의 서비스. 기본값이며 로드밸런서를 요구하지 않는 전략</td></tr>
+<tr><td>Blue/Green (내장)</td><td>ECS</td><td>그린 환경을 테스트 트래픽으로 선검증 후 프로덕션 트래픽 전량 즉시 전환</td><td>ALB/NLB 또는 Service Connect</td><td>즉시 전환과 신속 롤백이 필요한 서비스</td></tr>
+<tr><td>Linear</td><td>ECS</td><td>동일 비율 증분으로 점진 전환. step 3.0~100.0%(0.1 단위), step bake 0~1,440분</td><td>ALB/NLB 또는 Service Connect</td><td>트래픽을 조금씩 옮기며 지표를 확인해야 하는 서비스</td></tr>
+<tr><td>Canary</td><td>ECS</td><td>2단계 전환: 소량 트래픽 선검증 후 나머지 일괄 전환</td><td>ALB/NLB 또는 Service Connect</td><td>새로운 버전을 소량 트래픽으로 먼저 검증하고 싶은 서비스</td></tr>
+<tr><td>Blue/Green (CodeDeploy)</td><td>CODE_DEPLOY</td><td>CodeDeploy 사전 정의 구성으로 canary / linear / all-at-once 전환</td><td>ALB/NLB 필수, NLB는 all-at-once만</td><td>기존 CodeDeploy 파이프라인을 유지해야 하는 팀</td></tr>
+<tr><td>External</td><td>EXTERNAL</td><td>서드파티 컨트롤러가 task set의 scale 값으로 직접 제어</td><td>선택. 사용 시 ALB/NLB만</td><td>자체 배포 도구를 가진 조직</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 배포 전략 6종: 방식과 적합 상황</p>
+<p>선택 기준의 권고사항으로 CodeDeploy Blue/Green 배포 문서는 내장된 Blue/Green 사용을 권장한다고 밝힙니다. CodeDeploy 방식은 기존 파이프라인을 유지해야 하는 경우의 선택지로 남습니다.</p>
+<h3>1.1 내장 고급 배포의 공통 구조: 6단계와 bake time</h3>
+<p>내장 Blue/Green, Linear, Canary는 CodeDeploy 없이 ECS 컨트롤러가 직접 수행하며 준비, 배포, 테스트, 트래픽 전환, 모니터링, 완료의 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/blue-green-deployment-how-it-works.html" target="_blank" rel="noopener">공통 6단계 구조</a>를 공유합니다. 세부적으로는 11개 lifecycle stage로 나뉘고 스테이지에는 배포 흐름에 사용자 로직을 삽입하는 두 종류의 훅(hook)을 걸 수 있습니다. 검증 로직을 자동 실행하는 AWS Lambda 훅에 더해, <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/pause-lifecycle-hooks.html" target="_blank" rel="noopener">일시 정지(pause) 훅</a>은 <code>ContinueServiceDeployment</code> API로 계속 진행이나 롤백을 지시할 때까지 배포를 멈춥니다. 수동 승인 게이트가 필요한 팀에게는 이것이 직접적인 수단으로, 타임아웃(기본 24시간, 최대 14일)이 만료되면 지정한 동작을 수행하며 기본값은 롤백입니다. 트래픽 전환 후 배포 이전 버전인 구 리비전과 새로 배포한 신 리비전을 동시에 가동하며 지표를 지켜보는 구간인 bake time이 끝나야 기존 환경이 정리됩니다.</p>
+<figure class="fig"><div class="canvas"><img src="ecs-design-02-assets/fig01-01_builtin-deployment-flow-new.png" alt="내장 Blue/Green, Linear, Canary가 공유하는 6단계 배포 흐름: 준비, 배포, 테스트, 트래픽 전환, 모니터링(bake time, 경보 발생 시 이전 서비스 리비전으로 롤백), 완료" width="642" height="227" loading="lazy"></div><figcaption><b>그림 1.</b> 내장 Blue/Green, Linear, Canary가 공유하는 6단계 배포 흐름(11개 lifecycle stage와 훅 구성은 간략화)</figcaption></figure>
+<p>역할 구분이 중요합니다. 내장 Blue/Green의 프로덕션 전환은 전량 즉시(all-at-once)이므로, 점진적인 전환이 필요하다면 선택지는 Linear나 Canary입니다.</p>
+<h3>1.2 Rolling의 세부 규칙</h3>
+<p>Rolling의 교체 속도는 배포 중 Task 수가 지켜야 할 하한과 상한으로 정해지며 두 값 모두 서비스의 목표 Task 수인 <code>desiredCount</code> 대비 백분율로 지정합니다. 하한인 <code>minimumHealthyPercent</code>는 유지해야 하는 정상 Task 수를 올림으로 계산하고 상한인 <code>maximumPercent</code>는 동시에 실행될 수 있는 전체 Task 수를 내림으로 계산합니다. 예를 들어 min 75%에 desired 2면 올림 결과가 2라서 어떤 Task도 중지할 수 없습니다.</p>
+<p>배포 중 비정상이 된 Task는 자신이 속한 것과 동일한 서비스 리비전으로 교체됩니다. 실패 감지는 Task 기동 실패를 잡는 deployment circuit breaker와 애플리케이션 지표를 보는 CloudWatch 경보 2종을 병용할 수 있습니다. 두가지 모두 이전 서비스 리비전으로의 롤백을 지원합니다.</p>
+<h3>1.3 2026년의 배포 관측성 개선</h3>
+<p>전략 확장과 함께 배포 관측성도 좋아졌습니다. 2026년 7월 1일부터 ECS 콘솔 서비스의 Deployments 탭에서 라이브 배포 타임라인, 서킷 브레이커 상태, Task 실패 실시간 추적, 실패 Task에서 AWS CloudTrail로 이어지는 딥링크를 제공합니다. 다만 이 실시간 배포 관측성은 Rolling 배포 유형 서비스에만 해당하고 Blue/Green 등 다른 전략은 이번 발표 범위 밖입니다.</p>
+<p>2026년 7월 21일에 발표된 <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/07/amazon-ecs-action-logs/" target="_blank" rel="noopener">Action Logs</a>는 서비스 배포와 Managed daemon 업데이트 중 ECS가 고객 대신 수행한 동작을 타임스탬프 기록으로 남깁니다. 이벤트 이름, 로그 레벨(INFO/WARN/ERROR), 리소스 ARN, 상태 이유가 담깁니다. Amazon CloudWatch Logs, Amazon S3, Amazon Kinesis Data Firehose로 전송하고 Amazon Q 통합으로 배포 문제의 근본 원인 분석을 지원합니다. 클러스터 레벨 옵트인 기능이고 전송 대상의 표준 요금이 적용됩니다.</p>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>네트워크 형태</h2></header><div class="prose">
+<p>Task가 네트워크에 붙는 방식은 컨테이너의 네트워크 연결 방식을 정하는 Task definition 파라미터인 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-networking.html" target="_blank" rel="noopener">네트워크 모드(network mode)</a>가 정합니다. 모드는 5종이지만 OS에 따라 사용할 수 있는 조합이 다릅니다. 표 2는 EC2 기준으로 모드별 지원 OS와 특징을 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>모드</th><th>Linux on EC2</th><th>Windows on EC2</th><th>특징</th></tr>
+</thead>
+<tbody>
+<tr><td>awsvpc</td><td>가능</td><td>가능</td><td>Task가 전용 ENI(Elastic Network Interface)와 사설 IP를 받습니다. 권장 모드</td></tr>
+<tr><td>bridge</td><td>가능</td><td>불가</td><td>Docker bridge 드라이버 사용. Linux 기본값</td></tr>
+<tr><td>host</td><td>가능</td><td>불가</td><td>호스트 ENI에 포트 직결. 동적 포트 매핑 불가, hostPort 명시 필수. 같은 Task definition을 한 인스턴스에서 여러 개 실행 불가</td></tr>
+<tr><td>none</td><td>가능</td><td>불가</td><td>외부 네트워크 연결 없음</td></tr>
+<tr><td>default</td><td>불가</td><td>가능</td><td>Docker nat 드라이버 사용. Windows 기본값</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 네트워크 모드 5종: EC2 기준 Linux와 Windows 지원과 특징</p>
+<p>Fargate에는 선택지가 없습니다. 서비스 정의 문서는 Fargate 사용 시 <code>awsvpc</code> 모드가 필수라고 명시합니다. <code>awsvpc</code> 모드의 Task는 자기 전용 ENI에 직접 연결되므로, 로드밸런서 타겟 그룹도 ip 타입을 사용합니다.</p>
+<h3>2.1 IPv6-only 구성의 전제 조건</h3>
+<p>Task 네트워킹은 IPv4, IPv4와 IPv6를 함께 사용하는 듀얼스택(dual-stack), IPv6-only 세 가지 IP 구성을 지원합니다. IPv6-only는 서울 리전에서도 지원되지만 세 구성 가운데 전제 조건이 가장 많습니다.</p>
+<ul>
+<li>듀얼스택 로드밸런서와 IPv6 타겟 그룹 필수</li>
+<li>Windows 미지원. ECS 최적화 Linux AMI와 컨테이너 에이전트 1.99.1 이상 필수</li>
+<li>인스턴스 기동 시 <code>--enable-primary-ipv6</code> 필수. 누락하면 host, bridge 모드 Task가 로드밸런서와 AWS Cloud Map에 등록되지 않습니다</li>
+<li>IPv4 엔드포인트와 통신하려면 DNS64/NAT64 필요. Amazon ECR은 듀얼스택 URI 사용</li>
+<li>ECS Exec 미지원</li>
+</ul>
+<h3>2.2 서비스 간 연결: Service Connect, Cloud Map, 로드밸런서</h3>
+<p>서비스 사이를 연결하는 공식 옵션은 Service Connect, Cloud Map 기반 DNS인 Service discovery, 서비스 간 연결을 관리형으로 제공하는 Amazon VPC Lattice 3종입니다. 별도로 ALB나 NLB 로드밸런싱을 사용할 수 있습니다. Service Connect는 서비스 디스커버리와 서비스 메시를 ECS 구성만으로 함께 제공하는 기능입니다. Task마다 프록시 컨테이너를 주입해 짧은 이름(short name)과 표준 포트로 서비스 간 통신을 처리하고 기능 자체는 추가 요금이 없습니다. 다만 프록시는 Task 안에서 실행되어 Task의 vCPU와 메모리를 워크로드와 나눠 사용하므로, 요금이 없다는 것과 리소스를 사용하지 않는다는 것은 구분해야 합니다.</p>
+<p>서비스 메시를 계획할 때 확인해야 할 일정이 하나 있습니다. <b>AWS App Mesh는 2026년 9월 30일에 지원이 종료</b>되므로 신규 아키텍처에서 제외해야 합니다. 기존 App Mesh 기반 구성은 Service Connect나 VPC Lattice로 마이그레이션해야 합니다.</p>
+<p><a href="https://aws.amazon.com/ko/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/" target="_blank" rel="noopener">Service Connect로의 전환</a>은 설정 변경이 아니라 서비스 재생성 이벤트입니다. 하나의 ECS 서비스는 App Mesh의 mesh와 Service Connect namespace에 동시에 속할 수 없기 때문에 서비스를 다시 만들어야 합니다. 무중단이 필요하면 서비스 복제본을 만들어 트래픽을 점진적으로 이전하는 blue/green 방식이 AWS 공식 권고입니다.</p>
+<p>namespace 자체에도 상한이 있습니다. 하나의 namespace에서 실행할 수 있는 서비스는 300개로 고정입니다. 서비스가 많은 App Mesh를 이전할 때는 mesh 하나를 namespace 하나로 그대로 옮기지 말고 도메인 단위로 namespace를 나누는 분할 설계를 먼저 검토해야 합니다. Service discovery도 별도 상한이 있습니다. service discovery를 구성한 서비스는 Cloud Map의 서비스당 인스턴스 쿼터 때문에 서비스당 Task가 1,000개로 제한됩니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>스토리지와 플랫폼 옵션</h2></header><div class="prose">
+<h3>3.1 스토리지: 임시에서 지속까지</h3>
+<p>Task는 기본으로 임시 스토리지를 받고 지속성이 필요하면 볼륨을 연결합니다. <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_data_volumes.html" target="_blank" rel="noopener">개발자 가이드의 데이터 볼륨 옵션</a> 가운데 다섯 개의 선택지가 중심이 됩니다.</p>
+<ul>
+<li>Amazon EBS: Task당 볼륨을 자동 프로비저닝합니다. 지속성은 실행 형태에 따라 달라지는데, 서비스가 관리하는 Task에서는 Task 종료와 함께 삭제되는 임시 볼륨이지만 단독 실행(standalone) Task에서는 볼륨을 유지할 수 있습니다. Fargate, EC2, Managed Instances 3종 컴퓨트를 모두 지원합니다</li>
+<li>Amazon EFS: Linux Task용 지속 공유 스토리지. Fargate, EC2, Managed Instances 지원</li>
+<li>Amazon FSx for Windows File Server: Windows Task용 지속 스토리지. EC2 전용</li>
+<li>Docker volume: Linux와 Windows용 지속 볼륨. EC2 전용</li>
+<li>bind mount: 컨테이너 수명에 묶이는 임시(ephemeral) 볼륨. Fargate에서는 호스트 경로 마운트 대신 Task에 할당된 임시 스토리지(기본 20GiB, 최대 200GiB)를 Task 안 컨테이너끼리 공유하는 용도로 사용합니다. 호스트 경로를 지정하는 host의 sourcePath는 EC2 호스팅 Task 전용입니다. (Fargate, EC2, Managed Instances 지원)</li>
+</ul>
+<p>현재 공식 문서의 볼륨 옵션 표에는 Amazon FSx for NetApp ONTAP과 Amazon S3 Files까지 총 7종이 올라 있습니다. Amazon S3 Files는 S3 데이터를 파일 시스템 인터페이스로 빠르게 캐시 접근하는 지속 볼륨으로, Fargate와 Managed Instances의 Linux Task를 지원합니다. 볼륨마다 지원 컴퓨트가 다르기 때문에 FSx for Windows File Server와 Docker volume이 EC2 전용이라는 점을 포함해 공식 표에서 조합을 확인하고 설계하는 것이 안전합니다.</p>
+<h3>3.2 플랫폼 옵션: OS, 아키텍처, GPU, 운영 도구</h3>
+<p>컴퓨트와 스토리지 외에도 선택을 좌우하는 요소가 여섯 개 있습니다.</p>
+<ul>
+<li>OS와 아키텍처: Linux와 Windows, x86_64와 ARM64(Graviton). ARM64는 Linux 전용이고 Fargate에서는 platform version 1.4.0 이상이 필요합니다</li>
+<li>GPU: NVIDIA와 AMD. Fargate는 GPU를 지원하지 않으므로 Managed Instances나 EC2에서 사용합니다</li>
+<li>Fargate platform version: 커널과 컨테이너 런타임 버전의 조합. 미지정 시 LATEST가 기본값이고 새 Task는 항상 해당 버전의 최신 revision에서 기동합니다</li>
+<li>ECS Exec: 실행 중인 컨테이너에 셸로 접근하는 디버깅 도구. IPv6-only 구성에서는 지원되지 않습니다</li>
+<li><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html" target="_blank" rel="noopener">Task 배치</a>: EC2는 배치 방식을 정하는 placement strategy(모아서 채우는 binpack, 무작위 random, 고르게 분산하는 spread)와 배치 조건인 constraint를 모두 지원합니다. Managed Instances는 strategy 없이 constraint만 지원합니다. 다만 빌트인 attribute 가운데 <code>ecs.subnet-id</code>, <code>ecs.availability-zone</code>, <code>ecs.instance-type</code>, <code>ecs.cpu-architecture</code> 4종만 허용합니다. Fargate는 둘 다 지원하지 않습니다. Managed Instances와 Fargate의 가용 영역 분산은 플랫폼이 자동으로 처리합니다</li>
+<li>스케일링 2계층: Task 수는 서비스 오토스케일링(target tracking, step, scheduled, predictive 4종)이, Task를 올릴 용량은 capacity provider의 클러스터 오토스케일링이 담당합니다. 이 가운데 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/predictive-auto-scaling.html" target="_blank" rel="noopener">predictive scaling</a>은 서비스 수준 기능으로, 컴퓨트(EC2, Fargate) 용량의 스케일링과 독립적으로 서비스의 Task 계층만 스케일합니다</li>
+</ul>
+<p>스케일링 2계층 가운데 Task 계층의 <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/amazon-ecs-faster-autoscaling/" target="_blank" rel="noopener">서비스 오토스케일링</a>은 2026년 6월 18일부터 반응 속도가 개선되었습니다. scale-out 트리거까지 걸리는 시간이 363초에서 86초로 76% 줄었고 신규 Task 프로비저닝을 포함한 전체 스케일 시간은 386초에서 109초로 72% 줄었습니다. 20초 간격 고해상도 메트릭 기반이고 Fargate, ECS Managed Instances, EC2 모두 대상이 됩니다. 고해상도 메트릭에는 표준 CloudWatch 요금이 적용됩니다.</p>
+<p>용량 계층을 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html" target="_blank" rel="noopener">EC2 Auto Scaling group capacity provider</a>로 운영할 때의 관리 노브는 세 가지입니다. managed scaling을 켜면 ECS가 <code>CapacityProviderReservation</code> 메트릭과 target tracking 정책을 만들어 인스턴스의 스케일 인과 스케일 아웃을 대신 관리합니다. target capacity(유효 범위 1~100%)를 100 미만으로 두면 그만큼 여유 용량을 상시 확보해 후속 Task 기동이 빨라집니다. managed termination protection은 Task가 실행 중인 인스턴스가 스케일 인으로 종료되지 않게 보호합니다. 이때 ASG의 instance scale-in protection 활성화가 전제 조건입니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>상황별 선택 가이드와 설계 상한</h2></header><div class="prose">
+<p>표 3은 1부의 컴퓨트와 실행 형태부터 이번 편의 배포 및 연결까지, 두 편에서 살펴본 선택 기준을 상황별 권장 조합으로 제안해 드립니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>상황</th><th>권장 선택</th></tr>
+</thead>
+<tbody>
+<tr><td>웹 서비스를 가장 빠르게 올리고 싶다</td><td>Express Mode: 입력 3개로 자동 구성, 이후 직접 관리로 전환 가능</td></tr>
+<tr><td>인프라 운영을 최소화한 표준 서비스</td><td>Fargate capacity provider</td></tr>
+<tr><td>GPU나 특수 하드웨어는 필요하지만 패치는 맡기고 싶다</td><td>ECS Managed Instances capacity provider</td></tr>
+<tr><td>OS와 인스턴스를 완전히 통제해야 한다</td><td>EC2 Auto Scaling group capacity provider</td></tr>
+<tr><td>온프레미스 하드웨어를 그대로 사용한다</td><td>EXTERNAL launch type (ECS Anywhere)</td></tr>
+<tr><td>일회성 배치 작업 / 정기 실행</td><td>RunTask / EventBridge Scheduler 예약 Task</td></tr>
+<tr><td>점진적 트래픽 제어가 필요 없는 대부분의 서비스, 로드밸런서 없는 서비스</td><td>Rolling: 기본값이며 로드밸런서를 요구하지 않는 전략</td></tr>
+<tr><td>새로운 버전을 검증하며 트래픽을 옮기고 싶다</td><td>점진적인 전환은 Linear 또는 Canary, 선검증 후 즉시 전환은 내장 Blue/Green</td></tr>
+<tr><td>서비스 메시가 필요하다</td><td>Service Connect 또는 VPC Lattice. App Mesh는 2026년 9월 30일 지원 종료로 제외</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 상황별 선택 가이드: 컴퓨트, 실행, 배포, 연결</p>
+<p>표 3의 EXTERNAL(ECS Anywhere)은 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html" target="_blank" rel="noopener">기능 제약</a>을 전제로 선택해야 합니다. ELB 로드밸런싱, service discovery, awsvpc 네트워크 모드, capacity provider, EFS 볼륨이 지원되지 않으므로, 공식 문서도 인바운드 트래픽을 받는 웹 서비스류 워크로드에는 비효율적이라고 명시합니다.</p>
+<h3>4.1 핵심 서비스 쿼터</h3>
+<p>마지막 주제는 설계 상한이 되는 <a href="https://docs.aws.amazon.com/general/latest/gr/ecs-service.html" target="_blank" rel="noopener">서비스 쿼터</a>입니다. 표 4는 리전별 기본값 기준의 대표 수치입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>쿼터</th><th>기본값</th><th>상향 조정</th></tr>
+</thead>
+<tbody>
+<tr><td>계정당 클러스터 수</td><td>10,000</td><td>가능</td></tr>
+<tr><td>클러스터당 서비스 수</td><td>5,000</td><td>불가</td></tr>
+<tr><td>서비스당 Task 수 (desired count)</td><td>5,000</td><td>불가</td></tr>
+<tr><td>클러스터당 컨테이너 인스턴스 수</td><td>5,000</td><td>불가</td></tr>
+<tr><td>Task definition family당 revision 수</td><td>1,000,000</td><td>불가</td></tr>
+<tr><td>Fargate On-Demand vCPU 수</td><td>6 (Spot은 별도 6)</td><td>가능</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 대표 서비스 쿼터: 리전별 기본값</p>
+<p>표 4의 기본값은 AWS가 설정한 초기 쿼터이며 계정에 실제 적용된 값(applied quota)이나 요청 가능한 최대값과는 별개입니다. 또한 service discovery를 구성한 서비스는 서비스 간 연결에서 살펴본 Cloud Map 쿼터 때문에 서비스당 Task가 1,000개로 제한되어, 표의 서비스당 Task 수 5,000보다 먼저 제한됩니다.</p>
+<p>Task 기동 속도에도 상한이 있습니다. ECS 스케줄러가 서비스당 1분에 프로비저닝할 수 있는 Task 수는 Fargate 기준 주요 리전 500개, 그 외 리전(2025년 5월 20일 이후 신설 리전 포함) 125개이며 이 쿼터는 조정할 수 없습니다. EC2와 External 인스턴스도 서비스당 분당 500개입니다. 계정 레벨에서는 Fargate On-Demand 기동 속도가 지속(sustained) 초당 20개, 버스트 100개로 별도 제한됩니다(주요 리전 기본값, 상향 요청 가능). 수백 Task 규모의 대량 스케일아웃에서는 오토스케일링의 반응 속도보다 이 기동 상한이 먼저 걸립니다.</p>
+<p>두 가지 함정이 있습니다. Task definition revision은 등록을 해제하거나 삭제해도 1,000,000 한도 계산에서 빠지지 않습니다. 그리고 Fargate 쿼터는 Task 수가 아니라 vCPU 개수 기준이고 On-Demand vCPU 초기값은 6에 불과합니다(Spot은 별도로 6). 1 vCPU Task 기준 동시 6개면 한도에 닿는 수준이므로, 신규 계정에서는 첫 부하 테스트나 본 배포 전에 상향을 신청해 두는 것이 좋습니다. 이 값은 상향 요청이 가능하고 Fargate가 리전별 사용량을 관찰해 자동으로 올리기도 합니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>마치며</h2></header><div class="prose">
+<p>1부 글머리에서 언급한 세 번째 고민, 무엇으로 배포할 것인가를 다시 살펴보겠습니다. 점진적 트래픽 제어가 필요 없으면 기본값인 Rolling, 소량 검증 후 점진적인 전환이면 Linear나 Canary, 선검증 후 즉시 전환이면 내장 Blue/Green을 선택하면 됩니다. AWS는 CodeDeploy 방식보다 내장 Blue/Green을 권장하고 있습니다.</p>
+<p>이제 두 편을 정리해 봅니다.</p>
+<p>1/ 선언은 Task definition의 <code>requiresCompatibilities</code>에 맡기고 실행은 capacity provider로 구성합니다.</p>
+<p>2/ 컴퓨트는 Fargate, Managed Instances, EC2의 책임 분담에서 선택합니다.</p>
+<p>3/ 배포는 6종 전략 중 트래픽 전환 요구에 맞는 것을 선택하는 것이 2026년 8월 기준 Amazon ECS의 기본입니다.</p>
+<p>본문의 수치와 기본값은 작성 시점 기준이므로, 최신 값은 본문에 링크한 공식 문서에서 확인하시기 바랍니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>This post is Part 2 of a series on how Amazon ECS runs workloads and how to choose among its options. <a href="https://whchoi98.github.io/docs/techblog/container/ecs-design-01/" target="_blank" rel="noopener">Part 1</a> started from one principle: use the launch type only to declare which runtime environments a task is compatible with, and configure where the task actually runs through capacity providers. Building on that principle, it covered the compute choices across AWS Fargate, Amazon ECS Managed Instances, and Amazon EC2, and the ways to run workloads, from Express Mode to scheduled tasks.</p>
+<p>Part 2 covers the remaining choices. It starts with the deployment strategies, which have grown to six, moves on to networking, storage, and platform options, and closes by combining the selection criteria from both parts into a scenario-based selection guide and the service quotas that set your design limits.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Deployment strategies expanded to six</h2></header><div class="prose">
+<p>The ways to roll out a new revision have grown from three (rolling, CodeDeploy blue/green, and external) to six. <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_service-options.html" target="_blank" rel="noopener">The official documentation</a> is organized around three deployment controllers (ECS, CodeDeploy, and External). Of these, the ECS controller includes four strategies: ROLLING, BLUE_GREEN, LINEAR, and CANARY. Counting them all gives six approaches, and rolling is the default. Table 1 summarizes how each of the six shifts traffic, what it requires from a load balancer, and which situations it suits.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Strategy</th><th>Controller</th><th>Traffic shift</th><th>Load balancer requirement</th><th>Best for</th></tr>
+</thead>
+<tbody>
+<tr><td>Rolling</td><td>ECS</td><td>Replaces tasks gradually. The minimumHealthyPercent lower bound and the maximumPercent upper bound control the pace</td><td>Not required</td><td>Most services that don't need gradual traffic control. The default, and the strategy that doesn't require a load balancer</td></tr>
+<tr><td>Blue/green (built-in)</td><td>ECS</td><td>Validates the green environment with test traffic first, then shifts all production traffic at once</td><td>ALB/NLB or Service Connect</td><td>Services that need an immediate cutover and fast rollback</td></tr>
+<tr><td>Linear</td><td>ECS</td><td>Shifts traffic gradually in equal increments. Step 3.0 to 100.0% (in 0.1 increments), step bake 0 to 1,440 minutes</td><td>ALB/NLB or Service Connect</td><td>Services that need to move traffic a little at a time while checking metrics</td></tr>
+<tr><td>Canary</td><td>ECS</td><td>Two-step shift: validates with a small share of traffic first, then shifts the rest at once</td><td>ALB/NLB or Service Connect</td><td>Services that want to validate a new version with a small share of traffic first</td></tr>
+<tr><td>Blue/green (CodeDeploy)</td><td>CODE_DEPLOY</td><td>Shifts traffic canary / linear / all-at-once with CodeDeploy predefined configurations</td><td>ALB/NLB required; NLB supports all-at-once only</td><td>Teams that must keep an existing CodeDeploy pipeline</td></tr>
+<tr><td>External</td><td>EXTERNAL</td><td>A third-party controller manages the rollout directly through the scale value of task sets</td><td>Optional. ALB/NLB only when used</td><td>Organizations with their own deployment tooling</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Six deployment strategies: how they work and where they fit</p>
+<p>As a recommendation on which to choose, the CodeDeploy blue/green deployment documentation states that it recommends using the built-in blue/green. The CodeDeploy approach remains an option for cases where you must keep an existing pipeline.</p>
+<h3>1.1 Common structure of built-in advanced deployments: six stages and bake time</h3>
+<p>Built-in blue/green, linear, and canary deployments are carried out directly by the ECS controller without CodeDeploy, and they share <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/blue-green-deployment-how-it-works.html" target="_blank" rel="noopener">a common six-stage structure</a>: preparation, deployment, testing, traffic shifting, monitoring, and completion. In detail, the flow breaks down into 11 lifecycle stages, and you can attach two kinds of hooks to those stages to insert your own logic into the deployment flow. In addition to AWS Lambda hooks, which run validation logic automatically, <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/pause-lifecycle-hooks.html" target="_blank" rel="noopener">pause hooks</a> hold the deployment until you tell it to continue or roll back through the <code>ContinueServiceDeployment</code> API. For teams that need a manual approval gate, this is the direct way to get one, and when the timeout (24 hours by default, up to 14 days) expires, the deployment takes the action you specified, which defaults to rollback. The existing environment is cleaned up only after the bake time ends, which is the period after the traffic shift when the old revision (the version before the deployment) and the new revision (the newly deployed version) run side by side while you watch the metrics.</p>
+<figure class="fig"><div class="canvas"><img src="ecs-design-02-assets/fig01-01_builtin-deployment-flow-new.png" alt="The six-stage deployment flow shared by built-in blue/green, linear, and canary: preparation, deployment, testing, traffic shifting, monitoring (bake time, with rollback to the previous service revision if an alarm fires), and completion" width="642" height="227" loading="lazy"></div><figcaption><b>Figure 1.</b> The six-stage deployment flow shared by built-in blue/green, linear, and canary (the 11 lifecycle stages and hook configuration are simplified)</figcaption></figure>
+<p>The division of roles matters. Because the production cutover in built-in blue/green is all-at-once, your options are linear or canary if you need a gradual shift.</p>
+<h3>1.2 Detailed rules for rolling deployments</h3>
+<p>The replacement pace of a rolling deployment is set by a lower bound and an upper bound on the number of tasks during the deployment, and both are specified as a percentage of <code>desiredCount</code>, the target number of tasks for the service. The lower bound, <code>minimumHealthyPercent</code>, rounds up when calculating the number of healthy tasks to maintain, and the upper bound, <code>maximumPercent</code>, rounds down when calculating the total number of tasks that can run at the same time. For example, with min 75% and desired 2, rounding up gives 2, so no task can be stopped.</p>
+<p>A task that becomes unhealthy during a deployment is replaced with the same service revision it belongs to. For failure detection, you can combine two mechanisms: the deployment circuit breaker, which catches task launch failures, and CloudWatch alarms, which watch application metrics. Both support rollback to the previous service revision.</p>
+<h3>1.3 Deployment observability improvements in 2026</h3>
+<p>Along with the broader set of strategies, deployment observability has improved as well. Since July 1, 2026, the Deployments tab of a service in the ECS console provides a live deployment timeline, circuit breaker status, real-time tracking of task failures, and deep links from failed tasks to AWS CloudTrail. However, this real-time deployment observability applies only to services that use the rolling deployment type, and blue/green and the other strategies are outside the scope of this announcement.</p>
+<p><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/07/amazon-ecs-action-logs/" target="_blank" rel="noopener">Action Logs</a>, announced on July 21, 2026, keep a timestamped record of the actions that ECS takes on your behalf during service deployments and managed daemon updates. Each record contains the event name, log level (INFO/WARN/ERROR), resource ARN, and status reason. The logs can be delivered to Amazon CloudWatch Logs, Amazon S3, and Amazon Kinesis Data Firehose, and an Amazon Q integration supports root cause analysis of deployment issues. It is an opt-in feature at the cluster level, and the standard charges of the delivery destination apply.</p>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Networking</h2></header><div class="prose">
+<p>How a task attaches to the network is determined by the <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-networking.html" target="_blank" rel="noopener">network mode</a>, a task definition parameter that sets how containers connect to the network. There are five modes, but the combinations you can use depend on the OS. Table 2 summarizes the supported OS and characteristics of each mode on EC2.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Mode</th><th>Linux on EC2</th><th>Windows on EC2</th><th>Characteristics</th></tr>
+</thead>
+<tbody>
+<tr><td>awsvpc</td><td>Supported</td><td>Supported</td><td>Each task gets its own elastic network interface (ENI) and private IP address. The recommended mode</td></tr>
+<tr><td>bridge</td><td>Supported</td><td>Not supported</td><td>Uses the Docker bridge driver. The default on Linux</td></tr>
+<tr><td>host</td><td>Supported</td><td>Not supported</td><td>Maps ports directly to the host ENI. No dynamic port mapping, and hostPort must be specified. You can't run multiple tasks from the same task definition on one instance</td></tr>
+<tr><td>none</td><td>Supported</td><td>Not supported</td><td>No external network connectivity</td></tr>
+<tr><td>default</td><td>Not supported</td><td>Supported</td><td>Uses the Docker nat driver. The default on Windows</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Five network modes: Linux and Windows support on EC2 and characteristics</p>
+<p>With Fargate, there is no choice. The service definition documentation states that the <code>awsvpc</code> mode is required when you use Fargate. Because a task in <code>awsvpc</code> mode is connected directly to its own ENI, the load balancer target group also uses the ip target type.</p>
+<h3>2.1 Prerequisites for an IPv6-only configuration</h3>
+<p>Task networking supports three IP configurations: IPv4, dual-stack (IPv4 and IPv6 together), and IPv6-only. IPv6-only is supported in the Asia Pacific (Seoul) Region as well, but it has the most prerequisites of the three.</p>
+<ul>
+<li>A dual-stack load balancer and IPv6 target groups are required</li>
+<li>Windows is not supported. An ECS-optimized Linux AMI and container agent 1.99.1 or later are required</li>
+<li><code>--enable-primary-ipv6</code> is required when you launch instances. Without it, tasks in host and bridge modes are not registered with the load balancer or AWS Cloud Map</li>
+<li>DNS64/NAT64 is required to communicate with IPv4 endpoints. Amazon ECR uses dual-stack URIs</li>
+<li>ECS Exec is not supported</li>
+</ul>
+<h3>2.2 Service-to-service connectivity: Service Connect, Cloud Map, and load balancers</h3>
+<p>There are three official options for connecting services: Service Connect, service discovery (DNS based on Cloud Map), and Amazon VPC Lattice, which provides service-to-service connectivity as a managed service. Separately, you can use ALB or NLB load balancing. Service Connect provides service discovery and a service mesh together through ECS configuration alone. It injects a proxy container into each task to handle service-to-service communication with short names and standard ports, and the feature itself has no additional charge. However, the proxy runs inside the task and shares the task's vCPU and memory with your workload, so you need to distinguish between having no charge and consuming no resources.</p>
+<p>There is one date to check when you plan a service mesh. <b>AWS App Mesh reaches end of support on September 30, 2026</b>, so you should exclude it from new architectures. Existing App Mesh-based configurations must be migrated to Service Connect or VPC Lattice.</p>
+<p><a href="https://aws.amazon.com/ko/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/" target="_blank" rel="noopener">Moving to Service Connect</a> is not a configuration change but a service re-creation event. A single ECS service can't belong to an App Mesh mesh and a Service Connect namespace at the same time, so you have to create the service again. If you need zero downtime, AWS officially recommends a blue/green approach in which you create a replica of the service and shift traffic to it gradually.</p>
+<p>The namespace itself also has a limit. The number of services that can run in a single namespace is fixed at 300. When you migrate an App Mesh with many services, don't move one mesh straight into one namespace, and first consider a split design that divides namespaces by domain. Service discovery has a separate limit as well. A service configured with service discovery is limited to 1,000 tasks per service because of the Cloud Map quota for instances per service.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Storage and platform options</h2></header><div class="prose">
+<h3>3.1 Storage: from ephemeral to persistent</h3>
+<p>A task gets ephemeral storage by default, and you attach a volume when you need persistence. Among <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_data_volumes.html" target="_blank" rel="noopener">the data volume options in the developer guide</a>, five are the main choices.</p>
+<ul>
+<li>Amazon EBS: Provisions a volume for each task automatically. Persistence depends on how the task runs. For tasks managed by a service, it is an ephemeral volume that is deleted when the task ends, but for standalone tasks, you can keep the volume. All three compute options (Fargate, EC2, and Managed Instances) are supported</li>
+<li>Amazon EFS: Persistent shared storage for Linux tasks. Supported on Fargate, EC2, and Managed Instances</li>
+<li>Amazon FSx for Windows File Server: Persistent storage for Windows tasks. EC2 only</li>
+<li>Docker volume: Persistent volumes for Linux and Windows. EC2 only</li>
+<li>bind mount: An ephemeral volume tied to the lifetime of the container. On Fargate, instead of mounting a host path, you use it to share the ephemeral storage allocated to the task (20 GiB by default, up to 200 GiB) among the containers in the task. The sourcePath parameter of host, which specifies a host path, is only for tasks hosted on EC2. (Supported on Fargate, EC2, and Managed Instances)</li>
+</ul>
+<p>The volume options table in the current documentation lists seven types in total, including Amazon FSx for NetApp ONTAP and Amazon S3 Files. Amazon S3 Files is a persistent volume that provides fast, cached access to S3 data through a file system interface, and it supports Linux tasks on Fargate and Managed Instances. Because the supported compute options differ for each volume, including the fact that FSx for Windows File Server and Docker volumes are EC2 only, the safe approach is to check the combination in the official table before you design.</p>
+<h3>3.2 Platform options: OS, architecture, GPU, and operational tools</h3>
+<p>Beyond compute and storage, six more factors shape your choice.</p>
+<ul>
+<li>OS and architecture: Linux and Windows, x86_64 and ARM64 (Graviton). ARM64 is Linux only, and on Fargate it requires platform version 1.4.0 or later</li>
+<li>GPU: NVIDIA and AMD. Fargate doesn't support GPUs, so you use them on Managed Instances or EC2</li>
+<li>Fargate platform version: A combination of kernel and container runtime versions. LATEST is the default when you don't specify one, and new tasks always launch on the most recent revision of that version</li>
+<li>ECS Exec: A debugging tool that gives you shell access to a running container. It is not supported in IPv6-only configurations</li>
+<li><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html" target="_blank" rel="noopener">Task placement</a>: EC2 supports both placement strategies, which decide how tasks are placed (binpack packs tasks together, random places them randomly, and spread distributes them evenly), and constraints, which are placement conditions. Managed Instances supports only constraints, without strategies. Even so, it allows only four of the built-in attributes: <code>ecs.subnet-id</code>, <code>ecs.availability-zone</code>, <code>ecs.instance-type</code>, and <code>ecs.cpu-architecture</code>. Fargate supports neither. For Managed Instances and Fargate, the platform spreads tasks across Availability Zones automatically</li>
+<li>Two layers of scaling: The number of tasks is handled by service auto scaling (four types: target tracking, step, scheduled, and predictive), and the capacity to run those tasks is handled by the cluster auto scaling of capacity providers. Of these, <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/predictive-auto-scaling.html" target="_blank" rel="noopener">predictive scaling</a> is a service-level feature that scales only the task layer of a service, independently of scaling the compute (EC2, Fargate) capacity</li>
+</ul>
+<p>Of the two scaling layers, <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/amazon-ecs-faster-autoscaling/" target="_blank" rel="noopener">service auto scaling</a> in the task layer has responded faster since June 18, 2026. The time to trigger a scale-out dropped 76%, from 363 seconds to 86 seconds, and the total scaling time, including provisioning new tasks, dropped 72%, from 386 seconds to 109 seconds. The improvement is based on high-resolution metrics at 20-second intervals and applies to Fargate, ECS Managed Instances, and EC2 alike. Standard CloudWatch charges apply to high-resolution metrics.</p>
+<p>When you run the capacity layer with an <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html" target="_blank" rel="noopener">EC2 Auto Scaling group capacity provider</a>, there are three management controls. When you turn on managed scaling, ECS creates the <code>CapacityProviderReservation</code> metric and a target tracking policy and manages instance scale-in and scale-out for you. Setting target capacity (valid range 1 to 100%) below 100 keeps that much spare capacity available at all times, so subsequent tasks launch faster. Managed termination protection keeps instances that are running tasks from being terminated by a scale-in. Its prerequisite is that instance scale-in protection is enabled on the Auto Scaling group.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Scenario-based selection guide and design limits</h2></header><div class="prose">
+<p>Table 3 turns the selection criteria covered in both parts, from compute and execution types in Part 1 to deployment and connectivity in this part, into recommended combinations by scenario.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Scenario</th><th>Recommended choice</th></tr>
+</thead>
+<tbody>
+<tr><td>I want to get a web service running as fast as possible</td><td>Express Mode: configured automatically from three inputs, and you can switch to managing it yourself later</td></tr>
+<tr><td>A standard service with minimal infrastructure operations</td><td>Fargate capacity provider</td></tr>
+<tr><td>I need GPUs or specialized hardware but want patching handled for me</td><td>ECS Managed Instances capacity provider</td></tr>
+<tr><td>I need full control over the OS and instances</td><td>EC2 Auto Scaling group capacity provider</td></tr>
+<tr><td>I use on-premises hardware as it is</td><td>EXTERNAL launch type (ECS Anywhere)</td></tr>
+<tr><td>One-off batch jobs / recurring runs</td><td>RunTask / EventBridge Scheduler scheduled tasks</td></tr>
+<tr><td>Most services that don't need gradual traffic control, and services without a load balancer</td><td>Rolling: the default, and the strategy that doesn't require a load balancer</td></tr>
+<tr><td>I want to shift traffic while validating a new version</td><td>Linear or canary for a gradual shift, built-in blue/green for validation first and then an immediate cutover</td></tr>
+<tr><td>I need a service mesh</td><td>Service Connect or VPC Lattice. App Mesh is excluded because its support ends on September 30, 2026</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Selection guide by scenario: compute, execution, deployment, and connectivity</p>
+<p>You should choose EXTERNAL (ECS Anywhere) in Table 3 with its <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html" target="_blank" rel="noopener">feature limitations</a> in mind. ELB load balancing, service discovery, the awsvpc network mode, capacity providers, and EFS volumes are not supported, so the official documentation also states that it is inefficient for web service workloads that receive inbound traffic.</p>
+<h3>4.1 Key service quotas</h3>
+<p>The last topic is the <a href="https://docs.aws.amazon.com/general/latest/gr/ecs-service.html" target="_blank" rel="noopener">service quotas</a> that set your design limits. Table 4 lists representative values based on the default for each Region.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Quota</th><th>Default</th><th>Adjustable</th></tr>
+</thead>
+<tbody>
+<tr><td>Clusters per account</td><td>10,000</td><td>Yes</td></tr>
+<tr><td>Services per cluster</td><td>5,000</td><td>No</td></tr>
+<tr><td>Tasks per service (desired count)</td><td>5,000</td><td>No</td></tr>
+<tr><td>Container instances per cluster</td><td>5,000</td><td>No</td></tr>
+<tr><td>Revisions per task definition family</td><td>1,000,000</td><td>No</td></tr>
+<tr><td>Fargate On-Demand vCPUs</td><td>6 (Spot has a separate 6)</td><td>Yes</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Representative service quotas: default values per Region</p>
+<p>The defaults in Table 4 are the initial quotas that AWS sets, and they are separate from the value actually applied to your account (the applied quota) and from the maximum you can request. In addition, a service configured with service discovery is limited to 1,000 tasks per service by the Cloud Map quota covered under service-to-service connectivity, so it reaches that limit before the 5,000 tasks per service in the table.</p>
+<p>Task launch rates have an upper limit as well. The number of tasks that the ECS scheduler can provision per service in one minute on Fargate is 500 in major Regions and 125 in other Regions (including Regions launched after May 20, 2025), and this quota can't be adjusted. For EC2 and External instances, the rate is also 500 per minute per service. At the account level, the Fargate On-Demand launch rate is limited separately to a sustained 20 per second with a burst of 100 (the default for major Regions, and you can request an increase). In a large scale-out of several hundred tasks, you run into this launch limit before the response time of auto scaling.</p>
+<p>There are two pitfalls. Task definition revisions still count toward the 1,000,000 limit even after you deregister or delete them. And the Fargate quota is based on the number of vCPUs, not the number of tasks, and the initial On-Demand vCPU value is only 6 (Spot has a separate 6). With 1 vCPU tasks, 6 concurrent tasks are enough to reach the limit, so for a new account it is a good idea to request an increase before your first load test or production deployment. You can request an increase for this value, and Fargate also raises it automatically based on your usage in each Region.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Closing</h2></header><div class="prose">
+<p>Let's look again at the third question raised at the start of Part 1: what to deploy with. If you don't need gradual traffic control, choose rolling, the default. If you want a gradual shift after validating with a small share of traffic, choose linear or canary, and if you want validation first and then an immediate cutover, choose built-in blue/green. AWS recommends built-in blue/green over the CodeDeploy approach.</p>
+<p>Now, to sum up both parts.</p>
+<p>1/ Leave the declaration to <code>requiresCompatibilities</code> in the task definition, and configure execution with capacity providers.</p>
+<p>2/ Choose compute based on how responsibility is shared across Fargate, Managed Instances, and EC2.</p>
+<p>3/ For deployment, choosing the one of the six strategies that fits your traffic shifting needs is the baseline for Amazon ECS as of August 2026.</p>
+<p>The figures and defaults in this post reflect the time of writing, so check the official documentation linked in the post for the latest values.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs_service-options.html" target="_blank" rel="noopener">Amazon ECS 서비스 배포 옵션 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/blue-green-deployment-how-it-works.html" target="_blank" rel="noopener">내장 Blue/Green 배포의 동작 방식 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/pause-lifecycle-hooks.html" target="_blank" rel="noopener">Amazon ECS 배포 pause 훅 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/07/amazon-ecs-action-logs/" target="_blank" rel="noopener">Amazon ECS Action Logs 발표 (What’s New)</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-networking.html" target="_blank" rel="noopener">Amazon ECS Task 네트워킹과 네트워크 모드 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://aws.amazon.com/ko/blogs/containers/migrating-from-aws-app-mesh-to-amazon-ecs-service-connect/" target="_blank" rel="noopener">App Mesh에서 Amazon ECS Service Connect로 마이그레이션 (AWS 컨테이너 블로그)</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/using_data_volumes.html" target="_blank" rel="noopener">Amazon ECS 데이터 볼륨 옵션 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement.html" target="_blank" rel="noopener">Amazon ECS Task 배치 (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/predictive-auto-scaling.html" target="_blank" rel="noopener">Amazon ECS predictive scaling (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/amazon-ecs-faster-autoscaling/" target="_blank" rel="noopener">Amazon ECS 서비스 오토스케일링 속도 개선 (What’s New)</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/asg-capacity-providers.html" target="_blank" rel="noopener">Auto Scaling group capacity provider (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-anywhere.html" target="_blank" rel="noopener">Amazon ECS Anywhere (개발자 가이드)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://docs.aws.amazon.com/general/latest/gr/ecs-service.html" target="_blank" rel="noopener">Amazon ECS 서비스 엔드포인트 및 할당량 (AWS 일반 참조)</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/ecs-design-02/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-09-04 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/ecs-design-02/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-09-04. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

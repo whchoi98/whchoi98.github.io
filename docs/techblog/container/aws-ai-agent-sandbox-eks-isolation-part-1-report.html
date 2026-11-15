@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS에서 AI 에이전트 실행 환경 격리하기 1부: Amazon EKS와 Agent Sandbox, 개념과 구성</title>
+<meta name="description" content="Agent Sandbox v1.0.5와 gVisor를 EKS 1.36 클러스터에 구성하고 runc 샌드박스와 gVisor 샌드박스에서 같은 보안 점검을 실행했습니다. 1부는 Agent Sandbox의 구조와 설치 순서, 신뢰할 수 없는 코드를 막는 격리 계층을 다룹니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-1/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-10-18</span><span class="l-en">Published 2026-10-18</span></span><span>Container</span><span><span class="l-ko">읽는 시간 15분</span><span class="l-en">15 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">AWS에서 AI 에이전트 실행 환경 격리하기 1부: Amazon EKS와 Agent Sandbox, 개념과 구성</span><span class="l-en">Isolating AI agent execution environments on AWS, Part 1: Amazon EKS and Agent Sandbox, concepts and setup</span></h1>
+<p class="thesis"><span class="l-ko">모델이 생성한 코드를 Amazon EKS에서 실행할 때 어느 계층이 무엇을 막는지 확인합니다. 점검한 네 항목 중 세 항목은 gVisor가 아니라 PodSpec의 보안 설정과 컨트롤러 기본값이 막았고 호스트에서 점검 프로세스가 보이는 것만 gVisor가 막았습니다. 따라서 gVisor를 도입하더라도 Pod 보안 설정은 그대로 갖춰야 합니다.</span><span class="l-en">This post checks which layer blocks what when model-generated code runs on Amazon EKS. Of the four items checked, three were blocked by the PodSpec security settings and the controller defaults rather than by gVisor, and gVisor blocked only the visibility of the check process from the host. So even if you adopt gVisor, you must keep the Pod security settings in place.</span></p>
+<div class="tags"><span>#Amazon EKS</span><span>#Agent Sandbox</span><span>#gVisor</span><span>#Kubernetes</span><span>#NetworkPolicy</span><span>#Amazon VPC CNI</span><span>#AI agents</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">Agent Sandbox란 무엇인가</a><a href="#ko-s3">테스트 환경</a><a href="#ko-s4">설치 순서 한눈에 보기</a><a href="#ko-s5">gVisor 전용 노드 그룹</a><a href="#ko-s6">Agent Sandbox 설치</a><a href="#ko-s7">같은 보안 설정, 다른 런타임</a><a href="#ko-s8">신뢰할 수 없는 코드로 격리 계층 확인</a><a href="#ko-s9">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">What is Agent Sandbox</a><a href="#en-s3">Test environment</a><a href="#en-s4">Installation order at a glance</a><a href="#en-s5">A dedicated gVisor node group</a><a href="#en-s6">Installing Agent Sandbox</a><a href="#en-s7">Same security settings, different runtimes</a><a href="#en-s8">Checking the isolation layers with untrusted code</a><a href="#en-s9">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>조직 안에서 AI 에이전트를 만드는 구성원이 빠르게 늘고 있습니다. 여러 팀이 각자 목적에 맞는 에이전트를 만들고 이 에이전트들은 EKS 클러스터의 Pod에서 모델이 생성한 코드를 자유롭게 실행합니다. 편리한 만큼, 검증되지 않은 코드가 공용 클러스터의 노드와 자격 증명 바로 옆에서 실행된다는 뜻이기도 합니다.</p>
+<p>조직 내에서 코드를 작성하고 실행하는 AI 에이전트를 Amazon EKS에 올리려면 두 가지 설계 원칙을 고려해야 합니다. 첫째, 모델이 생성한 코드의 호스트 커널 접근을 중재하고 IAM 자격 증명과 클러스터 내부 서비스에 대한 접근을 제한해야 합니다. 둘째, 격리에 따른 샌드박스 기동과 실행 비용을 측정하고 이를 줄이는 방법을 함께 설계해야 합니다.</p>
+<p>이 글은 Kubernetes SIG Apps의 <a href="https://github.com/kubernetes-sigs/agent-sandbox" target="_blank" rel="noopener">Agent Sandbox</a> v1.0.5와 gVisor를 EKS 1.36 클러스터에 구성하고 runc 샌드박스와 gVisor 샌드박스에서 동일한 보안 점검과 성능 측정을 수행해 그 결과를 비교합니다. 1부에서는 Agent Sandbox의 구조와 설치 순서, 그리고 신뢰할 수 없는 코드를 막는 격리 계층을 다룹니다. 2부에서는 NetworkPolicy와 DNS, Warm Pool, 격리 비용, 수명 주기, 에이전트 연동처럼 운영 환경에 올릴 때 확인할 내용을 다룹니다.</p>
+<p><b><em>시리즈 블로그 보기</em></b></p>
+<ul>
+<li><em>AWS에서 AI 에이전트 실행 환경 격리하기 1부: Amazon EKS와 Agent Sandbox, 개념과 구성</em></li>
+<li><a href="https://whchoi98.github.io/docs/techblog/container/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 2부: Amazon EKS와 Agent Sandbox, 개념과 구성</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-3/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 3부: 에이블리의 Amazon EKS 기반 Agent Sandbox 운영 사례</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-4/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 4부: Amazon Bedrock AgentCore Runtime, 관리형 샌드박스의 동작과 선택 기준</em></a></li>
+</ul>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Agent Sandbox란 무엇인가</h2></header><div class="prose">
+<p>Agent Sandbox는 AI 에이전트가 생성한 코드를 실행할 격리 환경을 Kubernetes 위에서 선언형으로 관리하기 위한 오픈소스 프로젝트입니다. Kubernetes SIG Apps가 관리하며 2026년 3월 <a href="https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/" target="_blank" rel="noopener">Kubernetes 블로그</a>에서 소개됐습니다. 핵심 아이디어는 두 가지입니다. 샌드박스 하나를 Sandbox라는 커스텀 리소스로 표현해 수명 주기를 컨트롤러가 관리하게 합니다. 강한 격리는 RuntimeClass로 지정하는 gVisor나 Kata Containers 같은 런타임에 맡깁니다.</p>
+<p>에이전트의 실행 환경은 일반적인 웹 서버와 성격이 다릅니다. 세션마다 하나씩 필요한 상태 있는 단일 인스턴스이고 대부분의 시간은 유휴 상태이며 무엇보다 신뢰할 수 없는 코드를 실행합니다. 이런 워크로드는 StatefulSet(<code>replicas: 1</code>), headless Service, PersistentVolumeClaim을 조합해 구성할 수 있지만 규모가 커지면 운영이 어려워집니다. Agent Sandbox는 이 조합을 하나의 API로 묶고 그 위에 세 가지 확장 리소스를 얹습니다. SandboxTemplate(Pod 명세와 보안 기본값을 담은 샌드박스 템플릿), Warm Pool(미리 띄워 둔 대기 Sandbox의 풀), SandboxClaim(Warm Pool에서 Sandbox 하나를 할당받는 요청)입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>리소스</th><th>API 그룹</th><th>역할</th></tr>
+</thead>
+<tbody>
+<tr><td>Sandbox</td><td><code>agents.x-k8s.io/v1beta1</code></td><td>단일 Pod, 선택적 headless Service, PVC의 수명 주기(만료, suspend/resume)</td></tr>
+<tr><td>SandboxTemplate</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>Pod 명세와 보안 기본값, 템플릿당 NetworkPolicy 1개</td></tr>
+<tr><td>SandboxWarmPool</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>템플릿으로 미리 띄워 둔 대기 Sandbox의 개수(<code>replicas</code>)</td></tr>
+<tr><td>SandboxClaim</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>Warm Pool에서 Sandbox 하나를 할당받는 요청(<code>warmPoolRef</code> 필수)</td></tr>
+<tr><td>sandbox-router</td><td>Deployment</td><td><code>X-Sandbox-ID</code> 헤더로 요청을 해당 Sandbox Pod에 전달하는 리버스 프록시</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> Agent Sandbox v1.0.5의 리소스와 구성 요소 (CRD 4종은 모두 v1beta1)</p>
+<p>SandboxClaim은 템플릿을 직접 참조하지 않고 항상 Warm Pool을 참조합니다. <code>replicas: 0</code>인 Warm Pool에 Claim을 걸면 대기 Pod 없이 새 Sandbox를 만드는 Cold Start (콜드 스타트)가 됩니다. 덕분에 같은 템플릿으로 Cold Start와 Warm Pool을 공정하게 비교할 수 있습니다. 클라이언트는 Python SDK(<code>k8s-agent-sandbox</code>)로 Claim을 만들고 명령 실행과 파일 입출력은 sandbox-router를 거칩니다. 리소스 사이의 참조 관계와 요청 경로는 그림 1과 같습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig01-eks-agent-sandbox-gvisor-part1-fig01-resource-model-1.png" alt="사용자가 만드는 리소스(왼쪽)와 컨트롤러가 만드는 리소스(오른쪽), 그리고 제어 경로와 데이터 경로" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 1.</b> 사용자가 만드는 리소스(왼쪽)와 컨트롤러가 만드는 리소스(오른쪽), 그리고 제어 경로와 데이터 경로</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>테스트 환경</h2></header><div class="prose">
+<p>핵심 전제는 Managed Node Group(관리형 노드 그룹)을 사용할 수 있는 EKS 클러스터입니다. 그 이유는 gVisor 전용 노드 그룹을 만드는 파트에서 설명합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>이 테스트에서 사용한 값</th><th>비고</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS 클러스터</td><td>1.36, Managed Node Group 기반</td><td>Auto Mode 아님</td></tr>
+<tr><td>로컬 도구</td><td><code>kubectl</code> 1.36, AWS CLI 2.33, Python 3.12</td><td>SDK는 Python 3.11 이상 필요</td></tr>
+<tr><td>클러스터 AddOn</td><td>VPC CNI, EKS Pod Identity Agent, EBS CSI</td><td>VPC CNI는 NetworkPolicy, Pod Identity Agent는 EBS CSI 컨트롤러 권한, EBS CSI는 2부의 수명 주기 파트에서 추가</td></tr>
+<tr><td>IAM 권한</td><td>EKS, EC2, IAM, SSM</td><td>노드 그룹 생성과 노드 점검에 필요</td></tr>
+<tr><td>Agent Sandbox</td><td>v1.0.5</td><td>컨트롤러, sandbox-router, Python SDK(<code>k8s-agent-sandbox==1.0.5.post1</code>)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 테스트 환경과 사전 준비 (버전은 2026년 10월 기준)</p>
+<p>테스트 환경의 전체 구성은 그림 2와 같습니다. 워크스테이션의 에이전트는 Amazon Bedrock을 호출하고 SDK는 Kubernetes API로 SandboxClaim을 만듭니다. 모델이 생성한 명령은 sandbox-router를 거쳐 gVisor 전용 노드의 샌드박스 Pod에서만 실행됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig02-eks-agent-sandbox-gvisor-part1-fig02-architecture-1.png" alt="테스트 구성 (컨트롤러와 router는 기존 system 노드, 샌드박스 Pod는 gVisor 전용 노드에 배치)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 2.</b> 테스트 구성 (컨트롤러와 router는 기존 system 노드, 샌드박스 Pod는 gVisor 전용 노드에 배치)</figcaption></figure>
+<p>샌드박스 Pod는 모두 Private Subnet에 배치했고 테스트는 외부 노출 없이 <code>kubectl port-forward</code>와 VPC 내부 경로만 사용했습니다. 에이전트 UI를 외부에 공개한다면 Amazon CloudFront, Application Load Balancer, 에이전트 Pod 순서로 연결하고 샌드박스와 router는 노출하지 않습니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>설치 순서 한눈에 보기</h2></header><div class="prose">
+<p>전체 설치는 노드와 네트워크를 먼저 준비하고 Agent Sandbox를 설치한 뒤 샌드박스를 구성하는 순서로 진행합니다. 순서가 중요한 이유는 두 가지입니다. RuntimeClass와 템플릿이 Pod를 배치할 gVisor 전용 노드가 먼저 준비되어 있어야 하고 VPC CNI의 NetworkPolicy를 활성화하지 않은 채 샌드박스를 실행하면 템플릿이 만든 정책이 적용되지 않기 때문입니다. 그림 3과 표 3에 이 글에서 사용한 설치 순서와 단계별 핵심 설정을 정리했습니다. 7단계와 8단계의 세부 내용은 2부에서 다룹니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig03-eks-agent-sandbox-gvisor-part1-fig03-install-order-1.png" alt="설치 순서 (청록 글자는 선택 설정)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 3.</b> 설치 순서 (청록 글자는 선택 설정)</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>순서</th><th>단계</th><th>핵심 설정</th><th>확인 방법</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>시작 템플릿 작성</td><td>nodeadm <code>NodeConfig</code>로 <code>runsc</code> 등록, gVisor 번들 sha512 검증, IMDSv2 필수와 홉 제한 1</td><td>노드 그룹 생성 후 함께 확인</td></tr>
+<tr><td>2</td><td>gVisor 전용 노드 그룹 생성</td><td><code>sandbox-runtime=gvisor</code> 레이블, <code>NoSchedule</code> taint</td><td>노드 그룹 ACTIVE, Run Command로 <code>runsc</code> 등록과 IMDS 옵션 확인</td></tr>
+<tr><td>3</td><td>RuntimeClass 생성</td><td><code>handler: runsc</code>, <code>scheduling</code>의 nodeSelector와 toleration</td><td><code>runtimeClassName: gvisor</code> Pod가 gVisor 노드에 배치되는지 확인</td></tr>
+<tr><td>4</td><td>VPC CNI NetworkPolicy 활성화</td><td><code>enableNetworkPolicy: "true"</code></td><td>AddOn <code>configurationValues</code>의 <code>enableNetworkPolicy</code>, <code>amazon-vpc-cni</code> ConfigMap의 <code>enable-network-policy-controller</code>가 <code>true</code></td></tr>
+<tr><td>5</td><td>Agent Sandbox 컨트롤러 설치</td><td><code>sandbox-with-extensions.yaml</code> v1.0.5</td><td>CRD 4종 <code>v1beta1</code>, <code>--extensions</code> 플래그</td></tr>
+<tr><td>6</td><td>sandbox-router 배포</td><td>Go 구현, 이미지 <code>v1.0.5</code> 고정, <code>--response-header-timeout=180s</code></td><td>router Deployment의 이미지와 인자</td></tr>
+<tr><td>7</td><td>SandboxTemplate, Warm Pool 생성</td><td><code>runtimeClassName: gvisor</code>, 필요하면 Route 53 Resolver용 사용자 정의 <code>networkPolicy</code>와 EBS CSI AddOn</td><td>Warm Pool 대기 Pod Ready, 템플릿당 PolicyEndpoint 1개</td></tr>
+<tr><td>8</td><td>router 접근 제한, 에이전트 연결</td><td>router 8080 포트 Ingress를 에이전트 네임스페이스 레이블로 제한, port-forward 권한은 RBAC로 제한. 클러스터 안의 에이전트는 Direct 연결, 이 테스트의 워크스테이션은 Tunnel 모드</td><td>레이블 없는 네임스페이스에서 router 연결 차단</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 설치 순서와 단계별 확인 항목</p>
+<p><b>예제 범위:</b> 아래 코드는 설치의 핵심 설정을 발췌한 것입니다. 전체 환경을 재현하려면 gVisor 설치와 검증 셸 스크립트를 포함한 MIME 사용자 데이터와 시작 템플릿의 메타데이터 옵션이 추가로 필요합니다. 비교용 Sandbox와 SandboxTemplate, Warm Pool의 전체 매니페스트, router 배포 설정도 필요합니다. 이 글에는 해당 전체 파일이 포함되어 있지 않습니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>gVisor 전용 노드 그룹</h2></header><div class="prose">
+<p>gVisor를 사용하려면 노드의 containerd에 <code>runsc</code> 런타임을 등록해야 합니다. 그런데 <a href="https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html" target="_blank" rel="noopener">EKS Auto Mode 노드</a>는 사용자 지정 AMI를 지원하지 않고 노드에 소프트웨어를 직접 설치할 수도 없어 이 등록이 불가능합니다. 그래서 Managed Node Group 기반 클러스터에 gVisor 전용 노드 그룹을 추가했습니다. Auto Mode 클러스터에도 Managed Node Group을 함께 둘 수는 있지만 그 노드를 위해 VPC CNI, kube-proxy, CoreDNS AddOn을 별도로 설치해야 합니다. Karpenter를 직접 설치해 운영하는 클러스터라면 Managed Node Group 대신 Karpenter로도 같은 노드를 구성할 수 있습니다. <a href="https://karpenter.sh/docs/concepts/nodeclasses/" target="_blank" rel="noopener">EC2NodeClass</a>의 <code>userData</code>는 Karpenter가 생성하는 사용자 데이터에 병합되므로 AL2023의 <code>NodeConfig</code>로 <code>runsc</code>를 등록할 수 있습니다. NodePool에 같은 레이블과 taint를 지정하면 RuntimeClass도 그대로 사용합니다. 단, EKS Auto Mode에 내장된 Karpenter는 노드 사용자 데이터를 바꿀 수 없어 해당하지 않습니다.</p>
+<p>Amazon Linux 2023 노드에서는 nodeadm이 사용자 데이터의 <code>NodeConfig</code>를 containerd 설정에 병합합니다. 시작 템플릿의 사용자 데이터는 MIME multipart 형식으로 작성해 두 부분으로 나눴습니다. 첫 번째 부분은 <code>NodeConfig</code>로 <code>runsc</code> 런타임을 등록하고 두 번째 부분인 셸 스크립트는 버전을 고정한 gVisor 번들(release-20260928.0)을 sha512로 검증한 뒤 <code>/usr/local/bin</code>에 설치합니다. 테스트에 사용한 AMI의 containerd는 2.x(설정 버전 3)라 <code>io.containerd.cri.v1.runtime</code> 경로를 사용했습니다. containerd 1.x는 플러그인 경로가 다르므로 AMI의 containerd 버전에 맞춰야 합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># userdata.mime의 첫 번째 부분 (Content-Type: application/node.eks.aws)
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  containerd:
+    config: |
+      [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc]
+        runtime_type = 'io.containerd.runsc.v1'</code></pre></div>
+<p>시작 템플릿에는 인스턴스 메타데이터 서비스(IMDS)의 v2 필수 설정과 응답 홉 제한 1을 명시합니다. <a href="https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html" target="_blank" rel="noopener">EKS 모범 사례 가이드</a>에 따르면 이 두 설정은 Pod가 노드의 인스턴스 프로파일에 접근하지 못하게 합니다. 테스트 클러스터의 기존 노드는 홉 제한이 2였으므로 새 노드 그룹에서는 이 값을 반드시 명시해야 합니다. 노드 그룹에는 <code>sandbox-runtime=gvisor</code> 레이블과 <code>NoSchedule</code> taint를 붙입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws eks create-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name sandbox-gvisor \
+  --node-role "$NODE_ROLE_ARN" --subnets $PRIVATE_SUBNETS \
+  --ami-type AL2023_x86_64_STANDARD --instance-types m7i.xlarge \
+  --scaling-config minSize=0,maxSize=3,desiredSize=2 \
+  --release-version 1.36.4-20260930 \
+  --launch-template name=sandbox-gvisor-lt,version=1 \
+  --labels sandbox-runtime=gvisor \
+  --taints key=sandbox-runtime,value=gvisor,effect=NO_SCHEDULE</code></pre></div>
+<p>RuntimeClass의 <code>scheduling</code> 필드에 nodeSelector와 toleration을 넣으면 <code>runtimeClassName: gvisor</code>를 지정한 Pod가 gVisor 전용 노드 그룹에 배치됩니다. 템플릿마다 이 설정을 반복할 필요도 없습니다. 다만 이 설정이 다른 런타임의 Pod를 모두 차단하지는 않습니다. 같은 taint를 허용하는 toleration을 가진 runc Pod도 해당 노드에 배치될 수 있습니다. 전용 노드 사용을 강제하려면 Pod 생성 권한과 허용할 RuntimeClass와 toleration에 대한 admission 정책을 함께 관리해야 합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata: {name: gvisor}
+handler: runsc
+scheduling:
+  nodeSelector: {sandbox-runtime: gvisor}
+  tolerations:
+  - {key: sandbox-runtime, operator: Equal, value: gvisor, effect: NoSchedule}</code></pre></div>
+<p>노드 그룹이 ACTIVE가 되기까지 약 2분이 걸렸습니다. 새로운 노드 2대는 containerd 2.2.7과 커널 6.18.51로 올라왔습니다. AWS Systems Manager Run Command로 점검하니 <code>runsc</code>가 설치되고 containerd 설정에 등록되어 있었습니다. IMDS 옵션도 의도대로 required와 홉 제한 1이었습니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Agent Sandbox 설치</h2></header><div class="prose">
+<p>Agent Sandbox의 기본 네트워크 격리는 SandboxTemplate이 만드는 NetworkPolicy에 의존합니다. NetworkPolicy는 CNI가 실제로 적용해야 효과가 있으므로 <a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html" target="_blank" rel="noopener">Amazon VPC CNI AddOn</a>에서 <code>enableNetworkPolicy</code>를 먼저 활성화합니다. 테스트 클러스터는 이 값이 비어 있었고 AddOn 버전과 IRSA 역할은 그대로 둔 채 설정만 바꿨습니다. 활성화 여부는 AddOn의 <code>configurationValues</code>와 <code>amazon-vpc-cni</code> ConfigMap으로 확인합니다. 테스트에 사용한 VPC CNI AddOn <code>v1.22.4-eksbuild.3</code>은 <code>aws-eks-nodeagent</code> 컨테이너와 <code>policyendpoints</code> CRD를 활성화 전에도 배포했습니다. 비활성화 상태에서는 컨테이너가 하나라는 EKS 문서의 설명과 다르므로, 이 둘이 있다는 것만으로는 활성화됐다고 판단할 수 없습니다. 이 단계를 생략하면 어떤 일이 생기는지는 2부의 NetworkPolicy 파트에서 다룹니다.</p>
+<p><b>Pod 시작 시점의 정책 적용:</b> NetworkPolicy 기능 활성화와 시작 직후의 통신 차단은 별도 설정입니다. <code>NETWORK_POLICY_ENFORCING_MODE=standard</code>에서는 정책 적용 전까지 통신이 기본 허용됩니다. <code>strict</code>에서는 기본 차단으로 시작하며 DNS와 router 등 필요한 경로의 허용 정책을 준비해야 합니다. CoreDNS에도 필요한 정책이 있어야 하고 hostNetwork Pod에는 이 기본 차단이 적용되지 않습니다. 본문에는 시험 당시 enforcing mode 기록이 없어 Pod 시작 직후부터 격리가 유지됐다고 판단할 수 없습니다. 재현 시에는 aws-node DaemonSet의 해당 환경 변수와 실제 통신 결과를 함께 기록해야 합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws eks update-addon --cluster-name "$CLUSTER_NAME" --addon-name vpc-cni \
+  --addon-version v1.22.4-eksbuild.3 --service-account-role-arn &lt;기존 IRSA 역할&gt; \
+  --configuration-values '{"enableNetworkPolicy":"true"}' --resolve-conflicts PRESERVE
+
+# 활성화 확인: 두 값이 모두 true여야 합니다
+aws eks describe-addon --cluster-name "$CLUSTER_NAME" --addon-name vpc-cni \
+  --query addon.configurationValues --output text
+kubectl -n kube-system get cm amazon-vpc-cni \
+  -o jsonpath='{.data.enable-network-policy-controller}'</code></pre></div>
+<p>컨트롤러는 릴리스 매니페스트를 버전으로 고정해 설치합니다. Kubernetes 블로그의 Quick start가 안내하는 <code>manifest.yaml</code> 경로는 v1.x 릴리스에서 404를 반환하므로 <code>sandbox-with-extensions.yaml</code>을 사용합니다. 설치가 끝나면 CRD 4종이 모두 <code>v1beta1</code>로 등록되고 <code>--extensions</code> 플래그를 가진 컨트롤러 Deployment 하나가 남습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>kubectl apply --server-side -f \
+  https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.5/sandbox-with-extensions.yaml</code></pre></div>
+<p>sandbox-router는 기본 매니페스트가 사용하는 Go 구현을 택했고 업스트림 <code>sandbox-router/deploy</code> 매니페스트에서 두 가지만 바꿨습니다. 이미지 태그를 <code>:latest</code>에서 <code>v1.0.5</code>로 고정하고 <code>--response-header-timeout=180s</code>를 추가했습니다. Go router는 기본 매니페스트의 <code>--proxy-timeout=180s</code>와 별개로 응답 헤더를 30초까지만 기다립니다. 샌드박스의 <code>/execute</code>는 명령이 끝나야 응답 헤더를 보내므로, 이 값을 늘리지 않으면 45초짜리 명령이 30초에 502로 끊깁니다. 빌드나 테스트처럼 오래 걸리는 명령을 실행한다면 이 플래그를 함께 늘려야 합니다.</p>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>같은 보안 설정, 다른 런타임</h2></header><div class="prose">
+<p>먼저 템플릿 없이 core Sandbox 두 개의 런타임을 달리해 비교합니다. 두 Pod 모두 Pod Security Admission의 restricted 수준을 따릅니다. UID 1000으로 실행되고 모든 capability를 제거했으며 루트 파일 시스템은 읽기 전용입니다. hello-gvisor에는 <code>runtimeClassName: gvisor</code>를 지정하고 hello-runc에는 전용 노드의 taint를 허용하는 toleration을 붙입니다. toleration만으로 동일 노드 배치가 보장되지는 않으므로, 재현 시에는 두 Pod의 nodeSelector에 같은 <code>kubernetes.io/hostname</code> 값을 지정하고 생성 후 <code>spec.nodeName</code>이 일치하는지 확인해야 합니다. 두 Pod가 Ready가 되면 각 샌드박스 안에서 커널, CPU 수, seccomp 상태, 커널 모듈 목록을 확인합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>관찰 항목</th><th>runc</th><th>gVisor</th></tr>
+</thead>
+<tbody>
+<tr><td><code>uname -r</code></td><td>6.18.51-120.162.amzn2023 (Host Kernel)</td><td>4.19.0-gvisor</td></tr>
+<tr><td>컨테이너에 보이는 CPU, 메모리</td><td>4개, 16 GB (호스트 전체)</td><td>CPU 2개 (quota 기준, 최솟값 2), 메모리 1 GiB (limit 기준)</td></tr>
+<tr><td><code>/proc/modules</code></td><td>2,869바이트 (호스트 모듈 목록)</td><td>0바이트</td></tr>
+<tr><td>루트 파일 시스템</td><td>overlay, 호스트 스냅샷 경로 노출</td><td>9p 마운트 (Gofer 소유, directfs)</td></tr>
+<tr><td>호스트 <code>ps</code>에서 앱 프로세스</td><td>보임 (UID 1000이 노드의 <code>ec2-user</code>로 표시)</td><td>보이지 않음 (<code>runsc-sandbox</code>, <code>runsc-gofer</code>만 표시)</td></tr>
+<tr><td><code>kubectl port-forward pod/...</code></td><td>동작</td><td>실패</td></tr>
+<tr><td>Ready까지 걸린 시간 (이미지 캐시 후)</td><td>2.7초</td><td>2.7초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 동일한 보안 설정으로 런타임을 달리한 두 Sandbox의 관찰 결과</p>
+<p>표 4는 본문에 기록된 관찰값입니다. 동일 노드 배치를 입증하는 Pod 명세와 <code>spec.nodeName</code> 출력은 제시되어 있지 않습니다. 기동 시간의 반복 횟수, 측정 시작과 종료 기준, 통계값 종류도 제시되어 있지 않습니다. 따라서 2.7초를 평균이나 중앙값으로 해석하거나 두 런타임의 기동 성능이 같다는 결론으로 일반화하지 않습니다.</p>
+<p>그림 4는 두 런타임에서 시스템 콜, 파일 시스템, 네트워크가 지나는 경로를 비교합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig04-eks-agent-sandbox-gvisor-part1-fig04-runtime-boundary.png" alt="runc와 gVisor의 격리 경계 (청록 글자는 gVisor 전용 동작)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 4.</b> runc와 gVisor의 격리 경계 (청록 글자는 gVisor 전용 동작)</figcaption></figure>
+<p>이번 환경에서는 gVisor 내부의 앱 프로세스가 호스트의 일반 앱 프로세스로 표시되지 않았습니다. 사용자 공간 커널인 Sentry가 애플리케이션 시스템 콜을 처리하며 호출을 호스트 커널에 그대로 전달하지 않습니다. 다만 Sentry 자체는 동작에 필요한 제한된 호스트 시스템 콜을 사용합니다. 컨테이너 파일 시스템은 별도 프로세스인 Gofer가 소유합니다. <code>kubectl port-forward</code>가 실패하는 이유도 같은 구조에서 나옵니다. containerd는 Pod의 네트워크 네임스페이스에서 localhost:8888에 연결을 시도합니다. 그러나 gVisor는 Sentry 안의 사용자 공간 네트워크 스택에서 대기하므로 호스트 쪽에는 연결을 받을 소켓이 없습니다. SDK의 Tunnel 모드가 동작하는 이유는 샌드박스 Pod 대신 runc로 실행되는 router Service로 터널을 열기 때문입니다. 따라서 이 실패는 Sentry 네트워크 스택의 부작용일 뿐 접근 통제가 아닙니다. router로 port-forward하면 같은 샌드박스에 그대로 도달합니다.</p>
+<p>seccomp 결과도 달랐습니다. runc 컨테이너의 <code>/proc/self/status</code>는 <code>Seccomp: 2</code>(RuntimeDefault 적용)였지만 gVisor 안에서는 0으로 보였습니다. <a href="https://github.com/google/gvisor/blob/release-20260928.0/runsc/config/flags.go" target="_blank" rel="noopener">runsc 설정</a>의 <code>--oci-seccomp</code> 플래그는 기본값이 false라서 Pod의 seccomp 프로파일이 샌드박스 내부에 적용되지 않습니다. 대신 Sentry 프로세스 자체가 호스트 쪽의 제한된 seccomp 환경에서 실행됩니다. Pod Security Admission의 seccomp 요건은 충족하지만 필터가 걸리는 경계가 runc와 다르다는 점은 보안 검토 시 인지해 두시기를 권고드립니다.</p>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>신뢰할 수 없는 코드로 격리 계층 확인</h2></header><div class="prose">
+<p>이제 Python SDK로 Warm Pool에서 샌드박스를 할당받아 신뢰할 수 없는 코드를 실행합니다. 런타임별로 <code>replicas: 3</code>인 Warm Pool과 <code>replicas: 0</code>인 Cold Start용 풀을 하나씩 두었습니다. 점검 스크립트는 <a href="https://devopscube.com/kubernetes-agent-sandbox-tutorial/" target="_blank" rel="noopener">devopscube 튜토리얼</a>이 공개한 <code>untrusted-code.py</code>를 원본 그대로 사용했습니다. 이 스크립트는 <code>/etc/shadow</code> 읽기, <code>setuid(0)</code> 호출, ServiceAccount 토큰 읽기를 시도한 뒤 45초 동안 대기해 호스트에서 자신이 보이는지 확인할 시간을 줍니다.</p>
+<p>아래 예제는 router와 두 Warm Pool이 준비된 환경을 전제로 합니다. 참조한 튜토리얼의 <code>untrusted-code.py</code>를 로컬 작업 디렉터리에 저장한 다음, 그 내용을 읽어 샌드박스로 전송합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>from pathlib import Path
+from k8s_agent_sandbox import SandboxClient
+from k8s_agent_sandbox.models import SandboxLocalTunnelConnectionConfig
+
+code = Path("untrusted-code.py").read_text(encoding="utf-8")
+
+client = SandboxClient(connection_config=SandboxLocalTunnelConnectionConfig())  # Tunnel 모드
+for pool in ["python-runc-warm", "python-gvisor-warm"]:
+    sandbox = client.create_sandbox(warmpool=pool, namespace="sandbox-lab")
+    try:
+        sandbox.files.write("untrusted-code.py", code)
+        print(sandbox.commands.run("python3 untrusted-code.py", timeout=90).stdout)
+    finally:
+        sandbox.terminate()</code></pre></div>
+<p>스크립트가 대기하는 사이 노드에서 해당 프로세스가 보이는지는 Systems Manager Run Command로 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>점검</th><th>runc</th><th>gVisor</th><th>막은 계층</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/etc/shadow</code> 읽기</td><td>차단</td><td>차단</td><td>파일 접근 권한, 비루트 UID와 GID, capability 제한</td></tr>
+<tr><td><code>setuid(0)</code></td><td>차단</td><td>차단</td><td>비루트 UID와 CAP_SETUID를 포함한 capability 제거</td></tr>
+<tr><td>ServiceAccount 토큰 읽기</td><td>파일 없음</td><td>파일 없음</td><td>템플릿 컨트롤러의 <code>automountServiceAccountToken: false</code> 기본값</td></tr>
+<tr><td>호스트에서 점검 프로세스 확인</td><td>보임</td><td>보이지 않음</td><td>gVisor</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 동일한 점검 스크립트의 런타임별 실행 결과</p>
+<p><code>runAsNonRoot</code>는 비루트 실행을 요구하고 <code>runAsUser: 1000</code>은 실행 UID를 지정합니다. <code>/etc/shadow</code> 읽기는 파일 소유권과 권한, 프로세스의 UID, GID, capability에 좌우됩니다. 이 실험의 <code>setuid(0)</code> 실패는 비루트 실행과 <code>CAP_SETUID</code>를 포함한 capability 제거를 함께 보아야 합니다. <code>allowPrivilegeEscalation: false</code>는 NoNewPrivs를 설정해 setuid 실행 파일 등을 통한 추가 권한 획득을 제한하는 별도 보강입니다. 단일 점검 결과만으로 각 설정의 기여도를 분리해 입증한 것은 아닙니다.</p>
+<p>이번 점검은 기본 권한 제한과 런타임별 노출 차이를 확인합니다. 호스트의 프로세스 목록에서 앱이 보이지 않는다는 관찰만으로 격리의 안전성을 입증하지는 않으며 컨테이너 탈출 취약점이나 호스트 커널 공격에 대한 검증은 포함하지 않습니다.</p>
+<p>네 항목 중 세 항목은 gVisor가 아닌 PodSpec의 보안 설정이 막았고 runc에서도 결과가 같았습니다. ServiceAccount 토큰은 템플릿에 명시하지 않았는데도 마운트되지 않았습니다. SandboxTemplate을 거쳐 만든 Pod에는 컨트롤러가 <code>automountServiceAccountToken: false</code>를 기본값으로 넣기 때문입니다. gVisor는 Sentry를 통해 애플리케이션의 시스템 콜을 중재하고 호스트 커널에 직접 노출되는 공격 표면을 줄입니다. 그림 5에 4개 계층과 계층별로 막힌 항목을 정리했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig05-eks-agent-sandbox-gvisor-part1-fig05-defense-layers.png" alt="신뢰할 수 없는 코드를 막는 4개 계층과 계층별 시험 결과 (NetworkPolicy와 전용 노드 그룹 계층의 시험은 2부에서 다룹니다)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 5.</b> 신뢰할 수 없는 코드를 막는 4개 계층과 계층별 시험 결과 (NetworkPolicy와 전용 노드 그룹 계층의 시험은 2부에서 다룹니다)</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>마치며</h2></header><div class="prose">
+<p>1부에서는 첫 번째 설계 원칙인 격리를 계층별로 확인했습니다. 이번 점검에서 Pod 보안 설정과 컨트롤러 기본값은 권한 변경과 파일, 토큰 접근 시도를 제한했습니다. gVisor는 앱의 시스템 콜을 중재해 호스트 커널에 대한 직접 노출을 줄입니다. 시험한 네 항목 중 세 항목은 gVisor가 아니라 PodSpec의 보안 설정과 컨트롤러 기본값이 보호했기 때문에, gVisor를 도입하더라도 Pod 보안 설정은 그대로 갖춰야 합니다. 나머지 두 계층인 NetworkPolicy와 전용 노드 그룹의 IMDS 설정은 설치 단계에서 준비해 두었습니다.</p>
+<p>2부에서는 이 두 계층이 실제로 어떻게 동작하는지 확인하고 두 번째 설계 원칙인 격리 비용과 그 상쇄 방법을 측정 결과로 살펴봅니다. 에이전트를 Amazon Bedrock과 연결했을 때의 역할 분리와 sandbox-router 보안도 함께 다룹니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>The number of people building AI agents inside organizations is growing quickly. Teams build agents for their own purposes, and those agents freely run model-generated code in Pods on an EKS cluster. That convenience also means that unverified code runs right next to the nodes and credentials of a shared cluster.</p>
+<p>Running AI agents that write and execute code on Amazon EKS inside an organization calls for two design principles. First, you must mediate the access that model-generated code has to the host kernel and restrict its access to IAM credentials and in-cluster services. Second, you must measure the sandbox startup and execution cost that isolation adds, and design ways to reduce that cost along with the isolation.</p>
+<p>This post sets up <a href="https://github.com/kubernetes-sigs/agent-sandbox" target="_blank" rel="noopener">Agent Sandbox</a> v1.0.5 from Kubernetes SIG Apps and gVisor on an EKS 1.36 cluster, runs the same security checks and performance measurements in runc sandboxes and gVisor sandboxes, and compares the results. Part 1 covers the architecture of Agent Sandbox, the installation order, and the isolation layers that stop untrusted code. Part 2 covers what to verify before going to production, such as NetworkPolicy and DNS, warm pools, the cost of isolation, lifecycle, and agent integration.</p>
+<p><b><em>Posts in this series</em></b></p>
+<ul>
+<li><em>Isolating AI agent execution environments on AWS, Part 1: Amazon EKS and Agent Sandbox, concepts and setup</em></li>
+<li><a href="https://whchoi98.github.io/docs/techblog/container/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 2: Amazon EKS and Agent Sandbox, concepts and setup</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-3/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 3: How ABLY operates Agent Sandbox on Amazon EKS</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-4/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 4: Amazon Bedrock AgentCore Runtime, how the managed sandbox works and how to choose</em></a></li>
+</ul>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>What is Agent Sandbox</h2></header><div class="prose">
+<p>Agent Sandbox is an open source project for declaratively managing, on Kubernetes, the isolated environments that run code generated by AI agents. Kubernetes SIG Apps maintains it, and it was introduced on the <a href="https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/" target="_blank" rel="noopener">Kubernetes blog</a> in March 2026. It rests on two core ideas. Each sandbox is represented as a custom resource called Sandbox, so that a controller manages its lifecycle. Strong isolation is left to a runtime such as gVisor or Kata Containers, selected through a RuntimeClass.</p>
+<p>An agent's execution environment differs in nature from a typical web server. It is a stateful single instance needed once per session, it is idle most of the time, and above all it runs untrusted code. You can build such a workload by combining a StatefulSet (<code>replicas: 1</code>), a headless Service, and a PersistentVolumeClaim, but it becomes hard to operate as the scale grows. Agent Sandbox wraps this combination in a single API and adds three extension resources on top of it. They are SandboxTemplate (a sandbox template that holds the Pod spec and security defaults), a warm pool (a pool of standby Sandboxes started in advance), and SandboxClaim (a request to be allocated one Sandbox from a warm pool).</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Resource</th><th>API group</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td>Sandbox</td><td><code>agents.x-k8s.io/v1beta1</code></td><td>Lifecycle of a single Pod, an optional headless Service, and a PVC (expiry, suspend/resume)</td></tr>
+<tr><td>SandboxTemplate</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>Pod spec and security defaults, one NetworkPolicy per template</td></tr>
+<tr><td>SandboxWarmPool</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>Number of standby Sandboxes started in advance from a template (<code>replicas</code>)</td></tr>
+<tr><td>SandboxClaim</td><td><code>extensions.agents.x-k8s.io/v1beta1</code></td><td>Request to be allocated one Sandbox from a warm pool (<code>warmPoolRef</code> is required)</td></tr>
+<tr><td>sandbox-router</td><td>Deployment</td><td>Reverse proxy that forwards a request to the matching Sandbox Pod based on the <code>X-Sandbox-ID</code> header</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Resources and components of Agent Sandbox v1.0.5 (all four CRDs are v1beta1)</p>
+<p>A SandboxClaim never references a template directly and always references a warm pool. A claim against a warm pool with <code>replicas: 0</code> becomes a cold start, which creates a new Sandbox without a standby Pod. This makes it possible to compare cold starts and warm pools fairly with the same template. The client creates a claim with the Python SDK (<code>k8s-agent-sandbox</code>), and command execution and file I/O go through sandbox-router. Figure 1 shows how the resources reference each other and the path that requests take.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig01-eks-agent-sandbox-gvisor-part1-fig01-resource-model-1.png" alt="Resources created by the user (left) and resources created by the controller (right), with the control path and the data path" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 1.</b> Resources created by the user (left) and resources created by the controller (right), with the control path and the data path</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Test environment</h2></header><div class="prose">
+<p>The key prerequisite is an EKS cluster where you can use managed node groups. The section on creating the dedicated gVisor node group explains why.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value used in this test</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS cluster</td><td>1.36, based on managed node groups</td><td>Not Auto Mode</td></tr>
+<tr><td>Local tools</td><td><code>kubectl</code> 1.36, AWS CLI 2.33, Python 3.12</td><td>The SDK requires Python 3.11 or later</td></tr>
+<tr><td>Cluster add-ons</td><td>VPC CNI, EKS Pod Identity Agent, EBS CSI</td><td>VPC CNI for NetworkPolicy, Pod Identity Agent for the EBS CSI controller permissions, EBS CSI added in the lifecycle section of Part 2</td></tr>
+<tr><td>IAM permissions</td><td>EKS, EC2, IAM, SSM</td><td>Needed to create the node group and inspect the nodes</td></tr>
+<tr><td>Agent Sandbox</td><td>v1.0.5</td><td>Controller, sandbox-router, Python SDK (<code>k8s-agent-sandbox==1.0.5.post1</code>)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Test environment and prerequisites (versions as of October 2026)</p>
+<p>Figure 2 shows the overall test setup. The agent on the workstation calls Amazon Bedrock, and the SDK creates a SandboxClaim through the Kubernetes API. Commands generated by the model go through sandbox-router and run only in sandbox Pods on the dedicated gVisor nodes.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig02-eks-agent-sandbox-gvisor-part1-fig02-architecture-1.png" alt="Test setup (the controller and router run on the existing system nodes, and sandbox Pods run on the dedicated gVisor nodes)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 2.</b> Test setup (the controller and router run on the existing system nodes, and sandbox Pods run on the dedicated gVisor nodes)</figcaption></figure>
+<p>All sandbox Pods were placed in private subnets, and the tests used only <code>kubectl port-forward</code> and paths inside the VPC, with nothing exposed externally. If you expose the agent UI externally, connect Amazon CloudFront, an Application Load Balancer, and the agent Pod in that order, and do not expose the sandboxes or the router.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Installation order at a glance</h2></header><div class="prose">
+<p>The overall installation prepares the nodes and the network first, then installs Agent Sandbox, and then configures the sandboxes. The order matters for two reasons. The dedicated gVisor nodes where the RuntimeClass and the templates place Pods must be ready first, and if you run sandboxes without enabling NetworkPolicy in the VPC CNI, the policy that the template creates is not enforced. Figure 3 and Table 3 summarize the installation order used in this post and the key settings of each step. Part 2 covers the details of steps 7 and 8.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig03-eks-agent-sandbox-gvisor-part1-fig03-install-order-1.png" alt="Installation order (teal text marks optional settings)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 3.</b> Installation order (teal text marks optional settings)</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Order</th><th>Step</th><th>Key settings</th><th>How to verify</th></tr>
+</thead>
+<tbody>
+<tr><td>1</td><td>Write the launch template</td><td>Register <code>runsc</code> with a nodeadm <code>NodeConfig</code>, verify the gVisor bundle with sha512, require IMDSv2 with a hop limit of 1</td><td>Verified together after the node group is created</td></tr>
+<tr><td>2</td><td>Create the dedicated gVisor node group</td><td><code>sandbox-runtime=gvisor</code> label, <code>NoSchedule</code> taint</td><td>Node group is ACTIVE, <code>runsc</code> registration and IMDS options checked with Run Command</td></tr>
+<tr><td>3</td><td>Create the RuntimeClass</td><td><code>handler: runsc</code>, nodeSelector and toleration under <code>scheduling</code></td><td>A Pod with <code>runtimeClassName: gvisor</code> is placed on a gVisor node</td></tr>
+<tr><td>4</td><td>Enable NetworkPolicy in the VPC CNI</td><td><code>enableNetworkPolicy: "true"</code></td><td><code>enableNetworkPolicy</code> in the add-on <code>configurationValues</code> and <code>enable-network-policy-controller</code> in the <code>amazon-vpc-cni</code> ConfigMap are <code>true</code></td></tr>
+<tr><td>5</td><td>Install the Agent Sandbox controller</td><td><code>sandbox-with-extensions.yaml</code> v1.0.5</td><td>Four CRDs at <code>v1beta1</code>, the <code>--extensions</code> flag</td></tr>
+<tr><td>6</td><td>Deploy sandbox-router</td><td>Go implementation, image pinned to <code>v1.0.5</code>, <code>--response-header-timeout=180s</code></td><td>Image and arguments of the router Deployment</td></tr>
+<tr><td>7</td><td>Create the SandboxTemplate and warm pools</td><td><code>runtimeClassName: gvisor</code>, and if needed a custom <code>networkPolicy</code> for Route 53 Resolver and the EBS CSI add-on</td><td>Warm pool standby Pods are Ready, one PolicyEndpoint per template</td></tr>
+<tr><td>8</td><td>Restrict router access, connect the agent</td><td>Restrict Ingress on router port 8080 by the agent namespace label, and restrict port-forward permission with RBAC. Agents inside the cluster use a Direct connection, and the workstation in this test uses Tunnel mode</td><td>Router connections from a namespace without the label are blocked</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Installation order and what to verify at each step</p>
+<p><b>Scope of the examples:</b> The code below is an excerpt of the key installation settings. To reproduce the full environment, you also need the MIME user data that includes the gVisor installation and verification shell script, and the metadata options of the launch template. You also need the full manifests of the comparison Sandboxes, the SandboxTemplate, and the warm pools, as well as the router deployment settings. This post does not include those complete files.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>A dedicated gVisor node group</h2></header><div class="prose">
+<p>To use gVisor, you must register the <code>runsc</code> runtime with containerd on the node. However, <a href="https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html" target="_blank" rel="noopener">EKS Auto Mode nodes</a> do not support custom AMIs and do not let you install software directly on the node, so this registration is not possible. For that reason, I added a dedicated gVisor node group to a cluster based on managed node groups. An Auto Mode cluster can also have managed node groups alongside it, but you must separately install the VPC CNI, kube-proxy, and CoreDNS add-ons for those nodes. If you operate a cluster with Karpenter that you installed yourself, you can build the same nodes with Karpenter instead of a managed node group. The <a href="https://karpenter.sh/docs/concepts/nodeclasses/" target="_blank" rel="noopener">EC2NodeClass</a> <code>userData</code> is merged into the user data that Karpenter generates, so you can register <code>runsc</code> with the AL2023 <code>NodeConfig</code>. If you set the same label and taint on the NodePool, the RuntimeClass works as is. Note that the Karpenter built into EKS Auto Mode cannot change the node user data, so this does not apply to it.</p>
+<p>On Amazon Linux 2023 nodes, nodeadm merges the <code>NodeConfig</code> in the user data into the containerd configuration. I wrote the user data of the launch template in MIME multipart format and split it into two parts. The first part is a <code>NodeConfig</code> that registers the <code>runsc</code> runtime, and the second part is a shell script that verifies a version-pinned gVisor bundle (release-20260928.0) with sha512 and then installs it in <code>/usr/local/bin</code>. The AMI used in the test has containerd 2.x (configuration version 3), so I used the <code>io.containerd.cri.v1.runtime</code> path. containerd 1.x uses a different plugin path, so you must match the path to the containerd version of your AMI.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># First part of userdata.mime (Content-Type: application/node.eks.aws)
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  containerd:
+    config: |
+      [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc]
+        runtime_type = 'io.containerd.runsc.v1'</code></pre></div>
+<p>The launch template explicitly sets the instance metadata service (IMDS) to require v2 and sets the response hop limit to 1. According to the <a href="https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html" target="_blank" rel="noopener">EKS Best Practices Guide</a>, these two settings keep Pods from accessing the instance profile of the node. The existing nodes in the test cluster had a hop limit of 2, so you must set this value explicitly for the new node group. The node group gets the <code>sandbox-runtime=gvisor</code> label and a <code>NoSchedule</code> taint.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws eks create-nodegroup --cluster-name "$CLUSTER_NAME" --nodegroup-name sandbox-gvisor \
+  --node-role "$NODE_ROLE_ARN" --subnets $PRIVATE_SUBNETS \
+  --ami-type AL2023_x86_64_STANDARD --instance-types m7i.xlarge \
+  --scaling-config minSize=0,maxSize=3,desiredSize=2 \
+  --release-version 1.36.4-20260930 \
+  --launch-template name=sandbox-gvisor-lt,version=1 \
+  --labels sandbox-runtime=gvisor \
+  --taints key=sandbox-runtime,value=gvisor,effect=NO_SCHEDULE</code></pre></div>
+<p>When you put a nodeSelector and a toleration in the <code>scheduling</code> field of the RuntimeClass, Pods that specify <code>runtimeClassName: gvisor</code> are placed on the dedicated gVisor node group. You also do not need to repeat these settings in every template. However, this setting does not block all Pods that use other runtimes. A runc Pod with a toleration for the same taint can also be placed on those nodes. To enforce dedicated use of the nodes, you must manage Pod creation permissions together with an admission policy for the allowed RuntimeClass and tolerations.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata: {name: gvisor}
+handler: runsc
+scheduling:
+  nodeSelector: {sandbox-runtime: gvisor}
+  tolerations:
+  - {key: sandbox-runtime, operator: Equal, value: gvisor, effect: NoSchedule}</code></pre></div>
+<p>The node group took about 2 minutes to become ACTIVE. The two new nodes came up with containerd 2.2.7 and kernel 6.18.51. A check with AWS Systems Manager Run Command showed that <code>runsc</code> was installed and registered in the containerd configuration. The IMDS options were also as intended, required with a hop limit of 1.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Installing Agent Sandbox</h2></header><div class="prose">
+<p>The default network isolation of Agent Sandbox depends on the NetworkPolicy that a SandboxTemplate creates. A NetworkPolicy takes effect only when the CNI actually enforces it, so start with the <a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html" target="_blank" rel="noopener">Amazon VPC CNI add-on</a> and enable <code>enableNetworkPolicy</code> there. In the test cluster this value was empty, and I changed only this setting while leaving the add-on version and the IRSA role as they were. You can confirm whether it is enabled from the <code>configurationValues</code> of the add-on and the <code>amazon-vpc-cni</code> ConfigMap. The VPC CNI add-on used in the test, <code>v1.22.4-eksbuild.3</code>, deployed the <code>aws-eks-nodeagent</code> container and the <code>policyendpoints</code> CRD even before the feature was enabled. This differs from the EKS documentation, which says there is a single container when the feature is disabled, so the presence of these two alone does not tell you that it is enabled. The NetworkPolicy section of Part 2 covers what happens if you skip this step.</p>
+<p><b>Policy enforcement at Pod startup:</b> Enabling the NetworkPolicy feature and blocking traffic right after startup are separate settings. With <code>NETWORK_POLICY_ENFORCING_MODE=standard</code>, traffic is allowed by default until the policies are applied. With <code>strict</code>, Pods start with default deny, and you must prepare allow policies for the paths they need, such as DNS and the router. CoreDNS also needs the policies it requires, and this default deny does not apply to hostNetwork Pods. This post has no record of the enforcing mode at the time of the test, so it cannot conclude that isolation held from the moment the Pods started. When you reproduce this, you must record that environment variable of the aws-node DaemonSet together with the actual traffic results.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws eks update-addon --cluster-name "$CLUSTER_NAME" --addon-name vpc-cni \
+  --addon-version v1.22.4-eksbuild.3 --service-account-role-arn &lt;existing IRSA role&gt; \
+  --configuration-values '{"enableNetworkPolicy":"true"}' --resolve-conflicts PRESERVE
+
+# Verify activation: both values must be true
+aws eks describe-addon --cluster-name "$CLUSTER_NAME" --addon-name vpc-cni \
+  --query addon.configurationValues --output text
+kubectl -n kube-system get cm amazon-vpc-cni \
+  -o jsonpath='{.data.enable-network-policy-controller}'</code></pre></div>
+<p>Install the controller from a release manifest pinned to a version. The <code>manifest.yaml</code> path given in the Quick start on the Kubernetes blog returns 404 for v1.x releases, so use <code>sandbox-with-extensions.yaml</code>. When the installation finishes, all four CRDs are registered at <code>v1beta1</code> and a single controller Deployment with the <code>--extensions</code> flag remains.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>kubectl apply --server-side -f \
+  https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.5/sandbox-with-extensions.yaml</code></pre></div>
+<p>For sandbox-router, I chose the Go implementation that the default manifest uses and changed only two things in the upstream <code>sandbox-router/deploy</code> manifest. I pinned the image tag from <code>:latest</code> to <code>v1.0.5</code> and added <code>--response-header-timeout=180s</code>. Separately from the <code>--proxy-timeout=180s</code> in the default manifest, the Go router waits only up to 30 seconds for response headers. The <code>/execute</code> endpoint of the sandbox sends response headers only after the command finishes, so unless you raise this value, a 45-second command is cut off with a 502 at 30 seconds. If you run long commands such as builds or tests, you must raise this flag as well.</p>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Same security settings, different runtimes</h2></header><div class="prose">
+<p>First, compare two core Sandboxes, created without a template, that differ only in their runtime. Both Pods follow the restricted level of Pod Security Admission. They run as UID 1000, drop all capabilities, and have a read-only root file system. hello-gvisor specifies <code>runtimeClassName: gvisor</code>, and hello-runc gets a toleration for the taint of the dedicated nodes. A toleration alone does not guarantee placement on the same node, so when you reproduce this, you must set the same <code>kubernetes.io/hostname</code> value in the nodeSelector of both Pods and confirm after creation that their <code>spec.nodeName</code> values match. When both Pods are Ready, check the kernel, the CPU count, the seccomp status, and the kernel module list inside each sandbox.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Observation</th><th>runc</th><th>gVisor</th></tr>
+</thead>
+<tbody>
+<tr><td><code>uname -r</code></td><td>6.18.51-120.162.amzn2023 (host kernel)</td><td>4.19.0-gvisor</td></tr>
+<tr><td>CPU and memory visible to the container</td><td>4 CPUs, 16 GB (the entire host)</td><td>2 CPUs (based on quota, minimum of 2), 1 GiB of memory (based on limit)</td></tr>
+<tr><td><code>/proc/modules</code></td><td>2,869 bytes (host module list)</td><td>0 bytes</td></tr>
+<tr><td>Root file system</td><td>overlay, host snapshot path exposed</td><td>9p mount (owned by the Gofer, directfs)</td></tr>
+<tr><td>App process in host <code>ps</code></td><td>Visible (UID 1000 shown as <code>ec2-user</code> of the node)</td><td>Not visible (only <code>runsc-sandbox</code> and <code>runsc-gofer</code> shown)</td></tr>
+<tr><td><code>kubectl port-forward pod/...</code></td><td>Works</td><td>Fails</td></tr>
+<tr><td>Time to Ready (after image caching)</td><td>2.7 seconds</td><td>2.7 seconds</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Observations from two Sandboxes with identical security settings and different runtimes</p>
+<p>Table 4 lists the observed values recorded in this post. The Pod specs and the <code>spec.nodeName</code> output that would prove placement on the same node are not provided. The number of repetitions for the startup time, the criteria for the start and end of the measurement, and the type of statistic are not provided either. Therefore, this post does not interpret 2.7 seconds as a mean or a median, and does not generalize it into the conclusion that the two runtimes have the same startup performance.</p>
+<p>Figure 4 compares the paths that system calls, the file system, and the network take in the two runtimes.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig04-eks-agent-sandbox-gvisor-part1-fig04-runtime-boundary.png" alt="Isolation boundaries of runc and gVisor (teal text marks gVisor-only behavior)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 4.</b> Isolation boundaries of runc and gVisor (teal text marks gVisor-only behavior)</figcaption></figure>
+<p>In this environment, the app process inside gVisor did not appear as an ordinary app process on the host. The Sentry, a user-space kernel, handles the application's system calls and does not pass them straight through to the host kernel. The Sentry itself, however, uses a limited set of host system calls that it needs to operate. A separate process, the Gofer, owns the container file system. The reason <code>kubectl port-forward</code> fails comes from the same architecture. containerd tries to connect to localhost:8888 in the network namespace of the Pod. However, gVisor listens on a user-space network stack inside the Sentry, so there is no socket on the host side to accept the connection. The Tunnel mode of the SDK works because it opens the tunnel to the router Service, which runs on runc, instead of to the sandbox Pod. This failure is therefore only a side effect of the Sentry network stack, not an access control. If you port-forward to the router, you reach the same sandbox all the same.</p>
+<p>The seccomp results differed as well. In the runc container, <code>/proc/self/status</code> showed <code>Seccomp: 2</code> (RuntimeDefault applied), but inside gVisor it showed 0. In the <a href="https://github.com/google/gvisor/blob/release-20260928.0/runsc/config/flags.go" target="_blank" rel="noopener">runsc configuration</a>, the <code>--oci-seccomp</code> flag defaults to false, so the seccomp profile of the Pod is not applied inside the sandbox. Instead, the Sentry process itself runs in a restricted seccomp environment on the host side. The seccomp requirement of Pod Security Admission is met, but I recommend that you keep in mind during security reviews that the boundary where the filter applies differs from runc.</p>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Checking the isolation layers with untrusted code</h2></header><div class="prose">
+<p>Next, use the Python SDK to get a sandbox allocated from a warm pool and run untrusted code in it. For each runtime, I set up one warm pool with <code>replicas: 3</code> and one pool for cold starts with <code>replicas: 0</code>. The check script is the one published by the <a href="https://devopscube.com/kubernetes-agent-sandbox-tutorial/" target="_blank" rel="noopener">devopscube tutorial</a>, <code>untrusted-code.py</code>, used exactly as is. The script tries to read <code>/etc/shadow</code>, call <code>setuid(0)</code>, and read the ServiceAccount token, and then waits for 45 seconds to leave time to check whether it is visible from the host.</p>
+<p>The example below assumes an environment where the router and both warm pools are ready. Save the <code>untrusted-code.py</code> from the referenced tutorial in your local working directory, then read its contents and send them to the sandbox.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>from pathlib import Path
+from k8s_agent_sandbox import SandboxClient
+from k8s_agent_sandbox.models import SandboxLocalTunnelConnectionConfig
+
+code = Path("untrusted-code.py").read_text(encoding="utf-8")
+
+client = SandboxClient(connection_config=SandboxLocalTunnelConnectionConfig())  # Tunnel mode
+for pool in ["python-runc-warm", "python-gvisor-warm"]:
+    sandbox = client.create_sandbox(warmpool=pool, namespace="sandbox-lab")
+    try:
+        sandbox.files.write("untrusted-code.py", code)
+        print(sandbox.commands.run("python3 untrusted-code.py", timeout=90).stdout)
+    finally:
+        sandbox.terminate()</code></pre></div>
+<p>While the script was waiting, I used Systems Manager Run Command to check whether the process was visible on the node.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Check</th><th>runc</th><th>gVisor</th><th>Layer that blocked it</th></tr>
+</thead>
+<tbody>
+<tr><td>Read <code>/etc/shadow</code></td><td>Blocked</td><td>Blocked</td><td>File access permissions, non-root UID and GID, capability restrictions</td></tr>
+<tr><td><code>setuid(0)</code></td><td>Blocked</td><td>Blocked</td><td>Non-root UID and removal of capabilities including CAP_SETUID</td></tr>
+<tr><td>Read the ServiceAccount token</td><td>No file</td><td>No file</td><td>The template controller default of <code>automountServiceAccountToken: false</code></td></tr>
+<tr><td>Check process seen from the host</td><td>Visible</td><td>Not visible</td><td>gVisor</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Results of the same check script by runtime</p>
+<p><code>runAsNonRoot</code> requires non-root execution, and <code>runAsUser: 1000</code> sets the UID that the process runs as. Whether <code>/etc/shadow</code> can be read depends on the ownership and permissions of the file and on the UID, GID, and capabilities of the process. The <code>setuid(0)</code> failure in this experiment has to be read as the combined result of non-root execution and the removal of capabilities including <code>CAP_SETUID</code>. <code>allowPrivilegeEscalation: false</code> is a separate hardening measure that sets NoNewPrivs to limit gaining additional privileges through setuid executables and similar means. A single check result does not separately prove how much each setting contributed.</p>
+<p>This check confirms the basic privilege restrictions and the difference in exposure between the runtimes. The observation that the app does not appear in the process list of the host does not by itself prove that the isolation is safe, and the check does not include validation against container escape vulnerabilities or attacks on the host kernel.</p>
+<p>Three of the four items were blocked by the security settings of the PodSpec, not by gVisor, and the results were the same on runc. The ServiceAccount token was not mounted even though the template did not specify it. That is because the controller sets <code>automountServiceAccountToken: false</code> as a default on Pods created through a SandboxTemplate. gVisor mediates the application's system calls through the Sentry and reduces the attack surface that is exposed directly to the host kernel. Figure 5 summarizes the four layers and the items blocked at each layer.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-1-assets/fig05-eks-agent-sandbox-gvisor-part1-fig05-defense-layers.png" alt="The four layers that stop untrusted code and the test results for each layer (Part 2 covers the tests of the NetworkPolicy and dedicated node group layers)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 5.</b> The four layers that stop untrusted code and the test results for each layer (Part 2 covers the tests of the NetworkPolicy and dedicated node group layers)</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Closing</h2></header><div class="prose">
+<p>Part 1 examined isolation, the first design principle, layer by layer. In this check, the Pod security settings and the controller defaults restricted the attempts to change privileges and to access files and the token. gVisor mediates the system calls of the app and reduces direct exposure to the host kernel. Three of the four items tested were protected by the PodSpec security settings and the controller defaults rather than by gVisor, so even if you adopt gVisor, you must keep the Pod security settings in place. The remaining two layers, NetworkPolicy and the IMDS settings of the dedicated node group, were prepared during installation.</p>
+<p>Part 2 verifies how these two layers actually behave and uses measurement results to examine the second design principle, the cost of isolation and how to offset it. It also covers role separation and sandbox-router security when the agent is connected to Amazon Bedrock.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://kubernetes.io/blog/2026/03/20/running-agents-on-kubernetes-with-agent-sandbox/" target="_blank" rel="noopener">Running Agents on Kubernetes with Agent Sandbox - Kubernetes Blog (2026-03-20)</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://github.com/kubernetes-sigs/agent-sandbox" target="_blank" rel="noopener">kubernetes-sigs/agent-sandbox - GitHub</a></td><td class="nowrap"><span class="l-ko">GitHub</span><span class="l-en">GitHub</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://devopscube.com/kubernetes-agent-sandbox-tutorial/" target="_blank" rel="noopener">Kubernetes Agent Sandbox on AWS EKS - devopscube</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://gvisor.dev/docs/" target="_blank" rel="noopener">What is gVisor? - gVisor Documentation</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://gvisor.dev/docs/user_guide/filesystem/" target="_blank" rel="noopener">Filesystem - gVisor Documentation</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://github.com/google/gvisor/blob/release-20260928.0/runsc/config/flags.go" target="_blank" rel="noopener">runsc/config/flags.go (release-20260928.0) - google/gvisor GitHub</a></td><td class="nowrap"><span class="l-ko">GitHub</span><span class="l-en">GitHub</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html" target="_blank" rel="noopener">Restrict Pod network traffic with Kubernetes network policies - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/automode-learn-instances.html" target="_blank" rel="noopener">Learn about Amazon EKS Auto Mode Managed instances - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/eks-add-ons.html" target="_blank" rel="noopener">Amazon EKS add-ons - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/launch-templates.html" target="_blank" rel="noopener">Customize managed nodes with launch templates - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://awslabs.github.io/amazon-eks-ami/nodeadm/doc/examples/" target="_blank" rel="noopener">Examples - Amazon EKS AMI (nodeadm)</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html" target="_blank" rel="noopener">Identity and Access Management - Amazon EKS Best Practices Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-10-18 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-10-18. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">본문의 수치는 2026년 10월 기준 서울 리전의 EKS 1.36 클러스터에서 Agent Sandbox v1.0.5, gVisor release-20260928.0, m7i.xlarge 노드로 측정한 값입니다. 버전, 인스턴스 유형, 노드의 IP 사용 상태에 따라 결과가 달라질 수 있습니다.</span><span class="l-en">The numbers in this post were measured in October 2026 on an EKS 1.36 cluster in the Seoul Region with Agent Sandbox v1.0.5, gVisor release-20260928.0, and m7i.xlarge nodes. Results can vary depending on the versions, the instance type, and the IP usage state of the nodes.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

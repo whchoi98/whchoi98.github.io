@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS에서 AI 에이전트 실행 환경 격리하기 2부: Amazon EKS와 Agent Sandbox, 개념과 구성</title>
+<meta name="description" content="Amazon EKS에 Agent Sandbox와 gVisor를 올려 운영할 때 확인할 항목을 측정값과 함께 정리했습니다. NetworkPolicy 활성화, DNS 경로, Warm Pool 시작 지연, gVisor 성능 비용, 수명 주기, sandbox-router 보안을 다룹니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-2/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-10-18</span><span class="l-en">Published 2026-10-18</span></span><span>Container</span><span><span class="l-ko">읽는 시간 16분</span><span class="l-en">16 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">AWS에서 AI 에이전트 실행 환경 격리하기 2부: Amazon EKS와 Agent Sandbox, 개념과 구성</span><span class="l-en">Isolating AI agent execution environments on AWS, Part 2: Amazon EKS and Agent Sandbox, concepts and setup</span></h1>
+<p class="thesis"><span class="l-ko">Amazon EKS에서 Agent Sandbox와 gVisor로 만든 격리를 운영 환경에 올리려면 무엇을 더 확인해야 하는지 답합니다. VPC CNI에서 NetworkPolicy를 활성화해야 정책이 동작하며 기본 정책은 인터넷으로 나가는 경로를 열어 두므로 Egress 통제를 따로 설계해야 합니다. gVisor는 시스템 콜이 많은 작업을 2~12배 느리게 하지만 Warm Pool을 사용하면 Claim부터 Ready까지가 약 57 ms로 줄어 런타임 차이가 사라집니다.</span><span class="l-en">This post answers what else you need to check before you take the isolation built with Agent Sandbox and gVisor on Amazon EKS to production. The policy works only after you enable NetworkPolicy in VPC CNI, and the default policy leaves the path to the internet open, so egress control must be designed separately. gVisor makes work with many system calls 2 to 12 times slower, but with a warm pool the time from Claim to Ready drops to about 57 ms and the runtime difference disappears.</span></p>
+<div class="tags"><span>#Amazon EKS</span><span>#Agent Sandbox</span><span>#gVisor</span><span>#Kubernetes</span><span>#NetworkPolicy</span><span>#Amazon VPC CNI</span><span>#Amazon Route 53 Resolver</span><span>#Amazon Bedrock</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">NetworkPolicy는 활성화해야 동작합니다</a><a href="#ko-s3">시작 지연과 Warm Pool</a><a href="#ko-s4">격리 비용</a><a href="#ko-s5">수명 주기와 상태 보존</a><a href="#ko-s6">에이전트 연동과 router 보안</a><a href="#ko-s7">도입 전 확인 항목</a><a href="#ko-s8">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">NetworkPolicy works only after you enable it</a><a href="#en-s3">Startup latency and the warm pool</a><a href="#en-s4">The cost of isolation</a><a href="#en-s5">Lifecycle and state preservation</a><a href="#en-s6">Agent integration and router security</a><a href="#en-s7">Checklist before adoption</a><a href="#en-s8">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>1부에서는 Kubernetes SIG Apps의 <a href="https://github.com/kubernetes-sigs/agent-sandbox" target="_blank" rel="noopener">Agent Sandbox</a> v1.0.5를 Amazon EKS 1.36 클러스터에 gVisor와 함께 구성했습니다. 신뢰할 수 없는 코드를 막는 4개 격리 계층을 구성한 뒤 그중 Pod 보안 설정과 gVisor 계층을 확인했습니다.</p>
+<p>나머지 NetworkPolicy와 전용 노드 그룹의 IMDS 설정은 2부 1파트에서 확인합니다. 2부에서는 이 구성을 운영 환경에 올릴 때 확인해야 할 내용을 다룹니다. NetworkPolicy와 DNS 경로, Warm Pool과 Pod IP, gVisor의 성능 비용, 샌드박스 수명 주기, 그리고 에이전트 연동과 sandbox-router 보안입니다.</p>
+<p>테스트 환경은 1부와 같습니다. EKS 1.36 클러스터에 gVisor 전용 노드 그룹(m7i.xlarge × 2)을 추가하고 Agent Sandbox 컨트롤러와 Go 구현의 sandbox-router를 설치했습니다. 이 상태에서 runc 샌드박스와 gVisor 샌드박스를 비교했습니다.</p>
+<p><b><em>시리즈 블로그 보기</em></b></p>
+<ul>
+<li><a href="https://whchoi98.github.io/docs/techblog/container/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 1부: Amazon EKS와 Agent Sandbox, 개념과 구성</em></a></li>
+<li><em>AWS에서 AI 에이전트 실행 환경 격리하기 2부: Amazon EKS와 Agent Sandbox, 개념과 구성</em></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-3/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 3부: 에이블리의 Amazon EKS 기반 Agent Sandbox 운영 사례</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-4/" target="_blank" rel="noopener"><em>AWS에서 AI 에이전트 실행 환경 격리하기 4부: Amazon Bedrock AgentCore Runtime, 관리형 샌드박스의 동작과 선택 기준</em></a></li>
+</ul>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>NetworkPolicy는 활성화해야 동작합니다</h2></header><div class="prose">
+<p>SandboxTemplate은 사용자가 정책을 지정하지 않으면 보안 기본 정책을 만듭니다. Ingress는 <code>agent-sandbox-system</code> 네임스페이스의 sandbox-router에서 오는 트래픽만 허용합니다. Egress는 <code>0.0.0.0/0</code>에서 RFC 1918 사설 대역과 <code>169.254.0.0/16</code>을 뺀 Public IP로만 나갈 수 있습니다. 이 정책이 실제로 동작하는지 샌드박스 안에서 여러 목적지로 TCP 연결을 시도해 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>목적지</th><th>활성화 전</th><th>활성화 후</th></tr>
+</thead>
+<tbody>
+<tr><td>AWS API Public Endpoint (443)</td><td>연결됨</td><td>연결됨</td></tr>
+<tr><td>인스턴스 메타데이터 서비스 (169.254.169.254)</td><td>연결됨</td><td>차단</td></tr>
+<tr><td>Kubernetes API, CoreDNS, VPC DNS</td><td>연결됨</td><td>차단</td></tr>
+<tr><td>다른 샌드박스 Pod, router Pod</td><td>연결됨</td><td>차단</td></tr>
+<tr><td>다른 네임스페이스의 Pod에서 샌드박스로</td><td>연결됨</td><td>차단</td></tr>
+<tr><td>sandbox-router를 거친 샌드박스 호출</td><td>HTTP 200</td><td>HTTP 200</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 템플릿 관리형 NetworkPolicy의 VPC CNI 활성화 전후 연결 결과 (runc와 gVisor 결과 동일, TCP 3초 시도 기준)</p>
+<p>그림 1은 활성화 후 샌드박스 Pod를 기준으로 허용 경로와 차단 경로를 정리한 것입니다. DNS와 VPC 엔드포인트 경로는 이어지는 Route 53 Resolver 파트에서 다룹니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig01-eks-agent-sandbox-gvisor-part2-fig01-network-policy.png" alt="샌드박스 Pod에 적용된 NetworkPolicy의 허용 경로와 차단 경로 (VPC CNI 활성화 후, runc와 gVisor 결과 동일)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 1.</b> 샌드박스 Pod에 적용된 NetworkPolicy의 허용 경로와 차단 경로 (VPC CNI 활성화 후, runc와 gVisor 결과 동일)</figcaption></figure>
+<p>활성화 전에는 NetworkPolicy 객체가 있었는데도 샌드박스가 메타데이터 서비스와 Kubernetes API에 그대로 연결됐습니다. 정책을 노드 규칙으로 바꾸는 PolicyEndpoint가 하나도 없었기 때문입니다. 활성화 후에는 같은 정책이 문서대로 동작했고 gVisor Pod에도 동일하게 적용됐습니다. gVisor는 사용자 공간 네트워크 스택을 사용하지만 패킷은 결국 Pod의 네트워크 인터페이스를 지나고 VPC CNI는 노드에서 eBPF로 정책을 처리하므로 런타임과 관계없이 정책이 적용됩니다. 정책은 샌드박스 수와 상관없이 템플릿당 하나만 생성됐습니다.</p>
+<p><a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy.html" target="_blank" rel="noopener">EKS 문서</a>의 주의 사항 하나는 검토가 필요합니다. VPC CNI의 기본 standard 모드에서는 새 Pod가 정책이 적용되기 전까지 모든 트래픽을 허용하는 상태로 시작합니다. 새 샌드박스 Pod가 시작 직후의 이 짧은 구간에도 차단된 상태로 있어야 한다면 <code>NETWORK_POLICY_ENFORCING_MODE=strict</code>를 검토하는 것을 권고합니다. strict 모드는 정책이 없는 Pod를 기본 차단하므로 CoreDNS를 포함한 클러스터 전체의 정책을 함께 준비해야 합니다.</p>
+<p>기본 정책이 막는 것은 사설 대역과 링크 로컬 대역뿐이며 인터넷으로 나가는 연결은 모두 허용됩니다. 신뢰할 수 없는 코드가 인터넷 어디로든 나갈 수 있다는 뜻이므로 데이터 유출, 외부 C2 서버 접속, 채굴 같은 리소스 남용을 이 정책만으로는 막을 수 없습니다. 패키지 저장소처럼 꼭 필요한 목적지만 남기려면 사용자 정의 <code>networkPolicy</code>로 Egress 목적지를 제한하거나, 샌드박스 노드 서브넷의 기본 경로를 egress 프록시나 AWS Network Firewall로 보내야 합니다. 도메인 단위 허용 목록이 필요하면 Route 53 Resolver DNS Firewall을 사용할 수 있는데, 이어지는 Route 53 Resolver 구성이 그 전제입니다.</p>
+<h3>1.1 인스턴스 메타데이터 보호</h3>
+<p>NetworkPolicy가 선택하지 않는 Sandbox(템플릿 없이 만든 core Sandbox)에서 메타데이터 서비스를 직접 시험했습니다. TCP 연결은 성공했지만 IMDSv2 세션 토큰을 받는 PUT 요청은 응답 없이 시간 초과됐고 IMDSv1 방식의 조회는 HTTP 401을 받았습니다. 시작 템플릿의 IMDSv2 필수 설정과 홉 제한 1이 NetworkPolicy와는 독립적으로 노드 IAM 역할의 자격 증명을 보호한 것입니다. runc와 gVisor의 결과는 같았습니다.</p>
+<h3>1.2 Route 53 Resolver로 DNS 보내기</h3>
+<p>템플릿에 사용자 정의 <code>networkPolicy</code>가 없고 Pod 명세에 <code>dnsPolicy</code>를 지정하지 않으면 컨트롤러가 Pod에 <code>dnsPolicy: None</code>과 <code>nameservers: ["8.8.8.8", "1.1.1.1"]</code>을 주입합니다. 클러스터 내부 서비스 이름이 노출되지 않게 하려는 설계입니다. 그러나 AWS 환경에서는 샌드박스의 DNS 질의가 Route 53 Resolver를 거치지 않고 NAT 게이트웨이를 지나 공용 DNS로 나가게 됩니다. Route 53 Resolver DNS Firewall과 쿼리 로깅이 적용되지 않고 아웃바운드 53 포트를 막아 둔 VPC에서는 이름 해석 자체가 실패합니다.</p>
+<p>템플릿에 정책을 직접 정의하면 DNS 주입이 비활성화되고 Pod에 지정한 DNS 설정이 그대로 유지됩니다. 아래 발췌는 DNS를 VPC의 Route 53 Resolver(VPC 기본 CIDR의 +2 주소)로만 보내고 나머지 IPv4 규칙은 기본 정책과 같게 둔 예입니다. 기본 정책의 IPv6 규칙은 IPv4 클러스터라서 생략했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>spec:
+  networkPolicy:
+    ingress:
+    - from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-sandbox-system}}
+        podSelector: {matchLabels: {app: sandbox-router}}
+    egress:
+    - to: [{ipBlock: {cidr: 10.100.0.2/32}}]          # Route 53 Resolver
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+      - ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]}
+  podTemplate:
+    spec:
+      dnsPolicy: None
+      dnsConfig: {nameservers: [10.100.0.2], options: [{name: ndots, value: "1"}]}</code></pre></div>
+<p>이 구성에서 공인 이름은 Route 53 Resolver로 해석됐고 클러스터 내부 이름은 해석되지 않았으며 메타데이터 서비스와 Kubernetes API는 계속 차단됐습니다. 다만 VPC에 프라이빗 DNS를 활성화한 <a href="https://docs.aws.amazon.com/vpc/latest/privatelink/privatelink-access-aws-services.html" target="_blank" rel="noopener">인터페이스 VPC 엔드포인트</a>가 있으면 <code>sts</code>나 <code>bedrock-runtime</code> 같은 서비스 이름이 엔드포인트의 사설 IP로 해석됩니다. 이 주소는 사설 대역을 제외한 Egress 규칙에 막힙니다. 샌드박스가 AWS API를 호출해야 한다면 엔드포인트 서브넷의 443 포트를 명시적으로 열어야 합니다. 반대로 샌드박스에 AWS 자격 증명을 주지 않는 설계라면 이 차단이 안전한 기본값이 됩니다. 다만 막히는 것은 VPC 엔드포인트의 사설 IP 경로뿐이고 같은 서비스의 Public Endpoint로 가는 경로는 NAT 게이트웨이를 거쳐 열려 있습니다. 테스트에서도 같은 Pod에서 STS VPC 엔드포인트의 사설 IP는 차단됐지만 공용 DNS로 얻은 STS Public IP로는 연결됐습니다.</p>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>시작 지연과 Warm Pool</h2></header><div class="prose">
+<p>런타임별 템플릿에 <code>replicas: 3</code>과 <code>replicas: 0</code>인 Warm Pool을 하나씩 붙이고 SandboxClaim 생성부터 Claim의 Ready 조건까지 걸린 시간을 측정했습니다. 풀 네 개를 번갈아 10회씩 측정했으며 매번 Warm Pool이 다시 채워진 상태에서 Claim을 생성했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>풀</th><th>중앙값</th><th>p90</th><th>평균</th><th>대기 Pod 인수</th></tr>
+</thead>
+<tbody>
+<tr><td>gVisor Warm Pool</td><td>57.2</td><td>76.1</td><td>60.4</td><td>10/10</td></tr>
+<tr><td>gVisor Cold Start</td><td>2,046.6</td><td>2,553.8</td><td>2,090.8</td><td>0/10</td></tr>
+<tr><td>runc Warm Pool</td><td>53.3</td><td>95.4</td><td>62.8</td><td>10/10</td></tr>
+<tr><td>runc Cold Start</td><td>1,822.0</td><td>2,046.1</td><td>1,755.8</td><td>0/10</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> SandboxClaim 생성부터 Ready까지 걸린 시간 (단위 ms, 풀별 10회, p90은 inclusive 방식 분위수, VPC CNI NetworkPolicy 활성화 전 측정)</p>
+<p>Warm Pool을 사용하면 Claim이 이미 Ready 상태인 대기 Pod를 인수하므로 약 2초가 약 55 ms로 줄었습니다. Cold Start 대비 runc는 34.2배, gVisor는 35.8배 빠릅니다. 런타임 차이는 Cold Start에서만 드러났고(중앙값 기준 약 225 ms) Warm Pool에서는 사실상 사라졌습니다. 표 2는 NetworkPolicy를 활성화하기 전에 측정한 값입니다. 활성화 후 SDK로 3회씩 다시 잰 값도 Warm Pool 59~156 ms, Cold Start 1.8~2.6초로 같은 자릿수였습니다. 다만 재측정은 SDK 처리 시간이 포함된 방식이라 표 2와 직접 비교할 수는 없습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig02-eks-agent-sandbox-gvisor-part2-fig02-warmpool-latency.png" alt="SandboxClaim 생성부터 Ready까지 걸린 시간 (중앙값)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 2.</b> SandboxClaim 생성부터 Ready까지 걸린 시간 (중앙값)</figcaption></figure>
+<p>풀 크기를 넘는 동시 요청에서는 다른 문제가 보였습니다. 대기 Pod 3개인 풀에 Claim 6개를 동시에 생성하자 3개는 100~179 ms에 대기 Pod를 인수했지만 초과분 3개 중 2개는 약 15초가 걸렸습니다. 원인은 노드의 VPC CNI ipamd 로그에 있었습니다. 직전 측정에서 샌드박스 수십 개를 빠르게 만들고 지운 탓에, 사용 중인 IP는 7개뿐인데 삭제된 Pod의 IP 18개가 재사용 대기 시간(cooldown)에 묶여 있었습니다. VPC CNI는 v1.15.0부터 삭제된 Pod의 IP를 기본 30초(<a href="https://github.com/aws/amazon-vpc-cni-k8s/tree/master?tab=readme-ov-file#ip_cooldown_period-v1150" target="_blank" rel="noopener"><code>IP_COOLDOWN_PERIOD</code></a>) 동안 재사용하지 않습니다. 대기 시간이 풀린 뒤 같은 burst를 반복하자 초과분은 2.1~3.0초로 일반적인 Cold Start 수준이었습니다. 생성과 삭제가 잦은 샌드박스 노드라면 <a href="https://docs.aws.amazon.com/eks/latest/best-practices/prefix-mode-linux.html" target="_blank" rel="noopener">Prefix Delegation (접두사 위임)</a>으로 IP 할당 단위를 키우거나 <code>WARM_IP_TARGET</code>으로 여유 IP를 늘리면 됩니다. Warm Pool 크기는 평균 요청 수보다 피크 동시 요청 수에 맞춥니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>격리 비용</h2></header><div class="prose">
+<p>같은 노드, 같은 PodSpec, CPU limit 1인 두 샌드박스에서 같은 마이크로 벤치마크를 5회씩 실행해 중앙값을 비교했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>runc</th><th>gVisor</th><th>배수</th></tr>
+</thead>
+<tbody>
+<tr><td>순수 CPU 연산 (300만 회 루프)</td><td>0.144</td><td>0.146</td><td>1.0</td></tr>
+<tr><td><code>getppid</code> 시스템 콜 20만 회</td><td>0.035</td><td>0.444</td><td>12.5</td></tr>
+<tr><td>파일 1,000개 생성, stat, 삭제</td><td>0.041</td><td>0.195</td><td>4.7</td></tr>
+<tr><td><code>/bin/true</code> 50회 실행</td><td>0.030</td><td>0.192</td><td>6.5</td></tr>
+<tr><td>Python 인터프리터 5회 기동</td><td>0.206</td><td>0.399</td><td>1.9</td></tr>
+</tbody>
+</table></div>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig03-eks-agent-sandbox-gvisor-part2-fig03-isolation-cost.png" alt="runc 대비 gVisor 소요 시간 배수 (5회 중앙값)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 3.</b> runc 대비 gVisor 소요 시간 배수 (5회 중앙값)</figcaption></figure>
+<p><em>표 3. 같은 노드에서 측정한 소요 시간 (단위 초, 5회 중앙값, 배수는 gVisor ÷ runc)</em></p>
+<p>gVisor의 비용은 시스템 콜 횟수에 비례합니다. 순수 연산은 차이가 없었고 시스템 콜 한 번의 비용은 약 0.18 µs에서 2.2 µs로 늘었습니다. 모델이 생성하는 데이터 분석 코드처럼 연산 위주인 작업은 손해가 거의 없습니다. 반면 파일 작업과 프로세스 생성은 4.7~6.5배 느렸는데 패키지 설치나 빌드가 이런 유형에 해당합니다. 절대값으로 보면 프로세스 하나를 실행하는 데 0.6 ms에서 3.8 ms로 늘어나는 수준입니다.</p>
+<p>메모리는 kubelet이 집계한 working set 기준으로 runc 43 Mi, gVisor 57 Mi였습니다. 다만 호스트에서 잰 gVisor Pod의 Sentry와 Gofer 프로세스 RSS 합계는 약 120 MiB였습니다. 내역은 <code>runsc-sandbox</code> 72,596 KiB와 두 컨테이너의 <code>runsc-gofer</code> 24,756 KiB, 24,636 KiB입니다. kubelet 지표는 컨테이너 cgroup 기준이고 호스트 RSS는 런타임 프로세스와 공유 페이지까지 더한 값이라 집계 범위가 다릅니다. 노드 과밀을 막으려면 RuntimeClass의 <code>overhead.podFixed</code>로 이 차이를 스케줄러에 반영하고 <code>memory</code> 값은 이 규모에서 시작해 조정합니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>수명 주기와 상태 보존</h2></header><div class="prose">
+<p>에이전트 세션은 짧게 끝나기도 하고 며칠씩 유휴 상태로 남기도 합니다. Agent Sandbox는 만료와 일시 중지로 이 두 경우를 다룹니다. 만료는 <code>shutdownTime</code>에 만료 시각을, <code>shutdownPolicy</code>에 Delete나 Retain을 지정합니다. 일시 중지는 <code>spec.operatingMode</code>를 <code>Suspended</code>로 바꾸면 Pod가 삭제되고 <code>Running</code>으로 되돌리면 다시 생성됩니다. EBS 기반 시험을 위해 EBS CSI AddOn과 EKS Pod Identity 역할을 추가하고 암호화된 gp3 StorageClass를 만들었습니다. 그런 다음 <code>volumeClaimTemplates</code>로 작업 디렉터리를 EBS에 두는 Sandbox에서 파일을 쓰고 일시 중지와 재개를 거쳐 파일이 남아 있는지 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>시나리오</th><th>결과</th></tr>
+</thead>
+<tbody>
+<tr><td>Sandbox <code>shutdownTime</code> + <code>shutdownPolicy: Delete</code></td><td>만료 시각에 Sandbox와 Pod 삭제 (폴링 간격 2초 기준 오차 이내)</td></tr>
+<tr><td>Sandbox <code>shutdownTime</code> + <code>shutdownPolicy: Retain</code></td><td>Pod와 Service만 삭제, Sandbox는 <code>Ready=False (SandboxExpired)</code>로 유지</td></tr>
+<tr><td>SDK <code>create_sandbox(shutdown_after_seconds=60)</code></td><td>Claim의 lifecycle에 Delete 정책과 만료 시각 기록, 만료 시 Claim과 Sandbox 삭제</td></tr>
+<tr><td><code>operatingMode: Suspended</code> (emptyDir)</td><td>2.1초 후 Pod 삭제, podIPs 비움, 재개 2.2초, 파일 소실</td></tr>
+<tr><td><code>operatingMode: Suspended</code> (EBS gp3 PVC)</td><td>1.7초 후 Pod 삭제, PVC는 Bound 유지, 재개 5.6초, 파일 보존</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 만료와 일시 중지 시나리오별 결과 (gVisor 샌드박스 기준)</p>
+<p>EKS에서 일시 중지는 Pod를 지우고 Sandbox 객체와 볼륨을 남기는 동작이며 메모리 상태는 보존하지 않습니다. 에이전트의 작업 디렉터리를 이어서 사용하려면 <code>volumeClaimTemplates</code>로 PVC를 붙여야 합니다. EBS를 사용할 때 확인할 점은 두 가지입니다. 드라이버의 노드 플러그인은 taint가 있는 gVisor 노드에도 배치돼야 하고 EBS 볼륨은 가용 영역에 묶이므로 재개되는 Pod는 볼륨과 같은 가용 영역의 gVisor 노드로만 갈 수 있습니다. 가용 영역마다 gVisor 노드 용량을 두어야 재개가 막히지 않습니다. Sandbox를 삭제하면 템플릿에서 만든 PVC가 삭제됐고 StorageClass의 <code>reclaimPolicy</code>가 <code>Delete</code>이므로 EBS 볼륨도 함께 삭제됩니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>에이전트 연동과 router 보안</h2></header><div class="prose">
+<h3>5.1 Amazon Bedrock의 Claude와 샌드박스</h3>
+<p>마지막으로 실제 에이전트를 연결했습니다. 에이전트는 Anthropic Python SDK의 Tool Runner로 <code>run_python</code> 도구 하나를 노출합니다. 모델이 작성한 코드는 워크스테이션에서 실행되지 않고 Warm Pool에서 할당받은 gVisor 샌드박스에서만 실행됩니다.</p>
+<p>그림 4는 모델 호출 경로와 코드 실행 경로가 어떻게 나뉘는지 보여 줍니다. 에이전트는 VPC 엔드포인트로 Amazon Bedrock을 호출하고 모델이 만든 코드는 sandbox-router를 거쳐 샌드박스로만 전달됩니다. 샌드박스도 NAT 게이트웨이를 거쳐 Public Endpoint에 도달할 수 있으므로, 이 분리가 어느 계층에서 성립하는지는 아래에서 다룹니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig04-eks-agent-sandbox-gvisor-part2-fig04-agent-integration.png" alt="에이전트 연동 구조 (에이전트를 클러스터 안에서 실행하는 배치 기준이며 이 테스트에서는 워크스테이션에서 Tunnel 모드로 실행. 역할 분리는 자격 증명 계층에서 성립)" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 4.</b> 에이전트 연동 구조 (에이전트를 클러스터 안에서 실행하는 배치 기준이며 이 테스트에서는 워크스테이션에서 Tunnel 모드로 실행. 역할 분리는 자격 증명 계층에서 성립)</figcaption></figure>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 발췌: SandboxClient 생성과 메시지 구성 등은 생략했습니다
+from anthropic import AnthropicBedrock, BetaFallbackState, BetaRefusalFallbackMiddleware, beta_tool
+
+client = AnthropicBedrock(aws_region="ap-northeast-2",
+    middleware=[BetaRefusalFallbackMiddleware([{"model": "global.anthropic.claude-opus-4-8"}])])
+sandbox = SandboxClient(connection_config=SandboxLocalTunnelConnectionConfig()).create_sandbox(
+    warmpool="python-gvisor-warm", namespace="sandbox-lab", shutdown_after_seconds=1800)
+
+@beta_tool
+def run_python(code: str) -&gt; str:
+    """Run a complete Python 3 program inside the isolated sandbox and return its output."""
+    sandbox.files.write("main.py", code)
+    r = sandbox.commands.run("python3 main.py", timeout=120)
+    return f"exit_code={r.exit_code}\n{r.stdout[-8000:]}\n{r.stderr[-4000:]}"
+
+with BetaFallbackState():
+    for message in client.beta.messages.tool_runner(
+            model="global.anthropic.claude-opus-5-5", max_tokens=16000,
+            output_config={"effort": "medium"}, tools=[run_python], messages=[...]):
+        ...</code></pre></div>
+<p>에이전트에게 Warm Pool 측정 원본(JSON Lines)을 샌드박스에 올려 풀별 통계를 계산하게 했습니다. 샌드박스 할당은 0.08초, 모델 호출 4회, 샌드박스 실행 3회, 전체 33.2초였습니다. 두 번째 실행은 이전 실행의 변수를 가정한 코드라 오류(<code>exit_code=1</code>)로 끝났는데, 모델이 오류 출력을 읽고 세 번째 실행에서 프로그램 전체를 다시 작성했습니다. 에이전트가 낸 중앙값, p90, 평균, 배율 값은 샌드박스 밖에서 다시 계산한 값과 모두 일치했습니다.</p>
+<p>테스트는 서울 리전 <code>bedrock-runtime</code>의 global 추론 프로파일을 사용했습니다. 테스트 VPC에는 <code>bedrock-runtime</code> 인터페이스 VPC 엔드포인트가 있어서 클러스터 안에서 에이전트를 실행하면 NAT 게이트웨이 없이 Bedrock을 호출할 수 있습니다. 샌드박스의 NetworkPolicy는 이 VPC 엔드포인트의 사설 IP를 막지만 Bedrock Public Endpoint로 가는 NAT 경로는 제어하지 않습니다. 샌드박스가 Bedrock을 호출하지 못하는 실제 이유는 자격 증명이 없기 때문입니다. ServiceAccount 토큰은 마운트되지 않고(1부의 점검 결과) 노드 자격 증명은 IMDS 홉 제한 1에 막힙니다. 즉 에이전트와 샌드박스의 역할 분리는 네트워크가 아니라 자격 증명 계층에서 성립합니다. 네트워크 계층에서도 막으려면 템플릿 Egress에서 <code>0.0.0.0/0</code>을 빼고 필요한 목적지만 허용하거나, 샌드박스 노드 서브넷의 기본 경로를 AWS Network Firewall이나 egress 프록시로 보내야 합니다.</p>
+<h3>5.2 sandbox-router 인증과 접근 제한</h3>
+<p>Go router의 기본 인가 모드는 <code>allow-all</code>입니다. router에 접근할 수 있으면 이름을 아는 모든 샌드박스에 명령을 보낼 수 있다는 뜻입니다. <code>--authz-mode=tokenreview</code>와 토큰 필수 옵션을 활성화하고 다시 시험했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>요청</th><th>결과</th></tr>
+</thead>
+<tbody>
+<tr><td>인증 헤더 없음, 잘못된 토큰</td><td>401</td></tr>
+<tr><td>샌드박스 네임스페이스의 ServiceAccount 토큰</td><td>200</td></tr>
+<tr><td>관련 없는 네임스페이스의 ServiceAccount 토큰</td><td>200</td></tr>
+<tr><td>Python SDK 기본 동작</td><td><code>SandboxRequestError 401</code></td></tr>
+<tr><td>SDK 세션에 Authorization 헤더를 직접 추가</td><td>성공</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> --authz-mode=tokenreview 적용 시 요청별 결과</p>
+<p>TokenReview는 토큰이 클러스터에서 유효한지만 확인하고 그 주체가 해당 샌드박스를 사용할 권한이 있는지는 확인하지 않습니다. 관련 없는 네임스페이스의 토큰으로도 200을 받은 이유입니다. 또한 SDK v1.0.5는 인증 헤더를 보내지 않으므로 인증을 활성화하면 내부 세션 객체에 헤더를 직접 넣어야 합니다. 현재 버전에서는 router 앞단의 접근 자체를 좁히는 방법이 더 현실적입니다. 테스트에서는 router의 8080 포트 Ingress를 에이전트 네임스페이스 레이블로 제한하는 NetworkPolicy를 적용했고 레이블이 없는 네임스페이스에서는 연결이 차단됐습니다.</p>
+<p>다만 이 제한은 Pod 네트워크로 들어오는 요청에만 적용됩니다. SDK의 Tunnel 모드는 <code>kubectl port-forward</code>로 router에 연결합니다. port-forward 트래픽은 router Pod 안의 loopback으로 들어가므로 NetworkPolicy를 지나지 않습니다. 테스트에서도 정책 적용 후 레이블이 없는 Pod의 연결은 차단됐지만 port-forward 요청은 router에 도달했습니다. router의 기본 인가 모드가 <code>allow-all</code>이므로 <code>agent-sandbox-system</code> 네임스페이스의 <code>pods/portforward</code>(<code>create</code>) 권한은 RBAC로 따로 제한해야 합니다. <code>kubectl port-forward svc/…</code>도 내부적으로 Service를 Pod 하나로 해석해 이 권한을 사용합니다. 클러스터 안의 에이전트는 Tunnel 대신 Direct 연결로 router를 호출해야 레이블 기반 Ingress 제한이 적용됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>from k8s_agent_sandbox.models import SandboxDirectConnectionConfig
+
+config = SandboxDirectConnectionConfig(
+    api_url="http://sandbox-router-svc.agent-sandbox-system.svc:8080")</code></pre></div>
+<p>샌드박스 단위의 권한이 필요하면 샌드박스 UID, 메서드, 경로에 묶이는 <code>scoped-token</code> 모드를 검토하는 것을 권고합니다. 이 모드도 세 가지 전제가 있습니다. v1.0.5 SDK는 <code>Authorization</code> 헤더를 보내지 않으므로 세션에 헤더를 직접 넣어야 합니다. v2 토큰은 <code>X-Sandbox-UID</code> 헤더와 <code>--cache-enabled</code>가 필요하며 토큰을 발급하는 구성 요소도 직접 만들어야 합니다.</p>
+<p>router에 Egress 정책을 둘 때 확인한 점이 하나 있습니다. router는 Pod IP 캐시를 채우려고 Kubernetes API에 접속합니다. 그런데 Egress를 EKS 컨트롤 플레인 ENI가 있는 서브넷으로만 허용하자 router가 Ready 상태가 되지 못했습니다. <code>kubernetes</code> Service의 ClusterIP(<code>/32</code>)를 추가하자 정상화됐습니다. 원인은 정책이 적용되는 위치에 있습니다. VPC CNI의 eBPF 프로그램은 Pod의 네트워크 인터페이스(veth)에서 패킷을 검사하는데, 이 지점은 kube-proxy가 ClusterIP를 실제 엔드포인트 주소로 변환하기 전입니다. 그래서 Egress 정책은 ClusterIP를 목적지로 판정합니다. 업스트림 예제처럼 <code>default</code> 네임스페이스를 namespaceSelector로 지정한 규칙이 동작한 것도 같은 이유입니다. PolicyEndpoint를 확인하니 이 규칙이 해당 네임스페이스에 있는 Service의 ClusterIP로 확장되어 있었습니다.</p>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>도입 전 확인 항목</h2></header><div class="prose">
+<p>표 6에 테스트 과정에서 확인한 주요 고려 사항과 권장 조치를 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>확인 항목</th><th>증상</th><th>조치</th></tr>
+</thead>
+<tbody>
+<tr><td>노드 유형</td><td>EKS Auto Mode 노드에는 <code>runsc</code> 등록 불가</td><td>gVisor 전용 Managed Node Group</td></tr>
+<tr><td>VPC CNI NetworkPolicy</td><td>정책 객체가 있어도 IMDS와 Kubernetes API에 연결됨</td><td><code>enableNetworkPolicy: "true"</code></td></tr>
+<tr><td>샌드박스 DNS</td><td>기본 템플릿이 8.8.8.8, 1.1.1.1로 고정</td><td>사용자 정의 <code>networkPolicy</code>와 Route 53 Resolver</td></tr>
+<tr><td>샌드박스 Egress</td><td>기본 정책은 인터넷 전체 허용</td><td>목적지 허용 목록, egress 프록시, AWS Network Firewall, DNS Firewall</td></tr>
+<tr><td>router 응답 대기 시간</td><td>30초 넘는 명령이 502</td><td><code>--response-header-timeout</code> 상향</td></tr>
+<tr><td>Pod IP 재사용 대기</td><td>생성과 삭제가 잦으면 burst 기동 약 15초</td><td>Prefix Delegation, <code>WARM_IP_TARGET</code>, 피크 기준 Warm Pool</td></tr>
+<tr><td>router 인증</td><td>기본 <code>allow-all</code>, SDK는 인증 헤더 미전송, port-forward는 NetworkPolicy 우회</td><td>router Ingress 제한, port-forward RBAC 제한, <code>scoped-token</code> 검토</td></tr>
+<tr><td>상태 보존</td><td>일시 중지 시 emptyDir 데이터 소실</td><td><code>volumeClaimTemplates</code>, 가용 영역별 gVisor 노드</td></tr>
+<tr><td>Claim 옵션</td><td><code>env</code>나 <code>volumeClaimTemplates</code>를 지정한 Claim은 Warm Pool을 사용하지 않음</td><td>값을 템플릿에 고정</td></tr>
+<tr><td>설치 경로</td><td>블로그 Quick start의 <code>manifest.yaml</code>이 404</td><td><code>sandbox-with-extensions.yaml</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 도입 전 고려 사항과 권장 조치</p>
+<p>10개의 항목 중 노드 유형, VPC CNI NetworkPolicy, Pod IP 재사용 대기, 샌드박스 DNS 경로, 샌드박스 Egress는 EKS와 VPC 쪽에서 해결해야 하는 항목입니다. Agent Sandbox를 설치하는 것만으로는 드러나지 않으므로 설계 검토 단계에서 함께 점검해야 합니다. 테스트를 마친 뒤에는 샌드박스 워크로드와 네임스페이스, 컨트롤러와 router, RuntimeClass, 노드 그룹과 시작 템플릿 순서로 정리합니다. VPC CNI의 <code>enableNetworkPolicy</code>는 다른 워크로드가 NetworkPolicy를 사용하고 있을 수 있으므로 비활성화하기 전에 확인이 필요합니다.</p>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>마치며</h2></header><div class="prose">
+<p>모델이 생성한 코드를 노드와 클러스터로부터 분리하려면 Agent Sandbox만으로는 충분하지 않고 4개 계층이 함께 있어야 합니다.</p>
+<p>Pod 보안 설정은 권한 상승과 토큰 노출을 막고 gVisor는 Host Kernel과 프로세스를 보호합니다.</p>
+<p>VPC CNI가 적용하는 NetworkPolicy는 메타데이터 서비스와 클러스터 내부 경로를 보호하고 전용 노드 그룹의 IMDS 설정은 노드 자격 증명을 지킵니다. 시험에서는 VPC CNI 설정 하나를 빠뜨리자 정책 객체가 있어도 샌드박스가 메타데이터 서비스에 그대로 연결됐고 자격 증명을 지킨 것은 노드의 IMDS 설정뿐이었습니다. 또한 기본 정책은 인터넷으로 나가는 경로를 열어 두므로 외부 통신 통제는 별도로 설계해야 합니다.</p>
+<p>격리의 비용은 상쇄할 수 있었습니다. gVisor는 시스템 콜이 많은 작업을 2~12배 느리게 하고 Cold Start를 약 225 ms 늘렸습니다. 하지만 Warm Pool을 사용하면 Claim부터 Ready까지가 약 57 ms로 줄어 런타임 차이가 사라졌습니다. 운영 환경에서는 Agent Sandbox와 함께 EKS 구성도 설계해야 합니다. Prefix Delegation으로 Pod IP 재사용 대기의 영향을 줄이고 사용자 정의 정책으로 샌드박스 DNS를 Route 53 Resolver로 보내며 Egress 목적지를 제한합니다. 여기에 NetworkPolicy와 RBAC로 router 접근 범위를 좁히면 에이전트 실행 환경의 격리를 운영 수준으로 갖출 수 있습니다.</p>
+<p>Kubernetes Agent Sandbox로 Amazon EKS에서 AI 에이전트의 실행 환경을 격리한다는 것은, 모델이 만든 코드를 실행하는 일을 팀마다 따로 만드는 임시 구성에서 플랫폼이 제공하는 표준 기능으로 바꾼다는 뜻입니다. 샌드박스의 생성, 할당, 만료, 일시 중지가 SandboxTemplate, Warm Pool, SandboxClaim이라는 선언형 API로 정리됩니다. 그래서 플랫폼 팀은 템플릿 하나로 런타임, 보안 기본값, 네트워크 정책을 일관되게 적용할 수 있습니다. 각 팀은 Claim을 만드는 것만으로 Warm Pool에서 약 57 ms 만에 격리된 실행 환경을 받습니다. 또한 이 격리는 새로운 보안 제품을 도입하는 대신 Pod 보안 설정, VPC CNI NetworkPolicy, IMDS 설정, IAM 같은 EKS의 기존 통제 위에 gVisor 계층을 더한 구조입니다. 이미 EKS를 운영하는 조직이 익숙한 도구로 적용하고 점검할 수 있습니다. 외부 통신은 앞에서 설명한 것처럼 AWS Network Firewall이나 egress 프록시로 따로 통제합니다.</p>
+<p>조직 안에서 에이전트를 만드는 구성원이 늘어날수록 이 구조의 가치는 커집니다. 에이전트에게는 코드를 자유롭게 실행할 수 있는 환경을 주되, 그 영향 범위는 샌드박스와 허용한 목적지 안으로 한정하는 것입니다. Kubernetes Agent Sandbox와 gVisor, 그리고 EKS의 네트워크와 자격 증명 통제를 함께 설계하면, AI 에이전트를 조직 전체로 안전하게 확산하는 실행 기반을 갖출 수 있습니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>In Part 1, we set up <a href="https://github.com/kubernetes-sigs/agent-sandbox" target="_blank" rel="noopener">Agent Sandbox</a> v1.0.5 from Kubernetes SIG Apps together with gVisor on an Amazon EKS 1.36 cluster. We built four isolation layers that stop untrusted code and then verified two of them, the Pod security settings and the gVisor layer.</p>
+<p>The remaining two, NetworkPolicy and the IMDS settings of the dedicated node group, are verified in the first section of Part 2. Part 2 covers what you need to check when you take this setup to production. The topics are NetworkPolicy and the DNS path, the warm pool and Pod IP addresses, the performance cost of gVisor, the sandbox lifecycle, and agent integration and sandbox-router security.</p>
+<p>The test environment is the same as in Part 1. We added a node group dedicated to gVisor (m7i.xlarge × 2) to the EKS 1.36 cluster and installed the Agent Sandbox controller and the Go implementation of sandbox-router. In that state, we compared runc sandboxes with gVisor sandboxes.</p>
+<p><b><em>Posts in this series</em></b></p>
+<ul>
+<li><a href="https://whchoi98.github.io/docs/techblog/container/aws-ai-agent-sandbox-eks-isolation-part-1/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 1: Amazon EKS and Agent Sandbox, concepts and setup</em></a></li>
+<li><em>Isolating AI agent execution environments on AWS, Part 2: Amazon EKS and Agent Sandbox, concepts and setup</em></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-3/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 3: How ABLY operates Agent Sandbox on Amazon EKS</em></a></li>
+<li><a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-4/" target="_blank" rel="noopener"><em>Isolating AI agent execution environments on AWS, Part 4: Amazon Bedrock AgentCore Runtime, how the managed sandbox works and how to choose</em></a></li>
+</ul>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>NetworkPolicy works only after you enable it</h2></header><div class="prose">
+<p>When you do not specify a policy, SandboxTemplate creates a secure default policy. Ingress allows only traffic that comes from sandbox-router in the <code>agent-sandbox-system</code> namespace. Egress can go out only to public IP addresses, which means <code>0.0.0.0/0</code> minus the RFC 1918 private ranges and <code>169.254.0.0/16</code>. To check whether this policy actually works, we attempted TCP connections from inside a sandbox to several destinations.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Destination</th><th>Before enabling</th><th>After enabling</th></tr>
+</thead>
+<tbody>
+<tr><td>AWS API public endpoint (443)</td><td>Connected</td><td>Connected</td></tr>
+<tr><td>Instance metadata service (169.254.169.254)</td><td>Connected</td><td>Blocked</td></tr>
+<tr><td>Kubernetes API, CoreDNS, VPC DNS</td><td>Connected</td><td>Blocked</td></tr>
+<tr><td>Other sandbox Pods, router Pod</td><td>Connected</td><td>Blocked</td></tr>
+<tr><td>From a Pod in another namespace to the sandbox</td><td>Connected</td><td>Blocked</td></tr>
+<tr><td>Sandbox call through sandbox-router</td><td>HTTP 200</td><td>HTTP 200</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Connection results for the template-managed NetworkPolicy before and after enabling it in VPC CNI (same results for runc and gVisor, based on 3-second TCP attempts)</p>
+<p>Figure 1 summarizes the allowed and blocked paths from the sandbox Pod's point of view after enabling. The DNS and VPC endpoint paths are covered in the Route 53 Resolver section that follows.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig01-eks-agent-sandbox-gvisor-part2-fig01-network-policy.png" alt="Allowed and blocked paths of the NetworkPolicy applied to the sandbox Pod (after enabling it in VPC CNI, same results for runc and gVisor)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 1.</b> Allowed and blocked paths of the NetworkPolicy applied to the sandbox Pod (after enabling it in VPC CNI, same results for runc and gVisor)</figcaption></figure>
+<p>Before enabling, the sandbox still connected to the metadata service and the Kubernetes API even though the NetworkPolicy object existed. The reason was that there was not a single PolicyEndpoint, the object that turns a policy into node rules. After enabling, the same policy worked as documented and applied to gVisor Pods in the same way. gVisor uses a user-space network stack, but packets still pass through the Pod's network interface, and VPC CNI processes policies with eBPF on the node, so the policy applies regardless of the runtime. Only one policy was created per template, no matter how many sandboxes there were.</p>
+<p>One caveat in the <a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy.html" target="_blank" rel="noopener">EKS documentation</a> needs review. In the default standard mode of VPC CNI, a new Pod starts in a state that allows all traffic until its policies are applied. If a new sandbox Pod must stay blocked even during this short window right after startup, we recommend that you consider <code>NETWORK_POLICY_ENFORCING_MODE=strict</code>. Strict mode denies Pods without a policy by default, so you need to prepare policies for the whole cluster, including CoreDNS.</p>
+<p>The default policy blocks only the private ranges and the link-local range, and it allows every connection that goes out to the internet. This means that untrusted code can go anywhere on the internet, so this policy alone cannot prevent data exfiltration, connections to external C2 servers, or resource abuse such as cryptocurrency mining. To leave only the destinations that are really needed, such as package repositories, you must either restrict egress destinations with a custom <code>networkPolicy</code> or send the default route of the sandbox node subnets to an egress proxy or AWS Network Firewall. If you need a domain-level allow list, you can use Route 53 Resolver DNS Firewall, and the Route 53 Resolver configuration that follows is its prerequisite.</p>
+<h3>1.1 Protecting instance metadata</h3>
+<p>We tested the metadata service directly from a Sandbox that no NetworkPolicy selects (a core Sandbox created without a template). The TCP connection succeeded, but the PUT request for an IMDSv2 session token timed out with no response, and an IMDSv1-style query received HTTP 401. The IMDSv2-required setting and the hop limit of 1 in the launch template protected the credentials of the node IAM role independently of NetworkPolicy. The results for runc and gVisor were the same.</p>
+<h3>1.2 Sending DNS to Route 53 Resolver</h3>
+<p>If the template has no custom <code>networkPolicy</code> and the Pod spec does not set <code>dnsPolicy</code>, the controller injects <code>dnsPolicy: None</code> and <code>nameservers: ["8.8.8.8", "1.1.1.1"]</code> into the Pod. This design keeps in-cluster service names from being exposed. In an AWS environment, however, the sandbox's DNS queries bypass Route 53 Resolver and go out through the NAT gateway to public DNS. Route 53 Resolver DNS Firewall and query logging do not apply, and in a VPC that blocks outbound port 53, name resolution itself fails.</p>
+<p>When you define the policy directly in the template, DNS injection is turned off and the DNS settings that you specify on the Pod are kept as they are. The excerpt below sends DNS only to the Route 53 Resolver of the VPC (the +2 address of the VPC primary CIDR) and keeps the remaining IPv4 rules the same as the default policy. The IPv6 rules of the default policy are omitted because this is an IPv4 cluster.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>spec:
+  networkPolicy:
+    ingress:
+    - from:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: agent-sandbox-system}}
+        podSelector: {matchLabels: {app: sandbox-router}}
+    egress:
+    - to: [{ipBlock: {cidr: 10.100.0.2/32}}]          # Route 53 Resolver
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+      - ipBlock: {cidr: 0.0.0.0/0, except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]}
+  podTemplate:
+    spec:
+      dnsPolicy: None
+      dnsConfig: {nameservers: [10.100.0.2], options: [{name: ndots, value: "1"}]}</code></pre></div>
+<p>With this configuration, public names were resolved by Route 53 Resolver, in-cluster names were not resolved, and the metadata service and the Kubernetes API stayed blocked. However, if the VPC has <a href="https://docs.aws.amazon.com/vpc/latest/privatelink/privatelink-access-aws-services.html" target="_blank" rel="noopener">interface VPC endpoints</a> with private DNS enabled, service names such as <code>sts</code> and <code>bedrock-runtime</code> resolve to the private IP addresses of the endpoints. Those addresses are blocked by the egress rule that excludes the private ranges. If the sandbox needs to call AWS APIs, you must explicitly open port 443 to the endpoint subnets. Conversely, if your design gives the sandbox no AWS credentials, this block is a safe default. However, only the private IP path to the VPC endpoint is blocked, and the path to the public endpoint of the same service stays open through the NAT gateway. In our test, from the same Pod, the private IP address of the STS VPC endpoint was blocked, but the connection to the STS public IP address obtained through public DNS succeeded.</p>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Startup latency and the warm pool</h2></header><div class="prose">
+<p>For the template of each runtime, we attached one warm pool with <code>replicas: 3</code> and one with <code>replicas: 0</code>, and measured the time from SandboxClaim creation to the Ready condition of the Claim. We measured the four pools in rotation, 10 times each, and created each Claim only after the warm pool had been refilled.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Pool</th><th>Median</th><th>p90</th><th>Mean</th><th>Standby Pods adopted</th></tr>
+</thead>
+<tbody>
+<tr><td>gVisor warm pool</td><td>57.2</td><td>76.1</td><td>60.4</td><td>10/10</td></tr>
+<tr><td>gVisor cold start</td><td>2,046.6</td><td>2,553.8</td><td>2,090.8</td><td>0/10</td></tr>
+<tr><td>runc warm pool</td><td>53.3</td><td>95.4</td><td>62.8</td><td>10/10</td></tr>
+<tr><td>runc cold start</td><td>1,822.0</td><td>2,046.1</td><td>1,755.8</td><td>0/10</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Time from SandboxClaim creation to Ready (in ms, 10 runs per pool, p90 is an inclusive percentile, measured before enabling NetworkPolicy in VPC CNI)</p>
+<p>With a warm pool, the Claim adopts a standby Pod that is already Ready, so about 2 seconds dropped to about 55 ms. Compared with a cold start, runc is 34.2 times faster and gVisor is 35.8 times faster. The runtime difference showed up only in cold starts (about 225 ms at the median) and practically disappeared with the warm pool. Table 2 shows values measured before NetworkPolicy was enabled. The values that we measured again after enabling, 3 times each with the SDK, were of the same order of magnitude, at 59 to 156 ms for the warm pool and 1.8 to 2.6 seconds for cold starts. However, the remeasurement includes SDK processing time, so it cannot be compared directly with Table 2.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig02-eks-agent-sandbox-gvisor-part2-fig02-warmpool-latency.png" alt="Time from SandboxClaim creation to Ready (median)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 2.</b> Time from SandboxClaim creation to Ready (median)</figcaption></figure>
+<p>A different problem appeared with concurrent requests that exceed the pool size. When we created 6 Claims at the same time against a pool with 3 standby Pods, 3 of them adopted standby Pods in 100 to 179 ms, but 2 of the 3 excess Claims took about 15 seconds. The cause was in the VPC CNI ipamd log on the node. Because the preceding measurement had rapidly created and deleted dozens of sandboxes, only 7 IP addresses were in use while 18 IP addresses of deleted Pods were held in the reuse cooldown period. Since v1.15.0, VPC CNI does not reuse the IP address of a deleted Pod for 30 seconds by default (<a href="https://github.com/aws/amazon-vpc-cni-k8s/tree/master?tab=readme-ov-file#ip_cooldown_period-v1150" target="_blank" rel="noopener"><code>IP_COOLDOWN_PERIOD</code></a>). When we repeated the same burst after the cooldown had ended, the excess Claims took 2.1 to 3.0 seconds, which is the level of a typical cold start. For sandbox nodes with frequent creation and deletion, you can enlarge the IP allocation unit with <a href="https://docs.aws.amazon.com/eks/latest/best-practices/prefix-mode-linux.html" target="_blank" rel="noopener">prefix delegation</a> or increase the spare IP addresses with <code>WARM_IP_TARGET</code>. Size the warm pool for the peak number of concurrent requests rather than the average number of requests.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>The cost of isolation</h2></header><div class="prose">
+<p>On two sandboxes with the same node, the same PodSpec, and a CPU limit of 1, we ran the same microbenchmarks 5 times each and compared the medians.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>runc</th><th>gVisor</th><th>Ratio</th></tr>
+</thead>
+<tbody>
+<tr><td>Pure CPU computation (loop of 3 million iterations)</td><td>0.144</td><td>0.146</td><td>1.0</td></tr>
+<tr><td><code>getppid</code> system call, 200,000 times</td><td>0.035</td><td>0.444</td><td>12.5</td></tr>
+<tr><td>Create, stat, and delete 1,000 files</td><td>0.041</td><td>0.195</td><td>4.7</td></tr>
+<tr><td><code>/bin/true</code> run 50 times</td><td>0.030</td><td>0.192</td><td>6.5</td></tr>
+<tr><td>Python interpreter started 5 times</td><td>0.206</td><td>0.399</td><td>1.9</td></tr>
+</tbody>
+</table></div>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig03-eks-agent-sandbox-gvisor-part2-fig03-isolation-cost.png" alt="gVisor elapsed time as a multiple of runc (median of 5 runs)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 3.</b> gVisor elapsed time as a multiple of runc (median of 5 runs)</figcaption></figure>
+<p><em>Table 3. Elapsed time measured on the same node (in seconds, median of 5 runs, ratio is gVisor ÷ runc)</em></p>
+<p>The cost of gVisor is proportional to the number of system calls. Pure computation showed no difference, and the cost of a single system call rose from about 0.18 µs to 2.2 µs. Compute-heavy work, such as the data analysis code that a model generates, loses almost nothing. In contrast, file operations and process creation were 4.7 to 6.5 times slower, and package installation and builds fall into this category. In absolute terms, running one process goes from 0.6 ms to 3.8 ms.</p>
+<p>Memory, based on the working set that the kubelet reports, was 43 Mi for runc and 57 Mi for gVisor. However, the total RSS of the Sentry and Gofer processes of the gVisor Pod, measured on the host, was about 120 MiB. The breakdown is 72,596 KiB for <code>runsc-sandbox</code>, and 24,756 KiB and 24,636 KiB for the <code>runsc-gofer</code> processes of the two containers. The kubelet metric is based on the container cgroup, while the host RSS also adds the runtime processes and shared pages, so the two cover different scopes. To prevent node overcommitment, reflect this difference to the scheduler with <code>overhead.podFixed</code> in the RuntimeClass, and start the <code>memory</code> value at this scale and adjust it from there.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Lifecycle and state preservation</h2></header><div class="prose">
+<p>Agent sessions sometimes end quickly and sometimes stay idle for days. Agent Sandbox handles these two cases with expiration and suspension. For expiration, you set the expiration time in <code>shutdownTime</code> and either Delete or Retain in <code>shutdownPolicy</code>. For suspension, changing <code>spec.operatingMode</code> to <code>Suspended</code> deletes the Pod, and changing it back to <code>Running</code> creates the Pod again. For the EBS-based test, we added the Amazon EBS CSI driver add-on and an EKS Pod Identity role, and created an encrypted gp3 StorageClass. We then wrote a file in a Sandbox that keeps its working directory on EBS through <code>volumeClaimTemplates</code>, and checked whether the file remained after a suspend and a resume.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Scenario</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>Sandbox <code>shutdownTime</code> + <code>shutdownPolicy: Delete</code></td><td>Sandbox and Pod deleted at the expiration time (within the error of the 2-second polling interval)</td></tr>
+<tr><td>Sandbox <code>shutdownTime</code> + <code>shutdownPolicy: Retain</code></td><td>Only the Pod and Service deleted, Sandbox kept as <code>Ready=False (SandboxExpired)</code></td></tr>
+<tr><td>SDK <code>create_sandbox(shutdown_after_seconds=60)</code></td><td>Delete policy and expiration time recorded in the lifecycle of the Claim, Claim and Sandbox deleted at expiration</td></tr>
+<tr><td><code>operatingMode: Suspended</code> (emptyDir)</td><td>Pod deleted after 2.1 seconds, podIPs cleared, resume in 2.2 seconds, file lost</td></tr>
+<tr><td><code>operatingMode: Suspended</code> (EBS gp3 PVC)</td><td>Pod deleted after 1.7 seconds, PVC stays Bound, resume in 5.6 seconds, file preserved</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Results by expiration and suspension scenario (for a gVisor sandbox)</p>
+<p>On EKS, suspension deletes the Pod and keeps the Sandbox object and its volumes, and it does not preserve memory state. To keep using the agent's working directory, you must attach a PVC with <code>volumeClaimTemplates</code>. There are two points to check when you use EBS. The node plugin of the driver must also be placed on the tainted gVisor nodes, and because an EBS volume is tied to an Availability Zone, a resumed Pod can go only to a gVisor node in the same Availability Zone as the volume. You need gVisor node capacity in every Availability Zone so that a resume is not blocked. When we deleted the Sandbox, the PVC created from the template was deleted, and because the <code>reclaimPolicy</code> of the StorageClass is <code>Delete</code>, the EBS volume is deleted along with it.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Agent integration and router security</h2></header><div class="prose">
+<h3>5.1 Claude in Amazon Bedrock and the sandbox</h3>
+<p>Finally, we connected a real agent. The agent exposes a single tool, <code>run_python</code>, through the Tool Runner of the Anthropic Python SDK. The code that the model writes does not run on the workstation. It runs only in a gVisor sandbox allocated from the warm pool.</p>
+<p>Figure 4 shows how the model invocation path and the code execution path are separated. The agent calls Amazon Bedrock through a VPC endpoint, and the code that the model produces is delivered only to the sandbox through sandbox-router. Because the sandbox can also reach the public endpoint through the NAT gateway, the layer at which this separation holds is covered below.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-ai-agent-sandbox-eks-isolation-part-2-assets/fig04-eks-agent-sandbox-gvisor-part2-fig04-agent-integration.png" alt="Agent integration architecture (based on a deployment that runs the agent inside the cluster, while this test ran it on a workstation in Tunnel mode. Role separation holds at the credentials layer)" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 4.</b> Agent integration architecture (based on a deployment that runs the agent inside the cluster, while this test ran it on a workstation in Tunnel mode. Role separation holds at the credentials layer)</figcaption></figure>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Excerpt: SandboxClient creation, message construction, and other parts are omitted
+from anthropic import AnthropicBedrock, BetaFallbackState, BetaRefusalFallbackMiddleware, beta_tool
+
+client = AnthropicBedrock(aws_region="ap-northeast-2",
+    middleware=[BetaRefusalFallbackMiddleware([{"model": "global.anthropic.claude-opus-4-8"}])])
+sandbox = SandboxClient(connection_config=SandboxLocalTunnelConnectionConfig()).create_sandbox(
+    warmpool="python-gvisor-warm", namespace="sandbox-lab", shutdown_after_seconds=1800)
+
+@beta_tool
+def run_python(code: str) -&gt; str:
+    """Run a complete Python 3 program inside the isolated sandbox and return its output."""
+    sandbox.files.write("main.py", code)
+    r = sandbox.commands.run("python3 main.py", timeout=120)
+    return f"exit_code={r.exit_code}\n{r.stdout[-8000:]}\n{r.stderr[-4000:]}"
+
+with BetaFallbackState():
+    for message in client.beta.messages.tool_runner(
+            model="global.anthropic.claude-opus-5-5", max_tokens=16000,
+            output_config={"effort": "medium"}, tools=[run_python], messages=[...]):
+        ...</code></pre></div>
+<p>We had the agent upload the raw warm pool measurements (JSON Lines) to the sandbox and compute per-pool statistics. Sandbox allocation took 0.08 seconds, and the run involved 4 model calls, 3 sandbox executions, and 33.2 seconds in total. The second execution ended with an error (<code>exit_code=1</code>) because its code assumed variables from the previous execution, and the model read the error output and rewrote the whole program in the third execution. The median, p90, mean, and ratio values that the agent produced all matched the values recalculated outside the sandbox.</p>
+<p>The test used the global inference profile of <code>bedrock-runtime</code> in the Seoul Region. The test VPC has a <code>bedrock-runtime</code> interface VPC endpoint, so an agent that runs inside the cluster can call Bedrock without a NAT gateway. The sandbox's NetworkPolicy blocks the private IP addresses of this VPC endpoint, but it does not control the NAT path to the Bedrock public endpoint. The real reason the sandbox cannot call Bedrock is that it has no credentials. The ServiceAccount token is not mounted (as checked in Part 1), and the node credentials are blocked by the IMDS hop limit of 1. In other words, the role separation between the agent and the sandbox holds at the credentials layer, not at the network layer. To block the path at the network layer as well, you must either remove <code>0.0.0.0/0</code> from the egress rules of the template and allow only the destinations that are needed, or send the default route of the sandbox node subnets to AWS Network Firewall or an egress proxy.</p>
+<h3>5.2 sandbox-router authentication and access restriction</h3>
+<p>The default authorization mode of the Go router is <code>allow-all</code>. This means that anyone who can reach the router can send commands to every sandbox whose name they know. We enabled <code>--authz-mode=tokenreview</code> and the token-required option and tested again.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Request</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>No authentication header, invalid token</td><td>401</td></tr>
+<tr><td>ServiceAccount token from the sandbox namespace</td><td>200</td></tr>
+<tr><td>ServiceAccount token from an unrelated namespace</td><td>200</td></tr>
+<tr><td>Default behavior of the Python SDK</td><td><code>SandboxRequestError 401</code></td></tr>
+<tr><td>Authorization header added directly to the SDK session</td><td>Success</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Results by request with --authz-mode=tokenreview applied</p>
+<p>TokenReview checks only whether the token is valid in the cluster and does not check whether its subject is authorized to use the sandbox in question. That is why a token from an unrelated namespace also received 200. In addition, SDK v1.0.5 does not send an authentication header, so if you enable authentication, you must put the header directly into the internal session object. In the current version, narrowing access in front of the router is the more practical approach. In our test, we applied a NetworkPolicy that restricts ingress on port 8080 of the router by an agent namespace label, and connections from namespaces without the label were blocked.</p>
+<p>However, this restriction applies only to requests that come in through the Pod network. The Tunnel mode of the SDK connects to the router with <code>kubectl port-forward</code>. Port-forward traffic enters through the loopback interface inside the router Pod, so it does not pass through NetworkPolicy. In our test as well, after the policy was applied, connections from Pods without the label were blocked, but port-forward requests reached the router. Because the default authorization mode of the router is <code>allow-all</code>, you must separately restrict the <code>pods/portforward</code> (<code>create</code>) permission in the <code>agent-sandbox-system</code> namespace with RBAC. <code>kubectl port-forward svc/…</code> also uses this permission, because it internally resolves the Service to a single Pod. An agent inside the cluster must call the router through a Direct connection instead of Tunnel for the label-based ingress restriction to apply.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>from k8s_agent_sandbox.models import SandboxDirectConnectionConfig
+
+config = SandboxDirectConnectionConfig(
+    api_url="http://sandbox-router-svc.agent-sandbox-system.svc:8080")</code></pre></div>
+<p>If you need per-sandbox authorization, we recommend that you consider the <code>scoped-token</code> mode, which is bound to the sandbox UID, method, and path. This mode also has three prerequisites. The v1.0.5 SDK does not send the <code>Authorization</code> header, so you must put the header directly into the session. v2 tokens require the <code>X-Sandbox-UID</code> header and <code>--cache-enabled</code>, and you must also build the component that issues tokens yourself.</p>
+<p>There is one point that we confirmed when placing an egress policy on the router. The router connects to the Kubernetes API to fill its Pod IP cache. However, when we allowed egress only to the subnets that hold the EKS control plane ENIs, the router could not become Ready. Adding the ClusterIP (<code>/32</code>) of the <code>kubernetes</code> Service brought it back to normal. The cause lies in where the policy is applied. The eBPF program of VPC CNI inspects packets at the Pod's network interface (veth), and this point comes before kube-proxy translates the ClusterIP into the actual endpoint address. As a result, the egress policy evaluates the ClusterIP as the destination. A rule that specifies the <code>default</code> namespace with a namespaceSelector, as in the upstream example, works for the same reason. When we checked the PolicyEndpoint, this rule had been expanded to the ClusterIPs of the Services in that namespace.</p>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Checklist before adoption</h2></header><div class="prose">
+<p>Table 6 summarizes the main considerations that we identified during testing and the recommended actions.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Check item</th><th>Symptom</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td>Node type</td><td><code>runsc</code> cannot be registered on EKS Auto Mode nodes</td><td>Managed node group dedicated to gVisor</td></tr>
+<tr><td>VPC CNI NetworkPolicy</td><td>Connects to IMDS and the Kubernetes API even when the policy object exists</td><td><code>enableNetworkPolicy: "true"</code></td></tr>
+<tr><td>Sandbox DNS</td><td>Default template pins DNS to 8.8.8.8 and 1.1.1.1</td><td>Custom <code>networkPolicy</code> and Route 53 Resolver</td></tr>
+<tr><td>Sandbox egress</td><td>Default policy allows the entire internet</td><td>Destination allow list, egress proxy, AWS Network Firewall, DNS Firewall</td></tr>
+<tr><td>Router response timeout</td><td>Commands longer than 30 seconds return 502</td><td>Raise <code>--response-header-timeout</code></td></tr>
+<tr><td>Pod IP reuse cooldown</td><td>With frequent creation and deletion, burst startup takes about 15 seconds</td><td>Prefix delegation, <code>WARM_IP_TARGET</code>, warm pool sized for peak</td></tr>
+<tr><td>Router authentication</td><td>Default is <code>allow-all</code>, the SDK sends no authentication header, port-forward bypasses NetworkPolicy</td><td>Restrict router ingress, restrict port-forward with RBAC, consider <code>scoped-token</code></td></tr>
+<tr><td>State preservation</td><td>emptyDir data is lost on suspension</td><td><code>volumeClaimTemplates</code>, gVisor nodes in each Availability Zone</td></tr>
+<tr><td>Claim options</td><td>A Claim that sets <code>env</code> or <code>volumeClaimTemplates</code> does not use the warm pool</td><td>Fix the values in the template</td></tr>
+<tr><td>Installation path</td><td><code>manifest.yaml</code> in the blog Quick start returns 404</td><td><code>sandbox-with-extensions.yaml</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Considerations before adoption and recommended actions</p>
+<p>Of the 10 items, node type, VPC CNI NetworkPolicy, Pod IP reuse cooldown, the sandbox DNS path, and sandbox egress must be solved on the EKS and VPC side. They do not surface just by installing Agent Sandbox, so you should check them together at the design review stage. After you finish testing, clean up in this order: sandbox workloads and namespaces, the controller and router, the RuntimeClass, and then the node group and launch template. Other workloads might be using NetworkPolicy, so you need to check before you disable <code>enableNetworkPolicy</code> in VPC CNI.</p>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Closing</h2></header><div class="prose">
+<p>To separate model-generated code from the node and the cluster, Agent Sandbox alone is not enough, and all four layers must be in place together.</p>
+<p>The Pod security settings block privilege escalation and token exposure, and gVisor protects the host kernel and processes.</p>
+<p>The NetworkPolicy that VPC CNI applies protects the metadata service and in-cluster paths, and the IMDS settings of the dedicated node group protect the node credentials. In our tests, when a single VPC CNI setting was missing, the sandbox still connected to the metadata service even though the policy object existed, and the only thing that protected the credentials was the IMDS settings of the node. In addition, the default policy leaves the path to the internet open, so you must design the control of outbound communication separately.</p>
+<p>The cost of isolation could be offset. gVisor made work with many system calls 2 to 12 times slower and added about 225 ms to cold starts. With a warm pool, however, the time from Claim to Ready dropped to about 57 ms and the runtime difference disappeared. In production, you need to design the EKS configuration along with Agent Sandbox. Reduce the impact of the Pod IP reuse cooldown with prefix delegation, send sandbox DNS to Route 53 Resolver with a custom policy, and restrict egress destinations. If you also narrow the scope of access to the router with NetworkPolicy and RBAC, you can bring the isolation of the agent execution environment to a production level.</p>
+<p>Isolating the execution environment of AI agents on Amazon EKS with Kubernetes Agent Sandbox means turning the job of running model-generated code from an ad hoc setup that each team builds on its own into a standard capability that the platform provides. Creating, allocating, expiring, and suspending sandboxes are organized into declarative APIs, namely SandboxTemplate, the warm pool, and SandboxClaim. As a result, the platform team can consistently apply the runtime, security defaults, and network policy with a single template. Each team gets an isolated execution environment from the warm pool in about 57 ms just by creating a Claim. In addition, instead of introducing a new security product, this isolation adds a gVisor layer on top of existing EKS controls such as Pod security settings, VPC CNI NetworkPolicy, IMDS settings, and IAM. Organizations that already operate EKS can apply and check it with tools they know. Outbound communication is controlled separately with AWS Network Firewall or an egress proxy, as described earlier.</p>
+<p>The value of this structure grows as more people in the organization build agents. The idea is to give agents an environment where they can run code freely while confining the scope of impact to the sandbox and the destinations that you allow. When you design Kubernetes Agent Sandbox and gVisor together with the network and credential controls of EKS, you can build an execution foundation for safely expanding AI agents across the whole organization.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy-configure.html" target="_blank" rel="noopener">Restrict Pod network traffic with Kubernetes network policies - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy.html" target="_blank" rel="noopener">Limit Pod traffic with Kubernetes network policies - Amazon EKS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/best-practices/identity-and-access-management.html" target="_blank" rel="noopener">Identity and Access Management - Amazon EKS Best Practices Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/best-practices/prefix-mode-linux.html" target="_blank" rel="noopener">Prefix Mode for Linux - Amazon EKS Best Practices Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://github.com/aws/amazon-vpc-cni-k8s/tree/master?tab=readme-ov-file#ip_cooldown_period-v1150" target="_blank" rel="noopener">IP_COOLDOWN_PERIOD - aws/amazon-vpc-cni-k8s README</a></td><td class="nowrap"><span class="l-ko">GitHub</span><span class="l-en">GitHub</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/ebs/latest/userguide/ebs-attaching-volume.html" target="_blank" rel="noopener">Attach an Amazon EBS volume to an Amazon EC2 instance - Amazon EBS User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/vpc/latest/userguide/AmazonDNS-concepts.html" target="_blank" rel="noopener">Understanding Amazon DNS - Amazon VPC User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resolver-dns-firewall-overview.html" target="_blank" rel="noopener">How Resolver DNS Firewall works - Amazon Route 53 Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/resolver-query-logs.html" target="_blank" rel="noopener">Resolver query logging - Amazon Route 53 Developer Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/vpc/latest/privatelink/privatelink-access-aws-services.html" target="_blank" rel="noopener">Access AWS services through AWS PrivateLink - AWS PrivateLink Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html" target="_blank" rel="noopener">Global cross-Region inference - Amazon Bedrock User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://platform.claude.com/docs/en/build-with-claude/claude-in-amazon-bedrock" target="_blank" rel="noopener">Claude in Amazon Bedrock - Claude Docs</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-10-18 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-ai-agent-sandbox-eks-isolation-part-2/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-10-18. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">본문의 수치는 2026년 10월 기준 서울 리전의 EKS 1.36 클러스터에서 Agent Sandbox v1.0.5, gVisor release-20260928.0, m7i.xlarge 노드로 측정한 값입니다. 버전, 인스턴스 유형, 노드의 IP 사용 상태에 따라 결과가 달라질 수 있습니다.</span><span class="l-en">The figures in this post were measured in October 2026 on an EKS 1.36 cluster in the Seoul Region with Agent Sandbox v1.0.5, gVisor release-20260928.0, and m7i.xlarge nodes. Results can vary with the version, the instance type, and the IP usage state of the nodes.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

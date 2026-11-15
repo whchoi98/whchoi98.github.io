@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code 토큰 비용 최적화하기 1부: 비용 구조와 세션 습관</title>
+<meta name="description" content="Claude Code의 토큰 비용은 질문의 길이가 아니라 세션의 크기에 비례하고 실제로 지불하는 단가는 프롬프트 캐싱 적중률이 정합니다. 2부작의 1부로, 비용 구조와 측정 도구, 개인이 바로 적용할 수 있는 세션 습관을 다룹니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/claude-code-token-economy-01/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-09-02</span><span class="l-en">Published 2026-09-02</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 9분</span><span class="l-en">9 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/claude-code-token-economy-01/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/claude-code-token-economy-01/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">Claude Code 토큰 비용 최적화하기 1부: 비용 구조와 세션 습관</span><span class="l-en">Optimizing Claude Code token costs, Part 1: Cost structure and session habits</span></h1>
+<p class="thesis"><span class="l-ko">짧은 질문 하나에도 Claude Code의 토큰 사용량이 높은 이유와 개인이 비용을 줄이는 방법을 묻는 글입니다. Claude Code는 메시지를 보낼 때마다 시스템 프롬프트, 프로젝트 컨텍스트, 전체 대화 이력을 다시 전송하므로 비용은 컨텍스트 크기에 비례하고 실제 단가는 캐시 적중률이 정합니다. 작업을 바꿀 때마다 /clear로 새로 시작하고 CLAUDE.md를 200줄 이하로 유지하며 모델과 effort를 작업에 맞추고 도구 오버헤드를 /context로 점검하면 개인이 통제할 수 있는 낭비 경로는 대부분 닫힙니다.</span><span class="l-en">This post asks why Claude Code token usage is high even for a single short question and how an individual can bring the cost down. Claude Code resends the system prompt, the project context, and the entire conversation history with every message, so cost is proportional to context size and the price you actually pay is set by the cache hit rate. Starting fresh with /clear every time you switch tasks, keeping CLAUDE.md to 200 lines or fewer, matching the model and effort to the task, and checking tool overhead with /context closes most of the paths to waste that an individual can control.</span></p>
+<div class="tags"><span>#Claude Code</span><span>#Amazon Bedrock</span><span>#Prompt Caching</span><span>#MCP</span><span>#Subagents</span><span>#Hooks</span><span>#Skills</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">비용 구조: 토큰은 어디서 사용되는가</a><a href="#ko-s3">측정: /usage, /context, /insights</a><a href="#ko-s4">컨텍스트 정리: /clear, /compact, /rewind</a><a href="#ko-s5">모델 선택과 사고 깊이</a><a href="#ko-s6">도구 오버헤드: MCP와 CLI</a><a href="#ko-s7">구조적 절약: 서브에이전트, Hook, Skills</a><a href="#ko-s8">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Cost structure: where tokens are spent</a><a href="#en-s3">Measurement: /usage, /context, /insights</a><a href="#en-s4">Context cleanup: /clear, /compact, /rewind</a><a href="#en-s5">Model selection and thinking depth</a><a href="#en-s6">Tool overhead: MCP and CLIs</a><a href="#en-s7">Structural savings: subagents, hooks, and skills</a><a href="#en-s8">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>Claude Code를 팀에 도입하고 나면 비슷한 질문들이 찾아옵니다. 짧은 한 문장의 질문만 했는데 토큰 사용량이 왜 이렇게 높은지, 하루가 끝날 때쯤이면 세션이 왜 이렇게 무거워져 있는지 같은 의문입니다.</p>
+<p>Claude Code는 메시지를 보낼 때마다 시스템 프롬프트, 프로젝트 컨텍스트, 지금까지의 전체 대화 이력을 다시 전송하고 비용은 그 컨텍스트 크기에 비례합니다. 그리고 실제로 지불하는 토큰 단가는 프롬프트 캐싱(prompt caching) 적중률이 정합니다. 이 글은 Claude Code 토큰 비용 최적화를 다루는 2부작 시리즈의 1부로, 비용 구조와 측정 도구, 그리고 개인이 바로 적용할 수 있는 세션 습관을 다룹니다. 캐시 경제학과 Amazon Bedrock을 포함한 조직 단위 비용 관리는 2부에서 이어집니다. 대상 독자는 Claude Code를 실무에서 사용해 본 분들이며 토큰과 기본 슬래시 명령 사용 경험은 전제하되 프롬프트 캐싱 같은 핵심 개념은 본문에서 정의합니다. 본문의 수치와 기본값은 Claude Code 공식 문서와 Amazon Bedrock 사용자 가이드의 2026년 8월 기준입니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>비용 구조: 토큰은 어디서 사용되는가</h2></header><div class="prose">
+<p>모델은 요청 사이에 아무것도 기억하지 않습니다. 그래서 Claude Code는 메시지를 보낼 때마다 시스템 프롬프트, 프로젝트 컨텍스트, 지금까지의 모든 대화와 도구 결과 전체를 다시 전송합니다. 한 번의 턴(Turn) 안에서 Claude가 도구를 여러 번 사용하면 그때마다 또 한 번의 요청이 전송됩니다. 토큰 비용이 질문의 길이가 아니라 <b>세션의 크기</b>에 비례하는 이유입니다.</p>
+<p>요청은 세 계층으로 이뤄지며 잘 변하지 않는 내용일수록 앞에 옵니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>계층</th><th>내용</th><th>바뀌는 시점</th></tr>
+</thead>
+<tbody>
+<tr><td>시스템 프롬프트</td><td>코어 지시, 도구 정의, 출력 스타일</td><td>도구 정의 집합이 바뀌거나 Claude Code 업그레이드 시</td></tr>
+<tr><td>프로젝트 컨텍스트</td><td>CLAUDE.md, 자동 메모리, 스코프별 규칙</td><td>세션 시작, /clear 또는 /compact 이후</td></tr>
+<tr><td>대화</td><td>사용자 메시지, 응답, 도구 결과</td><td>매 턴(Turn)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 요청을 구성하는 세 계층</p>
+<p>이 반복 전송을 감당할 수 있게 해 주는 장치가 프롬프트 캐싱입니다. 직전 요청과 동일한 프리픽스(prefix)는 재처리하는 대신 캐시에서 읽어오고 표준 입력 단가의 <b>약 10%</b>로 과금됩니다. 캐시를 새로 쓰는 비용은 표준보다 비싸지만 한 번뿐이고 이후 턴은 그 프리픽스를 계속 낮은 단가로 재사용합니다. 표의 TTL(Time To Live)은 캐시가 유지되는 시간입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>처리 경로</th><th>상대 단가(표준 입력 = 1.0배)</th></tr>
+</thead>
+<tbody>
+<tr><td>캐시 쓰기(1시간 TTL)</td><td>2.0배</td></tr>
+<tr><td>캐시 쓰기(5분 TTL)</td><td>1.25배</td></tr>
+<tr><td>표준 입력</td><td>1.0배</td></tr>
+<tr><td>캐시 읽기</td><td>약 0.1배</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 처리 경로별 상대 단가. 캐시 쓰기 비용은 이후 턴의 할인을 얻기 위한 1회성 투자입니다</p>
+<p>과금 방식은 접속 방법에 따라 달라집니다. 구독 플랜(Pro, Max, Team)은 달러 대신 사용량 한도를 소모하고 이 한도는 5시간 롤링 윈도우와 주간 윈도우 단위로 관리됩니다. Claude Console의 API 및 Claude Enterprise와 Amazon Bedrock 같은 클라우드 프로바이더는 토큰 단위로 과금됩니다.</p>
+<p>원칙은 하나입니다. 비용은 컨텍스트 크기에 비례하고 실제로 지불하는 토큰 단가는 캐시 적중률이 정합니다. 이 글의 모든 전략은 이 두 가지 변수를 줄이는 방법입니다.</p>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>측정: /usage, /context, /insights</h2></header><div class="prose">
+<p>최적화는 측정에서 시작합니다. <code>/usage</code>는 인증 방식에 따라 보여주는 내용이 다릅니다. API 과금 사용자(Claude Enterprise)에게는 현재 세션의 토큰 통계와 추정 비용을 담은 Session 블록을, 구독자에게는 플랜 사용량 바와 최근 사용량의 어트리뷰션(소모 주체별 내역)을 보여줍니다. Skills, 서브에이전트, 플러그인, 개별 MCP 서버가 각각 전체의 몇 %를 차지하는지 확인할 수 있고 긴 컨텍스트나 캐시 미스처럼 최근 사용량의 <b>10% 이상</b>을 차지하는 행동 플래그도 여기에 함께 표시됩니다.</p>
+<p>다음은 대표적인 출력 형태입니다. 표기는 버전에 따라 조금씩 다르지만 담기는 정보는 같습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>&gt; /usage
+
+# API 과금 사용자에게 표시되는 Session 블록
+Session
+  Input      1,242,310 tokens (cache read 1,180,450 | cache write 38,220 | uncached 23,640)
+  Output     18,940 tokens
+  Est. cost  $4.87
+
+# 구독 사용자에게 표시되는 플랜 사용량과 어트리뷰션
+Plan usage
+  Session (5h)    ████████░░░░░░░░░░░░  41%   resets 18:00
+  Week (all)      ███░░░░░░░░░░░░░░░░░  16%   resets Mon 09:00
+  Week (Opus)     █░░░░░░░░░░░░░░░░░░░   4%
+
+Recent usage attribution
+  Subagents 28% | MCP: playwright 17% | Skills: pdf 6%
+
+Behavior flags
+  Long context sessions 14% | Cache misses after breaks 12%</code></pre></div>
+<p><b>참고:</b> <code>/usage</code>의 달러 표시는 추정치입니다. Claude Code는 이 금액을 표준 정가 기준으로 로컬에서 계산합니다. 프로모션이나 계약 할인 단가가 반영되지 않으므로 실제 청구액과 다를 수 있습니다. 청구 기준 수치는 Claude Console의 Usage 페이지에서 확인합니다.</p>
+<p><code>/context</code>는 지금 컨텍스트를 무엇이 차지하는지 보여줍니다. MCP 도구 정의, CLAUDE.md, 대화 이력의 비중을 확인해서 어디를 줄일지 정합니다. 상태 표시줄(statusline)을 설정하면 컨텍스트 사용률과 함께 응답마다 돌아오는 <code>cache_creation_input_tokens</code>와 <code>cache_read_input_tokens</code>를 상시 표시할 수 있습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>&gt; /context
+
+claude-sonnet-5 | 96.0K / 1.0M tokens (10%)
+
+  System prompt      3.2K  ( 0.3%)
+  System tools      12.8K  ( 1.3%)
+  MCP tools         28.4K  ( 2.8%)   playwright, github 도구 정의
+  Memory files       4.1K  ( 0.4%)   CLAUDE.md, 자동 메모리
+  Messages          47.5K  ( 4.8%)   대화 이력과 도구 결과
+  Free space       904.0K  (90.4%)</code></pre></div>
+<p>이 예시에서는 선로딩된 MCP 도구 정의가 대화 이력의 절반을 넘는 크기입니다. 이런 비중이 보이면 도구 오버헤드가 점검 대상입니다.</p>
+<p>두 가지 캐시 지표를 읽는 법은 단순합니다. 읽기(read)가 쓰기(creation)보다 훨씬 크면 캐시가 잘 동작하는 상태입니다. 반대로 creation이 턴마다 높게 유지되면 프리픽스가 계속 바뀌고 있다는 신호이므로, 모델 전환이나 도구 구성 변경처럼 캐시를 무효화하는 행동이 없었는지 점검합니다. 무효화 행동의 전체 목록은 2부에서 다룹니다.</p>
+<p><code>/insights</code>는 토큰 수 대신 일하는 방식을 분석합니다. 같은 머신의 최근 세션을 최대 200개까지 살펴, 어떤 작업을 자주 반복하는지, 어느 지점에서 요청 의도가 잘못 전달됐는지 같은 작업 흐름의 마찰 지점을 HTML 리포트(<code>~/.claude/usage-data/report.html</code>)로 정리해 줍니다. 분석 자체도 플랜이나 API 사용량을 소모하므로 주기적으로 한 번씩 실행하는 정도가 적당합니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>컨텍스트 정리: /clear, /compact, /rewind</h2></header><div class="prose">
+<p>가성비가 높은 최적화 방법은 컨텍스트를 처음부터 만들지 않는 것입니다. 무관한 작업으로 넘어갈 때는 <code>/clear</code>로 새로 시작합니다. 추가 비용이 없고 이전 이력이 다음 요청에 포함되지 않습니다. 세션을 나중에 찾아야 하면 <code>/rename</code>으로 이름을 붙인 뒤 비우고 필요할 때 <code>/resume</code>으로 돌아옵니다.</p>
+<p>같은 작업을 이어가면서 컨텍스트만 줄여야 하면 <code>/compact</code>가 이력을 요약으로 교체합니다. <code>/compact Focus on code samples and API usage</code>처럼 보존할 내용을 지시할 수 있고 매번 같은 지시를 사용한다면 CLAUDE.md에 상시 규칙으로 둡니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># Compact instructions
+
+When you are using compact, please focus on test output and code changes</code></pre></div>
+<p>컴팩션(compaction) 자체의 비용도 계산에 넣어야 합니다. 요약을 만드는 요청은 전체 대화를 프롬프트로 보내는 큰 요청입니다. 캐시가 유지되는 동안은 대부분 캐시 읽기로 처리되어 저렴하지만 캐시 수명이 지난 뒤(예를 들어 오래된 세션을 resume한 직후) 실행하면 전체를 재처리하는 가장 비싼 컴팩션이 됩니다. auto-compact가 작업 한가운데서 끼어들기 전에, <b>일이 일단락된 지점</b>에서 직접 실행해야 시점을 통제할 수 있습니다.</p>
+<p>방향이 틀렸을 때는 컴팩션 대신 <code>/rewind</code>를 사용합니다. 대화를 이전 턴으로 되돌리면 그 지점까지의 프리픽스는 이미 캐시에 있으므로 다음 요청이 그대로 캐시에 적중합니다. 새 요약을 만들어 캐시를 다시 쌓는 컴팩션보다 되돌리기가 훨씬 저렴합니다.</p>
+<p>다음은 세 가지 명령의 선택 기준입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>상황</th><th>명령</th><th>비용과 캐시 영향</th></tr>
+</thead>
+<tbody>
+<tr><td>무관한 새 작업으로 전환</td><td><code>/clear</code></td><td>추가 비용 없음, 캐시를 처음부터 다시 쌓기 시작</td></tr>
+<tr><td>같은 작업을 이어가는데 컨텍스트가 가득 참</td><td><code>/compact</code></td><td>요약 요청 1회 지불, 캐시가 만료되기 전에 실행</td></tr>
+<tr><td>잘못된 방향에서 복구</td><td><code>/rewind</code></td><td>기존 캐시를 그대로 적중</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 컨텍스트 전환 명령의 선택 기준. 셋 중 기존 캐시를 그대로 적중하는 것은 /rewind뿐입니다</p>
+<p>auto-compact 윈도우는 기본값이 모델에 맞춰 자동으로 정해집니다. <code>/autocompact</code> 명령으로 윈도우 값을 설정하고(<code>/autocompact auto</code>는 모델 기본값 복귀) <code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code> 환경 변수로도 조정할 수 있습니다. 다만 윈도우를 낮추면 컴팩션이 잦아져서 요약 요청 비용이 누적되므로, 특별한 이유가 없으면 자동값을 둡니다. Sonnet 5는 기본값으로 약 967,000토큰에서 자동 컴팩션됩니다(다른 모델은 별도 문서화된 임계값이 없습니다).</p>
+<p>CLAUDE.md는 세션 시작마다 로드되어 프로젝트 컨텍스트 계층에 상주합니다. 모든 턴이 이 비용을 지불하므로 <b>200줄 이하</b>로 유지하고 특정 워크플로우에만 필요한 상세 지시는 호출 시에만 로드되는 Skills로 옮깁니다.</p>
+<p><b>주의:</b> 프로젝트 루트와 사용자 레벨 CLAUDE.md는 세션 시작 시 한 번 읽혀 메모리에 유지됩니다. 세션 중에 파일을 고쳐도 캐시는 깨지지 않지만 변경도 반영되지 않습니다. 새 내용은 다음 <code>/clear</code>, <code>/compact</code>, 재시작 때 로드됩니다. 지시가 안 먹힌다고 같은 세션에서 파일을 반복 수정하며 재시도하는 것은 토큰만 낭비합니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>모델 선택과 사고 깊이</h2></header><div class="prose">
+<p>모델 선택이 단가의 첫 결정입니다. 대부분의 코딩 작업은 Sonnet으로 충분하고 Opus는 복잡한 아키텍처 결정이나 다단계 추론에 아껴 사용합니다. <code>/model</code>로 전환하고 <code>/config</code>에서 기본값을 정합니다. 조회나 포매팅처럼 단순한 서브에이전트 작업은 서브에이전트 설정에 <code>model: haiku</code>를 지정해 더 낮은 단가로 실행합니다.</p>
+<p>effort는 같은 모델 안에서 사고 깊이를 조절합니다. 확장 사고(extended thinking)의 토큰은 출력 토큰으로 과금되고 기본값으로는 모델에 따라 요청당 수만 토큰까지 사용합니다. 깊은 추론이 필요 없는 작업에서는 <code>/effort</code> 명령이나 <code>/model</code> 화면의 슬라이더로 수준을 낮추고 고정해 두려면 <code>effortLevel</code> 설정이나 <code>CLAUDE_CODE_EFFORT_LEVEL</code> 환경 변수를 사용합니다. 값은 low, medium, high, xhigh 중에서 선택합니다(환경 변수는 auto도 허용).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "effortLevel": "medium"
+}</code></pre></div>
+<p>위 설정은 <code>.claude/settings.json</code>(프로젝트) 또는 <code>~/.claude/settings.json</code>(사용자)에 둡니다. 셸 환경 변수로도 같은 효과를 냅니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre></div>
+<p>thinking 토큰에 고정 상한을 받는 모델은 <code>MAX_THINKING_TOKENS</code>로 제한합니다(예: <code>MAX_THINKING_TOKENS=8000</code>). adaptive reasoning 모델은 0이 아닌 상한 값을 무시하므로 effort로만 조절합니다. Claude Fable 5는 확장 사고를 끌 수 없어서 역시 effort 조절이 유일한 수단입니다.</p>
+<p>캐시와의 관계를 알면 바꾸는 시점이 보입니다. 모델과 effort는 각각 <b>별도의 캐시 키</b>라서 세션 중간에 바꾸면 다음 요청이 전체 이력을 캐시 미적중으로 재처리합니다. opusplan 설정은 plan mode 진입과 이탈마다 Opus와 Sonnet 사이를 오가므로 토글할 때마다 새 캐시를 쌓습니다. 모델과 effort는 세션 초반에 정하고 작업 중에는 유지하는 것이 캐시 관점의 정답입니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>도구 오버헤드: MCP와 CLI</h2></header><div class="prose">
+<p>MCP 서버의 도구 정의는 지원 모델(Claude 4.5 세대 이상)에서 기본적으로 지연(deferred) 로딩됩니다. tool search가 동작하면 도구 이름과 서버 지시만 컨텍스트에 올라가고 실제 정의는 Claude가 그 도구를 사용하는 시점에 로드됩니다. 그래도 서버가 많으면 부담이 쌓이므로 <code>/context</code>로 실제 점유를 확인하고 <code>/mcp</code>에서 사용하지 않는 서버를 비활성화합니다.</p>
+<p>지연 로딩이 안 되는 경우가 문제입니다. <b>custom <code>ANTHROPIC_BASE_URL</code> 게이트웨이, 그리고 Claude 4.5 세대보다 앞선 모델을 사용하는 환경에서는 tool search가 동작하지 않아</b> 도구 정의 전체가 프리픽스에 로딩됩니다. 게이트웨이는 <code>ENABLE_TOOL_SEARCH=true</code>로 재정의할 수 있지만 클라우드 프로바이더의 일부 플랫폼은 재정의되지 않습니다. Amazon Bedrock을 포함해 4.5 세대 이상 모델을 사용하는 환경에서는 Anthropic API와 동일하게 기본 동작합니다. <code>alwaysLoad</code>로 지정한 서버나 도구, threshold 기반 선로딩도 같은 결과를 만듭니다. 이때는 서버 하나가 연결되거나 끊기는 것만으로 캐시 전체가 무효화됩니다.</p>
+<p>같은 일을 하는 CLI가 있으면 CLI를 우선합니다. <code>aws</code>, <code>gh</code>, <code>gcloud</code>, <code>sentry-cli</code> 같은 도구는 도구 목록 비용 자체가 없고 Claude가 명령을 직접 실행하면 됩니다.</p>
+<p>타입 언어를 사용한다면 코드 인텔리전스 플러그인이 탐색 비용을 줄입니다. LSP의 go to definition 한 번이 grep 한 번과 후보 파일 여러 개 읽기를 대체하고 편집 직후 타입 에러를 자동 보고해 컴파일을 실행하지 않고도 실수를 잡습니다.</p>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>구조적 절약: 서브에이전트, Hook, Skills</h2></header><div class="prose">
+<p>장황한 출력은 서브에이전트로 격리합니다. 테스트 실행, 로그 처리, 문서 fetch를 위임하면 장황한 출력은 서브에이전트의 컨텍스트에 남고 <b>요약만</b> 본 대화로 돌아옵니다. 부모의 캐시도 손상되지 않습니다. 다만 서브에이전트는 자체 시스템 프롬프트와 자체 캐시로 시작하고 구독에서도 5분 TTL을 사용합니다.</p>
+<p>Hook은 Claude가 보기 전에 데이터를 전처리합니다. 10,000줄 로그를 통째로 읽히는 대신 Hook이 ERROR 줄만 추려서 넘기면 수만 토큰이 수백 토큰이 됩니다. 다음은 테스트 출력에서 실패만 남기는 PreToolUse Hook 예시입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>#!/bin/bash
+# ~/.claude/hooks/filter-test-output.sh
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+# 테스트 명령이면 실패 부분만 남기도록 명령을 재작성한다
+if [[ "$cmd" =~ ^(npm test|pytest|go test) ]]; then
+  filtered="$cmd 2&gt;&amp;1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100"
+  echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"$filtered\"}}}"
+else
+  echo "{}"
+fi</code></pre></div>
+<p>이 스크립트를 settings.json의 <code>hooks.PreToolUse</code>에 Bash matcher로 연결하면 매 실행 전에 적용됩니다. 전체 설정 예시는 공식 비용 문서에 그대로 있습니다.</p>
+<p>CLAUDE.md에 쌓인 워크플로우 지시는 Skills로 옮깁니다. Skills은 호출될 때만 로드되므로 기본 컨텍스트가 가벼워집니다. 프로젝트 아키텍처, 핵심 디렉토리, 네이밍 규칙을 담은 codebase-overview Skills을 만들어 두면, Claude가 구조를 파악하려고 파일 여러 개를 읽는 대신 Skills 호출 한 번으로 같은 맥락을 얻습니다.</p>
+<p>에이전트 팀은 실험 기능이며 비용 배수가 큽니다. 팀원마다 별도 인스턴스와 컨텍스트 윈도우를 유지해서 plan mode 기준 일반 세션의 약 7배 토큰을 사용합니다. 사용한다면 팀을 작게, 팀원 모델은 Sonnet으로, 일이 끝난 팀원은 바로 종료합니다.</p>
+<p>작업 습관도 토큰입니다. “이 코드베이스 개선해줘”처럼 모호한 요청은 광범위한 스캔을 유발하고 “auth.ts의 login 함수에 입력 검증 추가”는 최소한의 파일만 읽게 합니다. 복잡한 작업은 plan mode(Shift+Tab)로 방향을 합의한 뒤 실행하고 잘못 가면 Escape로 즉시 멈춰 <code>/rewind</code> 합니다. 테스트 케이스나 기대 출력 같은 검증 목표를 주면 재작업 요청 자체가 줄어듭니다.</p>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>마치며</h2></header><div class="prose">
+<p>짧은 한 문장의 질문에도 토큰 사용량이 높은 것은 하루 종일 열려 있던 세션이 전체 이력을 매번 재전송하기 때문입니다. 작업을 바꿀 때마다 <code>/clear</code> 하는 습관이 답입니다. 여기에 CLAUDE.md를 200줄 이하로 유지하고 모델과 effort를 작업에 맞추며 도구 오버헤드를 <code>/context</code>로 점검하는 습관이 더해지면 개인이 통제할 수 있는 낭비 경로는 대부분 닫힙니다.</p>
+<p>다만 습관만으로는 설명되지 않는 비용이 남습니다. 자리를 비운 뒤 첫 응답이 유난히 느리고 비싼 이유, 그리고 Amazon Bedrock으로 사용하는 조직에서 사용자별 지출을 확인하는 방법은 캐시의 수명과 조직 단위 관리 체계의 문제입니다. 2부에서는 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-token-economy-02/" target="_blank" rel="noopener">캐시 경제학(TTL, 무효화 행동, 캐시 범위)과 구독, Claude Console, Amazon Bedrock의 조직 비용 관리, 그리고 전체 적용 우선순위</a>를 다룹니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>Once a team adopts Claude Code, the same kinds of questions tend to come up. Why is token usage so high when all I asked was a single short sentence, and why has the session become so heavy by the end of the day?</p>
+<p>Every time you send a message, Claude Code resends the system prompt, the project context, and the entire conversation history so far, and cost is proportional to the size of that context. The token price you actually pay is then determined by the prompt caching hit rate. This post is part 1 of a two-part series on optimizing Claude Code token costs, and it covers the cost structure, the measurement tools, and the session habits that an individual can apply right away. Cache economics and organization-level cost management, including Amazon Bedrock, continue in part 2. This post is written for readers who have used Claude Code in real work. It assumes experience with tokens and the basic slash commands, and defines key concepts such as prompt caching in the text. The figures and defaults in this post are based on the official Claude Code documentation and the Amazon Bedrock User Guide as of August 2026.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Cost structure: where tokens are spent</h2></header><div class="prose">
+<p>The model remembers nothing between requests. So every time you send a message, Claude Code resends the system prompt, the project context, and all of the conversation and tool results so far. When Claude uses tools several times within a single turn, each use sends one more request. This is why token cost is proportional to <b>the size of the session</b>, not to the length of your question.</p>
+<p>A request is made up of three layers, and the less often content changes, the earlier it appears.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Layer</th><th>Contents</th><th>When it changes</th></tr>
+</thead>
+<tbody>
+<tr><td>System prompt</td><td>Core instructions, tool definitions, output style</td><td>When the set of tool definitions changes or Claude Code is upgraded</td></tr>
+<tr><td>Project context</td><td>CLAUDE.md, auto memory, scoped rules</td><td>At session start, and after /clear or /compact</td></tr>
+<tr><td>Conversation</td><td>User messages, responses, tool results</td><td>Every turn</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> The three layers that make up a request</p>
+<p>Prompt caching is what makes this repeated resending affordable. A prefix that is identical to the previous request is read from the cache instead of being reprocessed, and it is billed at <b>about 10%</b> of the standard input price. Writing a new cache entry costs more than standard input, but you pay for it only once, and later turns keep reusing that prefix at the lower price. The TTL (time to live) in the table is how long a cache entry is kept.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Processing path</th><th>Relative price (standard input = 1.0x)</th></tr>
+</thead>
+<tbody>
+<tr><td>Cache write (1-hour TTL)</td><td>2.0x</td></tr>
+<tr><td>Cache write (5-minute TTL)</td><td>1.25x</td></tr>
+<tr><td>Standard input</td><td>1.0x</td></tr>
+<tr><td>Cache read</td><td>About 0.1x</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Relative price by processing path. The cache write cost is a one-time investment that earns the discount on later turns</p>
+<p>How you are billed depends on how you connect. Subscription plans (Pro, Max, Team) consume a usage allowance instead of dollars, and that allowance is managed in a 5-hour rolling window and a weekly window. The Claude Console API, Claude Enterprise, and cloud providers such as Amazon Bedrock are billed per token.</p>
+<p>There is one principle. Cost is proportional to context size, and the token price you actually pay is determined by the cache hit rate. Every strategy in this post is a way to reduce these two variables.</p>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Measurement: /usage, /context, /insights</h2></header><div class="prose">
+<p>Optimization starts with measurement. What <code>/usage</code> shows depends on how you authenticate. For API-billed users (Claude Enterprise), it shows a Session block with the token statistics and estimated cost of the current session. For subscribers, it shows plan usage bars and an attribution of recent usage (a breakdown by what consumed it). You can see what percentage of the total is taken by skills, subagents, plugins, and each individual MCP server, and behavior flags that account for <b>10% or more</b> of recent usage, such as long contexts or cache misses, are shown here as well.</p>
+<p>The following is a typical output. The notation varies slightly from version to version, but the information it carries is the same.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>&gt; /usage
+
+# Session block shown to API-billed users
+Session
+  Input      1,242,310 tokens (cache read 1,180,450 | cache write 38,220 | uncached 23,640)
+  Output     18,940 tokens
+  Est. cost  $4.87
+
+# Plan usage and attribution shown to subscribers
+Plan usage
+  Session (5h)    ████████░░░░░░░░░░░░  41%   resets 18:00
+  Week (all)      ███░░░░░░░░░░░░░░░░░  16%   resets Mon 09:00
+  Week (Opus)     █░░░░░░░░░░░░░░░░░░░   4%
+
+Recent usage attribution
+  Subagents 28% | MCP: playwright 17% | Skills: pdf 6%
+
+Behavior flags
+  Long context sessions 14% | Cache misses after breaks 12%</code></pre></div>
+<p><b>Note:</b> The dollar amount in <code>/usage</code> is an estimate. Claude Code calculates this amount locally based on standard list prices. Promotional pricing and contract discount rates are not reflected, so it can differ from your actual bill. For the figures that billing is based on, check the Usage page in the Claude Console.</p>
+<p><code>/context</code> shows what is occupying the context right now. Check the share taken by MCP tool definitions, CLAUDE.md, and the conversation history, and decide where to cut. If you configure the status line, you can keep the context usage on display at all times, along with the <code>cache_creation_input_tokens</code> and <code>cache_read_input_tokens</code> values returned with each response.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>&gt; /context
+
+claude-sonnet-5 | 96.0K / 1.0M tokens (10%)
+
+  System prompt      3.2K  ( 0.3%)
+  System tools      12.8K  ( 1.3%)
+  MCP tools         28.4K  ( 2.8%)   playwright, github tool definitions
+  Memory files       4.1K  ( 0.4%)   CLAUDE.md, auto memory
+  Messages          47.5K  ( 4.8%)   conversation history and tool results
+  Free space       904.0K  (90.4%)</code></pre></div>
+<p>In this example, the preloaded MCP tool definitions are more than half the size of the conversation history. When you see a share like this, tool overhead is the thing to review.</p>
+<p>Reading the two cache metrics is simple. When read is far larger than creation, the cache is working well. Conversely, when creation stays high turn after turn, it is a sign that the prefix keeps changing, so check whether something invalidated the cache, such as switching models or changing the tool configuration. The full list of invalidating actions is covered in part 2.</p>
+<p><code>/insights</code> analyzes the way you work instead of the number of tokens. It looks at up to 200 recent sessions on the same machine and compiles the friction points in your workflow, such as which tasks you repeat often and where the intent of a request was misunderstood, into an HTML report (<code>~/.claude/usage-data/report.html</code>). The analysis itself consumes plan or API usage, so running it once every so often is about right.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Context cleanup: /clear, /compact, /rewind</h2></header><div class="prose">
+<p>A cost-effective way to optimize is to avoid building up context in the first place. When you move on to an unrelated task, start fresh with <code>/clear</code>. It costs nothing extra, and the earlier history is not included in the next request. If you need to find the session later, give it a name with <code>/rename</code> before you clear it, and come back with <code>/resume</code> when you need it.</p>
+<p>When you need to continue the same task and only shrink the context, <code>/compact</code> replaces the history with a summary. You can tell it what to preserve, as in <code>/compact Focus on code samples and API usage</code>, and if you use the same instruction every time, put it in CLAUDE.md as a standing rule.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Compact instructions
+
+When you are using compact, please focus on test output and code changes</code></pre></div>
+<p>The cost of compaction itself also has to be counted. The request that creates the summary is a large request that sends the entire conversation as the prompt. While the cache is still alive, most of it is processed as cache reads and is cheap, but if you run it after the cache lifetime has passed (for example, right after resuming an old session), it becomes the most expensive kind of compaction, one that reprocesses everything. To control the timing, run it yourself <b>at a point where a piece of work has wrapped up</b>, before auto-compact cuts in mid-task.</p>
+<p>When you have gone in the wrong direction, use <code>/rewind</code> instead of compaction. When you rewind the conversation to an earlier turn, the prefix up to that point is already in the cache, so the next request hits the cache as is. Rewinding is far cheaper than compaction, which creates a new summary and builds the cache again.</p>
+<p>The following are the criteria for choosing among the three commands.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Situation</th><th>Command</th><th>Cost and cache impact</th></tr>
+</thead>
+<tbody>
+<tr><td>Switching to an unrelated new task</td><td><code>/clear</code></td><td>No extra cost, the cache starts being built again from scratch</td></tr>
+<tr><td>Continuing the same task with a full context</td><td><code>/compact</code></td><td>Pay for one summary request, run it before the cache expires</td></tr>
+<tr><td>Recovering from a wrong direction</td><td><code>/rewind</code></td><td>Hits the existing cache as is</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Criteria for choosing a context-switching command. Of the three, only /rewind hits the existing cache as is</p>
+<p>The default auto-compact window is set automatically to suit the model. You can set the window value with the <code>/autocompact</code> command (<code>/autocompact auto</code> returns to the model default) and can also adjust it with the <code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code> environment variable. However, lowering the window makes compaction more frequent and the cost of the summary requests adds up, so leave it on the automatic value unless you have a specific reason. By default, Sonnet 5 is auto-compacted at about 967,000 tokens (other models have no separately documented threshold).</p>
+<p>CLAUDE.md is loaded at the start of every session and stays in the project context layer. Every turn pays this cost, so keep it to <b>200 lines or fewer</b>, and move detailed instructions that only specific workflows need into skills, which are loaded only when they are invoked.</p>
+<p><b>Caution:</b> The project root and user-level CLAUDE.md files are read once at session start and kept in memory. Editing a file during the session does not break the cache, but the change is not picked up either. The new content is loaded at the next <code>/clear</code>, <code>/compact</code>, or restart. Editing the file again and again and retrying in the same session because an instruction is not taking effect only wastes tokens.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Model selection and thinking depth</h2></header><div class="prose">
+<p>Model selection is the first decision that sets your unit price. Sonnet is enough for most coding tasks, and Opus is best saved for complex architecture decisions or multi-step reasoning. Switch with <code>/model</code> and set the default in <code>/config</code>. For simple subagent tasks such as lookups or formatting, specify <code>model: haiku</code> in the subagent configuration to run them at a lower unit price.</p>
+<p>Effort adjusts the depth of thinking within the same model. Extended thinking tokens are billed as output tokens, and by default they use up to tens of thousands of tokens per request, depending on the model. For tasks that do not need deep reasoning, lower the level with the <code>/effort</code> command or the slider on the <code>/model</code> screen, and to pin it, use the <code>effortLevel</code> setting or the <code>CLAUDE_CODE_EFFORT_LEVEL</code> environment variable. Choose a value from low, medium, high, and xhigh (the environment variable also accepts auto).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "effortLevel": "medium"
+}</code></pre></div>
+<p>Put the setting above in <code>.claude/settings.json</code> (project) or <code>~/.claude/settings.json</code> (user). A shell environment variable has the same effect.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>export CLAUDE_CODE_EFFORT_LEVEL=medium</code></pre></div>
+<p>For models that accept a fixed cap on thinking tokens, limit it with <code>MAX_THINKING_TOKENS</code> (for example, <code>MAX_THINKING_TOKENS=8000</code>). Adaptive reasoning models ignore any nonzero cap, so effort is the only way to adjust them. Extended thinking cannot be turned off on Claude Fable 5, so adjusting effort is again the only option.</p>
+<p>Once you know how these settings relate to the cache, it becomes clear when to change them. The model and the effort level are each <b>a separate cache key</b>, so changing either one in the middle of a session makes the next request reprocess the entire history as a cache miss. The opusplan setting moves between Opus and Sonnet each time you enter and leave plan mode, so every toggle builds a new cache. From a cache point of view, the right answer is to decide on the model and effort early in the session and keep them while you work.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Tool overhead: MCP and CLIs</h2></header><div class="prose">
+<p>On supported models (the Claude 4.5 generation and later), MCP server tool definitions use deferred loading by default. When tool search is working, only the tool names and server instructions go into the context, and the actual definition is loaded at the point where Claude uses that tool. Even so, the load adds up when you have many servers, so check the actual footprint with <code>/context</code> and disable the servers you do not use in <code>/mcp</code>.</p>
+<p>The problem is the cases where deferred loading does not work. <b>With a custom <code>ANTHROPIC_BASE_URL</code> gateway, and in environments that use models older than the Claude 4.5 generation, tool search does not work, so</b> the full set of tool definitions is loaded into the prefix. A gateway can override this with <code>ENABLE_TOOL_SEARCH=true</code>, but some cloud provider platforms cannot be overridden. In environments that use 4.5 generation or later models, including Amazon Bedrock, it works by default in the same way as with the Anthropic API. Servers or tools marked with <code>alwaysLoad</code> and threshold-based preloading produce the same result. In that case, a single server connecting or disconnecting is enough to invalidate the entire cache.</p>
+<p>When a CLI does the same job, prefer the CLI. Tools such as <code>aws</code>, <code>gh</code>, <code>gcloud</code>, and <code>sentry-cli</code> carry no tool listing cost at all, and Claude only has to run the commands directly.</p>
+<p>If you use a typed language, a code intelligence plugin reduces the cost of navigation. A single LSP go to definition replaces one grep plus reading several candidate files, and type errors are reported automatically right after an edit, which catches mistakes without running a compile.</p>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Structural savings: subagents, hooks, and skills</h2></header><div class="prose">
+<p>Isolate verbose output in subagents. When you delegate test runs, log processing, and document fetches, the verbose output stays in the subagent's context and <b>only the summary</b> comes back to the main conversation. The parent's cache is not damaged either. However, a subagent starts with its own system prompt and its own cache, and it uses the 5-minute TTL even on a subscription.</p>
+<p>Hooks preprocess data before Claude sees it. Instead of having Claude read a 10,000-line log in full, a hook can pick out only the ERROR lines and pass them on, which turns tens of thousands of tokens into hundreds. The following is an example of a PreToolUse hook that keeps only the failures from test output.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>#!/bin/bash
+# ~/.claude/hooks/filter-test-output.sh
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+# If this is a test command, rewrite it so that only the failures remain
+if [[ "$cmd" =~ ^(npm test|pytest|go test) ]]; then
+  filtered="$cmd 2&gt;&amp;1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100"
+  echo "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\",\"updatedInput\":{\"command\":\"$filtered\"}}}"
+else
+  echo "{}"
+fi</code></pre></div>
+<p>Connect this script to <code>hooks.PreToolUse</code> in settings.json with a Bash matcher, and it is applied before every run. The full configuration example is available as is in the official cost documentation.</p>
+<p>Move the workflow instructions that have piled up in CLAUDE.md into skills. Skills are loaded only when they are invoked, so the base context gets lighter. If you create a codebase-overview skill that holds the project architecture, key directories, and naming conventions, Claude gets the same context from a single skill invocation instead of reading several files to work out the structure.</p>
+<p>Agent teams are an experimental feature, and their cost multiplier is large. Each teammate keeps a separate instance and context window, so a team uses about 7 times the tokens of a standard session, measured in plan mode. If you use them, keep the team small, use Sonnet as the teammate model, and shut down teammates as soon as their work is done.</p>
+<p>Work habits are tokens too. A vague request such as “improve this codebase” triggers a broad scan, while “add input validation to the login function in auth.ts” makes Claude read only the minimum set of files. For complex tasks, agree on the direction in plan mode (Shift+Tab) before executing, and if it goes the wrong way, stop it immediately with Escape and <code>/rewind</code>. Giving verification targets such as test cases or expected output reduces the number of rework requests in the first place.</p>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Closing</h2></header><div class="prose">
+<p>Token usage is high even for a single short question because a session that has been open all day resends its entire history every time. The answer is the habit of running <code>/clear</code> every time you switch tasks. Add the habits of keeping CLAUDE.md to 200 lines or fewer, matching the model and effort to the task, and checking tool overhead with <code>/context</code>, and most of the paths to waste that an individual can control are closed.</p>
+<p>Still, some costs cannot be explained by habits alone. Why the first response after you step away is unusually slow and expensive, and how an organization that uses Claude Code through Amazon Bedrock can check spending per user, are questions of cache lifetime and of organization-level management. Part 2 covers <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-token-economy-02/" target="_blank" rel="noopener">cache economics (TTL, invalidating actions, cache scope), organizational cost management for subscriptions, the Claude Console, and Amazon Bedrock, and the overall order of priority for applying these practices</a>.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://code.claude.com/docs/en/costs" target="_blank" rel="noopener">Manage costs effectively - Anthropic, Claude Code Docs (2026-08-25 확인)</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://code.claude.com/docs/en/model-config" target="_blank" rel="noopener">Model configuration - Anthropic, Claude Code Docs</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Prompt caching - Anthropic, Claude Platform Docs (TTL별 캐시 쓰기/읽기 단가표 포함)</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://claude.dev/blog/lessons-from-building-claude-code-prompt-caching-is-everything/" target="_blank" rel="noopener">Lessons from building Claude Code: Prompt caching is everything - Anthropic (plan mode, 지연 도구 로딩, 컴팩션의 설계 배경)</a></td><td class="nowrap"><span class="l-ko">웹 문서</span><span class="l-en">Web</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/claude-code-token-economy-01/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-09-02 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/claude-code-token-economy-01/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-09-02. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">본문의 수치, 기본값, 명령과 환경 변수는 작성 시점의 Claude Code v2.1.x 기준이며, 최신 값은 위 공식 문서에서 확인하시길 바랍니다.</span><span class="l-en">The figures, defaults, commands, and environment variables in this post are based on Claude Code v2.1.x at the time of writing. Check the official documentation above for the latest values.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

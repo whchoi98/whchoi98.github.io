@@ -1,0 +1,821 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Network Firewall 컨테이너 속성 기반 규칙으로 EKS와 ECS 트래픽 제어하기</title>
+<meta name="description" content="AWS Network Firewall의 컨테이너 속성 기반 규칙을 서울 리전의 EKS와 ECS에 직접 구성했습니다. 커스텀 속성 필터 지원 여부, IP 수집 경로, 반영 지연을 측정한 결과와 권장 도입 순서를 정리합니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/anfw-eks-ecs/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-09-16</span><span class="l-en">Published 2026-09-16</span></span><span>Networking</span><span><span class="l-ko">읽는 시간 18분</span><span class="l-en">18 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/anfw-eks-ecs/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/anfw-eks-ecs/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">AWS Network Firewall 컨테이너 속성 기반 규칙으로 EKS와 ECS 트래픽 제어하기</span><span class="l-en">Controlling EKS and ECS traffic with AWS Network Firewall container attribute-based rules</span></h1>
+<p class="thesis"><span class="l-ko">이 글은 컨테이너 속성 기반 규칙에서 커스텀 속성 필터를 사용할 수 있는지, IP를 어떤 경로로 수집하는지, 컨테이너 변화가 규칙에 반영되기까지 얼마나 걸리는지를 확인합니다. 커스텀 속성 필터는 EKS와 ECS 모두에서 동작하고 ECS 연동만 고객 계정에서 감사할 수 있습니다. 반영 지연은 필터가 없으면 1초, 커스텀 속성 필터가 있으면 최대 45초이므로 즉시 격리가 필요하면 이 지연을 설계에 넣어야 합니다.</span><span class="l-en">This post checks whether container attribute-based rules accept custom attribute filters, which path the service uses to collect IP addresses, and how long container changes take to reach the rules. Custom attribute filters work on both EKS and ECS, and only the ECS integration can be audited from the customer account. Propagation takes 1 second without a filter and up to 45 seconds with a custom attribute filter, so scenarios that need immediate isolation must factor this delay into the design.</span></p>
+<div class="tags"><span>#AWS Network Firewall</span><span>#Amazon EKS</span><span>#Amazon ECS</span><span>#AWS Fargate</span><span>#Amazon EventBridge</span><span>#AWS CloudTrail</span><span>#Suricata</span><span>#Amazon VPC CNI</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">컨테이너 속성 기반 규칙 소개</a><a href="#ko-s3">내부 동작 원리: EKS와 ECS는 동작 방식이 다릅니다</a><a href="#ko-s4">적용 환경 구성</a><a href="#ko-s5">시험으로 확인한 동작 특성</a><a href="#ko-s6">제한사항과 도입 전 확인 지점</a><a href="#ko-s7">마치며</a><a href="#ko-s8">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Introducing container attribute-based rules</a><a href="#en-s3">How it works internally: EKS and ECS behave differently</a><a href="#en-s4">Setting up the environment</a><a href="#en-s5">Behavior confirmed by testing</a><a href="#en-s6">Limitations and what to check before adoption</a><a href="#en-s7">Closing</a><a href="#en-s8">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/aws-network-firewall-container-attributes-referencing/" target="_blank" rel="noopener">2026년 6월 30일</a>, AWS Network Firewall이 컨테이너 속성 기반 규칙(container attribute-based rules)을 출시했습니다.</p>
+<p>이제 방화벽 규칙에 IP를 나열할 필요가 없습니다. “이 label을 가진 pod”나 “이 속성을 가진 인스턴스에서 실행되는 task”라는 조건만 선언하면 됩니다. Network Firewall이 해당 컨테이너의 IP를 자동으로 추적합니다. Amazon Elastic Kubernetes Service(Amazon EKS)나 Amazon Elastic Container Service(Amazon ECS)에서 실행되는 워크로드는 스케일링과 재배포 때마다 pod와 task의 IP가 바뀝니다. 반면 방화벽 규칙은 IP를 기준으로 작성합니다. 둘 사이에는 늘 간극이 있었습니다. 이번 기능이 그 간극을 메웁니다.</p>
+<p>다만 공식 문서를 읽고 나면 3가지 질문이 남습니다. 문서가 예시로 든 namespace 같은 빌트인 키 외에 직접 정의한 커스텀 label이나 container instance 속성도 필터로 사용할 수 있을까요? 이 기능은 계정 안에 어떤 리소스를 만들고 어떤 경로로 IP를 수집할까요? 그리고 컨테이너가 기동되고 종료될 때 그 변화가 규칙에 반영되기까지는 얼마나 걸릴까요?</p>
+<p>이번 게시글에서는 이 3가지 질문에 답하면서 컨테이너 속성 기반 규칙을 실제 워크로드에 적용하는 방법을 알아봅니다.</p>
+<p>서울 리전(ap-northeast-2)에서 EKS와 ECS 두 트랙으로 container association을 직접 구성했습니다. 허용과 차단 12개 케이스를 2회씩 실행하고 컨테이너 기동과 종료에 따른 반영 지연 8건을 테스트했습니다. 또한 AWS CloudTrail과 Amazon EventBridge를 교차 조회해 서비스가 IP를 수집하는 내부 경로까지 추적했습니다. 이 결과를 바탕으로 내부 동작 원리와 적용 전 갖춰야 할 전제, 권장 도입 순서를 차례로 살펴봅니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>컨테이너 속성 기반 규칙 소개</h2></header><div class="prose">
+<p>컨테이너 속성 기반 규칙은 EKS와 ECS 클러스터의 컨테이너 라이프사이클(lifecycle) 이벤트를 구독하는 Network Firewall 기능입니다. 속성에 매칭되는 컨테이너의 IP를 동적 IP 세트(dynamic IP set)로 유지합니다. 운영자는 IP를 직접 나열하지 않고 조건만 선언하며 방화벽의 stateful 룰(Suricata 호환 문법)이 그 집합을 별칭으로 참조합니다. 출시 공지에 따르면 TLS 복호화 검사, FQDN 필터링, URL 카테고리 필터링, GeoIP 필터링과 결합해 사용할 수 있고 추가 요금은 없습니다.</p>
+<p>핵심 리소스는 container association입니다. 발표된 기능 이름은 container attribute-based rules입니다. 하지만 <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/container-associations.html" target="_blank" rel="noopener">개발자 가이드</a>는 이 기능을 구현하는 리소스를 container association으로 설명합니다. API에서는 <a href="https://docs.aws.amazon.com/network-firewall/latest/APIReference/API_CreateContainerAssociation.html" target="_blank" rel="noopener">CreateContainerAssociation</a> 오퍼레이션으로 생성합니다. 하나의 association은 타입(ECS 또는 EKS, 생성 후 변경 불가)과 최대 5개의 monitoring configuration으로 구성됩니다. 각 configuration에는 클러스터 ARN 하나와 선택적인 속성 필터 목록이 들어갑니다. 클러스터는 association과 같은 리전, 같은 계정에 있어야 하므로 교차 계정(Cross Account) 구성은 지원되지 않습니다.</p>
+<p>이 기능은 트래픽 경로를 바꾸지 않습니다. 개발자 가이드는 Network Firewall이 라이프사이클 이벤트에서 IP 정보만 수집하며 클러스터의 Data Path(실제 트래픽이 흐르는 경로)와 상호작용하지 않는다고 명시합니다. 클러스터 안에 에이전트나 컨트롤러를 설치하지 않고 검사는 기존 방화벽 엔드포인트가 그대로 수행합니다. 바뀌는 것은 규칙이 대상을 지목하는 방식뿐이고 트래픽이 방화벽을 지나가도록 만드는 책임은 여전히 라우팅 설계에 의존합니다.</p>
+<h3>1.1 새로 추가된 API 오퍼레이션</h3>
+<p>기존 Network Firewall API에 오퍼레이션 5종이 추가되었습니다. 태깅 관련 오퍼레이션도 이 리소스 타입을 지원합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>오퍼레이션</th><th>역할</th><th>주의할 점</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CreateContainerAssociation</code></td><td>association 생성</td><td>이름은 ^[a-zA-Z0-9-]+$, 타입과 이름은 생성 후 변경 불가</td></tr>
+<tr><td><code>DescribeContainerAssociation</code></td><td>상태 조회</td><td>응답의 <code>ResolvedCidrCount</code>가 IP 수집 여부를 보는 유일한 지표</td></tr>
+<tr><td><code>UpdateContainerAssociation</code></td><td>모니터링 대상 변경</td><td>UpdateToken 필수, 불일치 시 InvalidTokenException</td></tr>
+<tr><td><code>DeleteContainerAssociation</code></td><td>삭제</td><td>비동기로 <code>DELETING</code> 반환, Rule Group이 참조 중이면 실패</td></tr>
+<tr><td><code>ListContainerAssociations</code></td><td>목록 조회</td><td>이름과 ARN만 반환하므로 상태는 Describe로 다시 조회</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> Container association API 5종과 주요 파라미터</p>
+<h3>1.2 Rule Group에서 참조하는 방법</h3>
+<p>stateful Rule Group의 <code>ReferenceSets.IPSetReferences</code>에 변수 이름과 association ARN을 매핑합니다. 그러면 <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups-ip-set-references.html" target="_blank" rel="noopener">Suricata 룰 문자열에서 @변수명으로</a> 그 집합을 가리킬 수 있습니다. 이번 구성에서 만든 ECS Rule Group은 필터형 association과 필터 없는 association 2개를 동시에 참조합니다. 아래는 abi-ecs-rg Rule Group의 <code>create-rule-group</code> 요청 발췌입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "RulesSource": { "RulesString": "
+    reject tls @abi_ec2_tasks any -&gt; any any (msg:\"abi ecs-ec2 block amazon.com\";
+      flow:to_server; tls.sni; dotprefix; content:\".amazon.com\"; endswith; nocase; sid:3001; rev:1;)
+    alert  tls @abi_all_tasks any -&gt; any any (msg:\"abi ecs-all allow checkip\";
+      ... content:\".checkip.amazonaws.com\"; sid:3101; rev:1;)
+    reject tls @abi_all_tasks any -&gt; any any (msg:\"abi ecs-all block wikipedia\";
+      ... content:\".wikipedia.org\"; sid:3102; rev:1;)" },
+  "ReferenceSets": { "IPSetReferences": {
+    "abi_ec2_tasks": { "ReferenceArn": "arn:aws:network-firewall:ap-northeast-2:...:container-association/abi-ecs-ec2" },
+    "abi_all_tasks": { "ReferenceArn": "arn:aws:network-firewall:ap-northeast-2:...:container-association/abi-ecs-all" }
+  } }
+}    // ConsumedCapacity 3 / 100</code></pre></div>
+<h3>1.3 Quota와 구조적 제약</h3>
+<p>Quota는 대부분 고정값입니다. 특히 Rule Group당 참조 30개는 prefix list를 사용하는 기존 IP 세트 참조의 5개 제한과 별개로 적용됩니다. association을 세분화해서 운영하는 설계가 Quota 때문에 막히는 경우는 드뭅니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>값</th><th>조정</th></tr>
+</thead>
+<tbody>
+<tr><td>계정, 리전당 association</td><td>100개</td><td>가능</td></tr>
+<tr><td>association당 monitoring configuration</td><td>5개</td><td>불가</td></tr>
+<tr><td>Rule Group당 container association 참조</td><td>30개</td><td>불가</td></tr>
+<tr><td><code>ResolvedCidrCount</code> 상한</td><td>1,000,000개</td><td>불가</td></tr>
+<tr><td>EKS 필터 키</td><td>namespace, pod, cluster, 커스텀 label 키</td><td>SNAT 비활성화 전제</td></tr>
+<tr><td>ECS 필터 키</td><td>container instance 속성, EC2 launch type 전용</td><td>awsvpc 모드 전용</td></tr>
+<tr><td>IaC 지원</td><td>CloudFormation 미지원, Terraform은 병합 완료</td><td>CLI/SDK 필요</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> Quota와 구조적 제약</p>
+<p>IaC 지원은 이 가운데 가장 유동적인 부분입니다. 작성 시점 기준 AWS CloudFormation에는 리소스 타입이 없습니다. Terraform은 <code>aws_networkfirewall_container_association</code> 리소스가 2026년 8월 6일 <a href="https://github.com/hashicorp/terraform-provider-aws/pull/49321" target="_blank" rel="noopener">병합되었습니다</a>.</p>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>내부 동작 원리: EKS와 ECS는 동작 방식이 다릅니다</h2></header><div class="prose">
+<p>같은 API, 같은 리소스 타입인데 EKS와 ECS의 내부 구현은 동일하지 않습니다. CloudTrail, EventBridge, EKS access entry, 서비스 연결 역할(service-linked role) 정책을 교차 조회해 보면 차이가 분명합니다. ECS는 고객 계정에 관측 가능한 자원과 호출을 남깁니다. 반면 EKS는 거의 아무것도 남기지 않습니다. 이 구현 차이는 두 트랙의 반영 지연이 서로 다른 이유이기도 합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="anfw-eks-ecs-assets/fig01-anfw-container-attr-rules-fig1-collection-path.png" alt="EKS와 ECS의 IP 수집 경로 비교 다이어그램" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> IP 수집 경로. 위쪽 EKS 경로는 고객 계정에 리소스도 주기적 호출도 남기지 않고 아래쪽 ECS 경로는 계정 안의 EventBridge 규칙과 서비스 연결 역할 호출로 관측됩니다. 두 경로는 같은 IP 세트로 수렴합니다.</figcaption></figure>
+<h3>2.1 EKS와 Network Firewall 연동 시에는 고객 계정에 리소스를 만들지 않습니다</h3>
+<p>개발자 가이드는 EKS 타입 association이 Amazon EKS Pulse Event Service를 통해 pod 라이프사이클 이벤트를 구독한다고 명시합니다.</p>
+<p>첫째, IAM 주체의 Kubernetes API 접근을 등록하는 access entry에는 방화벽 관련 항목이 없습니다. association을 연결한 클러스터와 연결하지 않은 대조군 클러스터의 구성이 같습니다.</p>
+<p>둘째, <a href="https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSNetworkFirewallServiceRolePolicy.html" target="_blank" rel="noopener">서비스 연결 역할 정책</a>에는 <code>eks:*</code> 권한이 포함되어 있지 않습니다.</p>
+<p>셋째, CloudTrail에서 <code>eks:DescribeCluster</code> 호출은 association 생성 시점에 한 번만 기록되고 주기적 폴링 호출은 나타나지 않습니다.</p>
+<p>생성 시점의 <code>eks:DescribeCluster</code> 레코드를 보면 <code>sourceIPAddress</code>와 <code>userAgent</code>는 <code>network-firewall.amazonaws.com</code>입니다. 하지만 세션은 association을 생성한 호출자의 것입니다. 즉 이 조회는 서비스 권한이 아니라 호출자 자격 증명으로 수행되며 관리형 정책에 <code>eks:*</code> 권한이 없는 것과도 일치합니다.</p>
+<h3>2.2 ECS와 Network Firewall 연동 시에는 계정 안에 규칙을 만들고 주기적으로 폴링합니다</h3>
+<p>ECS 타입 association을 만들면 Network Firewall이 사용자 계정의 EventBridge에 관리형 규칙(Managed Rule)을 자동으로 프로비저닝합니다. 실제 테스트를 해보면 직접 만들지 않은 규칙 한 건이 생성되고 대상 클러스터로 범위가 좁혀져 있어 클러스터 단위로 규칙이 만들어지는 구조임을 알 수 있습니다. AWS Lambda나 Amazon SQS 같은 사용자 리소스를 가리키는 일반적인 EventBridge 규칙과 달리, 타깃은 계정 ID도 리소스 경로도 없는 서비스 소유 ARN입니다. 개발자 가이드도 이 규칙을 서비스가 수명 주기를 관리하는 리소스로 안내하며 직접 수정하거나 삭제하지 말라고 명시합니다. 아래는 events describe-rule과 list-targets-by-rule로 조회한 결과입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>Name        : NetworkFirewallManagedRule-abi-ecs-f95002052a4bc1e8
+Description : This rule is used to route ECS Task Events to AWS Network Firewall
+ManagedBy   : network-firewall.amazonaws.com
+State       : ENABLED
+EventPattern: {"source":["aws.ecs"],"detail-type":["ECS Task State Change"],
+               "detail":{"clusterArn":["arn:aws:ecs:ap-northeast-2:********6239:cluster/abi-ecs"]}}
+Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-2:::
+                                       # 계정 ID와 리소스 경로가 없는 서비스 소유 ARN</code></pre></div>
+<p>이벤트를 받은 뒤의 처리도 CloudTrail에 그대로 남습니다. 서비스가 서비스 연결 역할을 수임(assume)한 세션으로 ECS 읽기 API 3종을 순서대로 호출합니다. 이 호출은 association 생성 직후와 약 9분 뒤, 두 차례 웨이브(같은 순서로 몰린 호출 묶음)로 관측되었습니다. 가장 결정적인 증거는 첫 번째 호출의 필터 문자열입니다. 속성 필터에 넣은 커스텀 키가 ECS의 서버측 attribute 필터 문법으로 그대로 번역되어 전달됩니다. 아래는 CloudTrail에 기록된 AWSServiceRoleForNetworkFirewall 세션의 호출 순서입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>08:15:21Z  ecs:ListContainerInstances  cluster=abi-ecs  filter="attribute:abi-env == lab"
+08:15:21Z  ecs:ListTasks               cluster=abi-ecs  containerInstance=d0bc521b...  desiredStatus=RUNNING
+08:15:22Z  ecs:DescribeTasks           cluster=abi-ecs  tasks=[task/abi-ecs/ad040da6...]
+08:15:25Z  ecs:ListTasks               cluster=abi-ecs  desiredStatus=RUNNING   # 필터 없는 association 용
+08:15:25Z  ecs:DescribeTasks           cluster=abi-ecs  tasks=[task/abi-ecs/3fa22e0b..., task/abi-ecs/ad040da6...]
+
+08:24:01Z  # 약 9분 뒤 동일 순서로 두 번째 웨이브</code></pre></div>
+<p>실제 반영 속도는 이벤트 경로가 결정합니다. 필터 없는 association의 반영이 1초로 측정되어 약 9분 간격의 폴링만으로는 설명되지 않는 속도입니다.</p>
+<p>두 트랙의 차이를 아래 표로 정리했습니다. 표의 마지막 행에 있는 반영 지연 수치는 시험 결과에서 자세히 다룹니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>기준</th><th>EKS</th><th>ECS</th></tr>
+</thead>
+<tbody>
+<tr><td>이벤트 수신 경로</td><td>고객 계정에 리소스를 만들지 않음, 문서상 EKS Pulse Event Service 내부 구독</td><td>고객 계정에 EventBridge Managed Rule 생성, 타깃은 서비스 소유 ARN</td></tr>
+<tr><td>생성 시 클러스터 검증</td><td><code>eks:DescribeCluster</code>, 호출자 세션으로 1회</td><td><code>ecs:DescribeClusters</code>, 호출자 세션으로 1회</td></tr>
+<tr><td>이후 지속 조회</td><td>없음, CloudTrail에 나타나지 않음</td><td>서비스 연결 역할 권한으로 주기적 폴링, 관측 간격 약 9분</td></tr>
+<tr><td>Kubernetes 인증 경로</td><td>access entry 미사용, 방화벽 관련 항목 0건 / 7건</td><td>해당 없음</td></tr>
+<tr><td>서비스 연결 역할 권한</td><td><code>eks:*</code> 전혀 없음</td><td>ECS 읽기 4종, 정책 v4에서 추가</td></tr>
+<tr><td>관측된 반영 지연</td><td>6초에서 40초</td><td>필터 없음 1초, 필터형 39초에서 45초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> EKS와 ECS 내부 동작 비교</p>
+<p>표가 시사하는 운영 원칙은 하나입니다. ECS 연동은 고객 계정에서 감사할 수 있고 EKS 연동은 그럴 수 없습니다. EKS 쪽 동작을 확인해야 한다면 CloudTrail이 아니라 <code>DescribeContainerAssociation</code> 응답의 <code>ResolvedCidrCount</code>와 실제 트래픽 결과로 확인해야 합니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>적용 환경 구성</h2></header><div class="prose">
+<p>적용은 ap-northeast-2 리전에서 Network Firewall 1세트를 두고 진행했습니다. 구성 원칙은 2가지였습니다.</p>
+<p>첫째, 이미 다른 용도로 사용하던 방화벽과 EKS 클러스터는 읽기만 하고 수정하지 않습니다. 기존 Rule Group과 association을 그대로 남겨 베이스라인 비교군으로 사용하고 방화벽 정책에는 신규 Rule Group 참조만 추가합니다.</p>
+<p>둘째, 신규 리소스에는 모두 abi- 접두어를 붙여 정리 대상을 이름만으로 식별할 수 있게 합니다.</p>
+<p>구성의 핵심은 대조군입니다. 속성이 매칭된 컨테이너가 차단된다는 것만 확인해서는 규칙이 실제로 선택적인지 알 수 없습니다. 같은 클러스터, 같은 서브넷, 같은 이미지에서 속성만 없는 워크로드를 나란히 두고 그것이 통과하는지까지 봐야 필터가 동작한다고 말할 수 있습니다. 그래서 트랙마다 대조군을 하나씩 배치했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="anfw-eks-ecs-assets/fig02-anfw-container-attr-rules-fig2-test-layout.png" alt="적용 구성과 대조군 배치 다이어그램" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 적용 구성과 대조군 배치. 점선은 의도적으로 매칭되지 않아야 하는 경로입니다. Fargate task는 필터형 association에서는 제외되지만 필터 없는 association에는 포함됩니다. 그래서 같은 태스크가 한 규칙에는 걸리고 다른 규칙에는 걸리지 않는 대비를 한 세트로 관측할 수 있습니다.</figcaption></figure>
+<h3>3.1 동작 확인 체계와 기대 결과</h3>
+<p>동작 확인 체계는 허용용과 차단용, 2가지 역할의 도메인으로 단순화했습니다. <code>.checkip.amazonaws.com</code>은 alert로 두어 허용하면서 로그 증적을 남기고 차단 대상 도메인은 reject로 두어 TLS 핸드셰이크 단계에서 끊습니다. 클라이언트에서 보이는 결과는 허용이면 HTTP 상태 코드, 차단이면 연결 실패이므로 컨테이너 안의 curl 결과만으로 1차 판정이 가능합니다.</p>
+<p>ECS Rule Group은 두 참조의 의미를 구분하도록 규칙 3개로 구성했습니다. 필터형 참조로 차단하는 도메인, 필터 없는 참조로 허용하는 도메인, 필터 없는 참조로 차단하는 도메인을 각각 하나씩 둡니다. 그러면 EC2 task와 Fargate task의 결과 조합만으로 어느 association이 어느 IP를 수집했는지 역산할 수 있습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>대상</th><th>checkip</th><th>amazon.com</th><th>wikipedia.org</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS abi-curl (label 보유)</td><td>허용</td><td>차단</td><td>해당 없음</td></tr>
+<tr><td>EKS abi-free (대조군)</td><td>허용</td><td>허용</td><td>해당 없음</td></tr>
+<tr><td>ECS EC2 task (속성 보유)</td><td>허용</td><td>차단</td><td>차단</td></tr>
+<tr><td>ECS Fargate task (대조군)</td><td>허용</td><td>허용</td><td>차단</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 대상별 기대 결과 설계</p>
+<p>판정 근거는 3개 계층으로 교차 확인했습니다. 클라이언트의 응답 코드, association의 <code>ResolvedCidrCount</code>, 그리고 방화벽 alert 로그입니다. IP 세트가 아직 갱신되지 않아 통과한 트래픽과 필터 밖이어서 통과한 트래픽은 클라이언트에서 똑같이 보이므로, 카운트와 로그를 반드시 함께 봐야 합니다.</p>
+<p>적용 전에 점검해야 할 전제가 2가지 있습니다. EKS에서 VPC CNI의 SNAT(Source Network Address Translation)가 켜져 있으면 pod IP가 노드 IP로 바뀐 채 방화벽에 도착합니다. 그래서 규칙이 매칭되지 않습니다. 차단 규칙이 통과되는 형태로 나타나기 때문에 설정 문제인데도 기능 미동작으로 오인하기 쉽습니다. <code>AWS_VPC_K8S_CNI_EXTERNALSNAT=true</code>로 pod IP가 보존되는지 먼저 확인할 수 있습니다.</p>
+<p>라우팅 순서도 마찬가지입니다. 서브넷 트래픽이 NAT Gateway를 먼저 지나면 방화벽은 NAT IP만 보게 되어 컨테이너 IP 기반 참조가 전부 무력화됩니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>시험으로 확인한 동작 특성</h2></header><div class="prose">
+<p>확인한 동작 특성은 허용과 차단 매트릭스, 초기 해석 시간, 동적 추적 지연, 로그 메타데이터의 4가지로 나뉩니다. 이 장의 모든 수치는 적용 과정에서 저장한 JSON 결과 파일에서 그대로 인용했습니다.</p>
+<h3>4.1 허용과 차단 12개 케이스 모두 기대와 일치</h3>
+<p>12개 케이스를 두 번 실행해 24건 모두 기대값과 일치했습니다. 주목할 부분은 PASS 개수보다 대조군 3건입니다. label이 없는 pod, 커스텀 속성 필터 밖의 Fargate task, 그리고 같은 Fargate task가 필터 없는 참조에는 걸리는 케이스가 모두 설계한 대로 나왔습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>case</th><th>대상</th><th>기대</th><th>시험 결과</th><th>판정</th></tr>
+</thead>
+<tbody>
+<tr><td>T1-checkip-allow</td><td>EKS 베이스라인</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T1-amazon-block</td><td>EKS 베이스라인</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T2-restricted-checkip-allow</td><td>EKS label 보유</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T2-restricted-amazon-block</td><td>EKS label 보유</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T2-free-amazon-allow</td><td>EKS 대조군</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T2-free-checkip-allow</td><td>EKS 대조군</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-amazon-block</td><td>ECS EC2 task</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-checkip-allow</td><td>ECS EC2 task</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-wikipedia-block</td><td>ECS EC2 task</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T5-fg-amazon-allow</td><td>ECS Fargate 대조군</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T5-fg-checkip-allow</td><td>ECS Fargate</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T5-fg-wikipedia-block</td><td>ECS Fargate</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 허용과 차단 12개 케이스 결과, 2회 실행 동일</p>
+<p>설명하기에 가장 좋은 원본 증거는 두 컨테이너의 로그를 나란히 놓은 것입니다. 같은 클러스터, 같은 이미지, 30초 주기의 같은 curl 루프인데 www.amazon.com에 대한 결과가 정반대입니다. Fargate 쪽의 HTTP:503은 차단이 실패한 것이 아니라 TCP와 TLS 연결이 정상 성립해 원 서버 응답까지 도달했다는 증거입니다. 아래는 Amazon CloudWatch Logs의 <code>/ecs/abi</code> 로그 그룹에서 가져온 두 task의 curl 루프 출력입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>ec2/curl/ad040da6...                      fg/curl/25cc5746...
+  checkip.amazonaws.com HTTP:200            checkip.amazonaws.com HTTP:200
+  www.amazon.com        FAIL                www.amazon.com        HTTP:503
+  en.wikipedia.org      FAIL                en.wikipedia.org      FAIL
+
+# EC2 task 는 커스텀 속성 필터에 매칭되어 amazon.com 이 차단된다
+# Fargate task 는 필터 밖이므로 연결이 성립하고, 필터 없는 참조가 걸린 wikipedia 만 차단된다</code></pre></div>
+<h3>4.2 커스텀 속성 필터의 초기 해석 시간</h3>
+<p>커스텀 속성 지원 여부는 두 트랙 모두 지원으로 확인되었습니다. EKS는 label 키를 <code>label:</code> 같은 접두어 없이 그대로 사용하는 것이 정답이었습니다. ECS는 <code>put-attributes</code>가 아니라 인스턴스 <code>user-data</code>의 <code>ECS_INSTANCE_ATTRIBUTES</code>로 붙인 <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-constraints.html" target="_blank" rel="noopener">container instance 속성</a>이 바로 인식되었습니다. 문서가 예시로 제시한 빌트인 키로 내려가는 폴백은 양쪽 모두 실행할 필요가 없었습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>association</th><th>필터</th><th>해석 시간</th><th>확인 내용</th></tr>
+</thead>
+<tbody>
+<tr><td>abi-eks-label</td><td>커스텀 pod label</td><td>23초</td><td>pod 2개 중 label 보유 1개만 해석, 카운트로 선택성 확인</td></tr>
+<tr><td>abi-ecs-ec2</td><td>커스텀 인스턴스 속성</td><td>18초</td><td>서버측 필터 문자열로 번역되어 전달됨을 CloudTrail로 확인</td></tr>
+<tr><td>abi-ecs-all</td><td>없음</td><td>0초</td><td>생성 시점에 이미 존재하던 task ENI를 즉시 수집</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> association 생성 후 초기 해석 시간</p>
+<h3>4.3 동적 추적 지연은 필터 유무가 핵심입니다</h3>
+<p>스케일 변경과 태스크 기동, 중지에 대한 반영 지연 8건을 5초 간격 폴링으로 측정했습니다. 개발자 가이드는 “near real-time”이라고만 적고 수치나 목표치를 제시하지 않으므로, 이 값들이 문서의 공백을 메우는 부분입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>트랙</th><th>이벤트</th><th>지연</th><th>관측 대상</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS</td><td>eks-scale-out-1to3</td><td>23초</td><td>카운트 1에서 3으로</td></tr>
+<tr><td>EKS</td><td>eks-newpod-enforcement</td><td>6초</td><td>신규 pod에서 차단 실제 발효</td></tr>
+<tr><td>EKS</td><td>eks-scale-in-3to1</td><td>40초</td><td>카운트 3에서 1로</td></tr>
+<tr><td>EKS</td><td>eks-pod-recreate-enforcement</td><td>29초</td><td>재생성 후 차단 재발효</td></tr>
+<tr><td>ECS</td><td>ecs-runtask-ec2filter</td><td>39초</td><td>필터형 참조 카운트 증가</td></tr>
+<tr><td>ECS</td><td>ecs-runtask-allfilter</td><td>1초</td><td>필터 없는 참조 카운트 증가</td></tr>
+<tr><td>ECS</td><td>ecs-stoptask-ec2filter</td><td>45초</td><td>필터형 참조 카운트 감소</td></tr>
+<tr><td>ECS</td><td>ecs-stoptask-allfilter</td><td>1초</td><td>필터 없는 참조 카운트 감소</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 7.</b> 동적 추적 지연 8건, 폴링 간격 5초</p>
+<p>표에서 3가지를 읽어낼 수 있습니다.</p>
+<p>첫째, 같은 클러스터, 같은 이벤트인데 필터가 없으면 1초, 커스텀 속성 필터형이면 39초에서 45초가 걸립니다. 필터형 경로는 이벤트를 받은 뒤 인스턴스 목록 조회, 태스크 목록 조회, 태스크 상세 조회를 순서대로 거치므로 왕복이 늘어납니다. 내부 동작 원리에서 관측한 호출 순서와 지연 차이가 일치하므로 추가 조회가 지연의 주된 원인으로 보입니다. 이는 시험에 근거한 추론입니다.</p>
+<p>둘째, EKS에서는 카운트 반영보다 실제 차단 동작이 빨랐습니다. 스케일아웃 카운트는 23초에 반영되었지만 신규 pod에서 차단이 걸리기까지는 6초였습니다. <code>ResolvedCidrCount</code>는 API 응답에 최종 일관성으로 반영되는 지표입니다. 실제 패킷을 검사하는 Data Path에는 그와 독립적으로 더 이르게 반영될 수 있습니다.</p>
+<p>셋째, 감소 방향이 증가 방향보다 느립니다. EKS는 증가 23초에 감소 40초, ECS 필터형은 증가 39초에 감소 45초입니다. 보안 관점에서 이 방향성은 불리합니다. 허용 범위가 늦게 좁아진다는 뜻이므로, 종료된 컨테이너의 IP가 수십 초 동안 IP 세트에 남아 있습니다. 따라서 정책을 적용할 때 고려해야 할 사항입니다.</p>
+<h3>4.4 alert 로그의 컨테이너 메타데이터는 참조 그룹 이름뿐입니다</h3>
+<p>alert 로그에서 이번 적용에 사용한 룰 시그니처 7개를 모두 찾았고 컨테이너 관련 정규식으로 스키마 전체를 스캔한 결과 매칭되는 경로는 정확히 하나였습니다. 값은 룰을 쓸 때 사용한 @변수명을 그대로 되돌려 주는 것입니다. 공식 개발자 가이드의 <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/firewall-logging-contents.html" target="_blank" rel="noopener">로그 콘텐츠 페이지</a>는 작성 시점 기준 이 필드의 JSON 키를 문서화하지 않았습니다. 아래 경로는 시험으로 확정한 값입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>sid</th><th>트랙</th><th>container_association</th><th>action</th></tr>
+</thead>
+<tbody>
+<tr><td>1001</td><td>EKS 베이스라인</td><td>nfw_test_pods</td><td>allowed</td></tr>
+<tr><td>1002</td><td>EKS 베이스라인</td><td>nfw_test_pods</td><td>blocked</td></tr>
+<tr><td>2001</td><td>EKS label 필터</td><td>abi_restricted_pods</td><td>allowed</td></tr>
+<tr><td>2002</td><td>EKS label 필터</td><td>abi_restricted_pods</td><td>blocked</td></tr>
+<tr><td>3001</td><td>ECS 속성 필터</td><td>abi_ec2_tasks</td><td>blocked</td></tr>
+<tr><td>3101</td><td>ECS 필터 없음</td><td>abi_all_tasks</td><td>allowed</td></tr>
+<tr><td>3102</td><td>ECS 필터 없음</td><td>abi_all_tasks</td><td>blocked</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 8.</b> alert 로그에서 확인한 시그니처와 container_association 값</p>
+<p>아래는 <code>/aws/network-firewall/DMZVPC/alert</code> 로그 그룹에서 발췌한 sid 3001 이벤트입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "firewall_name": "DMZVPC-nfw",
+  "availability_zone": "ap-northeast-2a",
+  "event": {
+    "src_ip": "10.11.37.87", "src_port": 57922,
+    "dest_ip": "184.29.45.254", "dest_port": 443,
+    "alert": {
+      "signature_id": 3001, "rev": 1,
+      "metadata": { "container_association": ["abi_ec2_tasks"] },   // 유일한 컨테이너 필드
+      "signature": "abi ecs-ec2 block amazon.com",
+      "action": "blocked"
+    },
+    "verdict": { "action": "drop", "reject-target": "to_client", "reject": ["tcp-reset"] },
+    "tls": { "sni": "www.amazon.com", "version": "TLS 1.3" },
+    "aws_metadata": { "resource_arn": ".../stateful-rulegroup/abi-ecs-rg" },  // Rule Group ARN, 컨테이너 아님
+    "timestamp": "2026-08-12T13:53:34.086401+0000", "direction": "to_server"
+  }
+}</code></pre></div>
+<p>pod 이름, 네임스페이스, ECS task ARN, 태스크 정의, 컨테이너 ID와 이미지, 클러스터 이름, 매칭에 사용된 속성 값은 어느 필드에도 없습니다. 혼동하기 쉬운 필드가 2개 있습니다. <code>aws_metadata.resource_arn</code>은 매칭된 Rule Group의 ARN입니다. <code>endpoint</code>는 방화벽 엔드포인트 UUID로, 시그니처 7개에서 모두 같은 값이 나옵니다.</p>
+<p>결과적으로 감사나 사고 대응에서는 <code>src_ip</code>와 시각을 EKS 또는 ECS API와 교차 조회해야 합니다. 컨테이너 IP는 수명이 짧아 사후에는 이미 회수된 IP를 되짚을 수 없으므로, 실시간으로 IP와 컨테이너를 잇는 인벤토리를 따로 적재해 두는 것이 사실상 필수입니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>제한사항과 도입 전 확인 지점</h2></header><div class="prose">
+<p>제한사항은 2종류로 나뉩니다. 기능 자체의 구조적 제약과, 이 기능이 잘 동작하는지 확인하려 할 때 점검 절차가 만들어 내는 착오입니다. 앞쪽은 설계 단계에서 결정해야 하고 뒤쪽은 점검 스크립트를 쓸 때마다 되풀이됩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>제한</th><th>왜 문제가 되는가</th><th>조치</th></tr>
+</thead>
+<tbody>
+<tr><td>SNAT 비활성화 필수</td><td>pod IP가 노드 IP로 바뀌면 참조가 빗나가고 차단이 통과되는 형태로 조용히 실패한다</td><td>VPC CNI의 SNAT 설정을 먼저 확인하고 클러스터 전체 영향이므로 별도 승인 절차를 둔다</td></tr>
+<tr><td>라우팅 순서</td><td>NAT를 먼저 지나면 방화벽은 NAT IP만 본다</td><td>대상 서브넷의 기본 경로가 방화벽 엔드포인트를 먼저 지나는지 라우트 테이블로 확인한다</td></tr>
+<tr><td>awsvpc 모드 전용</td><td>ECS의 bridge, host 모드는 지원되지 않고 task 단위 IP가 없다</td><td>태스크 정의의 네트워크 모드를 점검하고 아니면 이 기능의 대상이 아니라고 판단한다</td></tr>
+<tr><td>Fargate 속성 필터 불가</td><td>container instance가 없어 필터 매칭 자체가 성립하지 않는다</td><td>Fargate를 포함하려면 필터 없는 association을 별도로 두고 두 참조를 같은 Rule Group에서 함께 사용한다</td></tr>
+<tr><td>IP 세트 참조 혼용 금지</td><td>한 Rule Group에서 일반 IP 세트와 container association을 섞으면 요청이 거부된다</td><td>기존 prefix list 기반 Rule Group과 컨테이너 기반 Rule Group을 분리해 유지한다</td></tr>
+<tr><td>동일 노드 east-west 미검사</td><td>방화벽 엔드포인트를 지나지 않는 트래픽은 통제 대상이 아니다</td><td>같은 노드 안의 pod 사이 통신은 네트워크 정책 등 별도 수단으로 다룬다</td></tr>
+<tr><td>반영 지연</td><td>종료된 컨테이너 IP가 수십 초간 허용 집합에 남는다</td><td>지연을 전제로 규칙을 설계하고 즉시 격리가 필요한 시나리오에는 이 기능만 의존하지 않는다</td></tr>
+<tr><td>로그 메타데이터 한계</td><td>참조 그룹 이름만 남아 어느 pod나 task였는지 사후 특정이 불가능하다</td><td>IP와 컨테이너를 잇는 인벤토리를 실시간으로 적재해 로그와 조인할 준비를 둔다</td></tr>
+<tr><td>CloudFormation 미지원</td><td>리소스 타입이 없어 CDK L1과 L2 구성도 없다</td><td>CLI 또는 SDK로 만들거나 Terraform 리소스를 사용한다, 커스텀 리소스로 우회할 수도 있다</td></tr>
+<tr><td>삭제 순서 고정</td><td>Rule Group이 참조하는 동안 association을 삭제할 수 없다</td><td>정책에서 Rule Group 참조 제거, Rule Group 삭제, association 삭제 순서로 진행한다</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 9.</b> 제한사항과 도입 전 확인 지점</p>
+<p>점검 절차 측면의 함정도 짚고 넘어가겠습니다. <code>cloudtrail lookup-events</code>에 <code>--max-results</code>를 주면 AWS CLI가 그 오퍼레이션의 자동 페이지네이션을 끄고 최신 50건 이하만 반환합니다. 상시 백그라운드 API 트래픽이 있는 계정에서는 몇 시간 전 이벤트가 그 페이지 밖으로 밀려나므로, 실제로는 존재하는 호출이 0건으로 보입니다. 이번 점검에서도 처음에는 EKS와 ECS 모두 0건이었고 <code>--start-time</code>과 <code>--max-items</code>로 바꾸자 EKS 1건과 ECS 12건이 나왔습니다.</p>
+<p>비슷한 함정이 2개 더 있습니다. <code>logs filter-log-events</code>는 <code>--query</code>를 페이지마다 적용해 결과를 이어 붙이므로 단일 JSON 값을 기대하는 파이프라인이 깨집니다. <code>ecs list-tasks --desired-status RUNNING</code>은 desired 상태이지 실제 상태가 아니므로, 기동에 실패한 태스크를 정상으로 통과시킵니다.</p>
+<h3>5.1 권장 도입 순서</h3>
+<p>도입 순서에는 우선순위가 있습니다. 1번을 확인하지 않은 채 2번 이후를 진행하면 규칙이 동작하지 않는 이유를 규칙 문법에서 찾게 되는데, 원인은 네트워크 계층에 있습니다.</p>
+<ol>
+<li>SNAT와 라우팅 순서를 먼저 확정합니다. 이 2가지가 이 기능의 전제이고 나머지 모든 설계는 그다음입니다. 점검은 pod에서 나간 트래픽의 원본 IP가 방화벽 로그의 <code>src_ip</code>로 보이는지 확인하는 것으로 충분합니다.</li>
+<li>association을 용도별로 나눕니다. 필터형 association과 필터 없는 association은 하나로 합치지 않습니다. EC2 워크로드용과 Fargate 포함 전체용을 분리하고 같은 Rule Group에서 두 참조를 함께 사용합니다. 반영 지연이 서로 다르기 때문에, 운영 중 관측값을 해석할 때도 분리해 두는 편이 낫습니다.</li>
+<li>새 규칙은 alert로 먼저 넣고 로그를 본 뒤 차단으로 바꿉니다. 필터가 의도한 집합을 잡는지 확인하기 전에 차단부터 켜면 대상 밖 워크로드까지 끊을 위험이 있습니다.</li>
+<li>대조군을 상시로 남깁니다. 속성이 없는 워크로드가 통과하는지 계속 확인할 수 있어야 필터가 조용히 넓어진 상황을 잡아낼 수 있습니다. 이번 구성에서도 대조군이 판정의 절반을 담당했습니다.</li>
+<li>IP와 컨테이너를 잇는 인벤토리를 준비합니다. alert 로그의 참조 그룹 이름만으로는 사고 대응이 되지 않고 IP는 짧은 시간 안에 재사용되므로 사후 조회로는 복원할 수 없습니다.</li>
+</ol>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>마치며</h2></header><div class="prose">
+<p>커스텀 속성 필터는 EKS와 ECS 양쪽에서 모두 동작합니다. EKS는 pod label 키를 접두어 없이 그대로 사용하고 ECS는 <code>ECS_INSTANCE_ATTRIBUTES</code>로 붙인 커스텀 container instance 속성을 그대로 사용합니다. 문서에 예시가 없다는 이유로 빌트인 키만 고집할 필요는 없습니다.</p>
+<p>IP 수집 경로는 트랙마다 다릅니다. ECS는 고객 계정에 EventBridge Managed Rule을 만들고 서비스 연결 역할로 폴링하므로, 계정 안에서 감사할 수 있습니다. 반면 EKS는 Pulse Event Service를 통한 이벤트 구독으로 동작합니다. 생성 시점의 조회 1회 외에는 CloudTrail에 흔적을 남기지 않습니다. EKS 쪽 동작을 확인해야 한다면 <code>ResolvedCidrCount</code>와 실제 트래픽 결과를 봐야 합니다.</p>
+<p>반영 지연은 필터 유무가 가릅니다. 필터가 없으면 1초, 커스텀 속성 필터가 있으면 최대 45초가 걸리고 감소 방향이 증가 방향보다 느려 종료된 컨테이너의 IP가 수십 초간 허용 집합에 남습니다. 즉시 격리가 필요한 시나리오라면 이 지연을 설계에 넣어야 합니다.</p>
+<p>컨테이너 IP가 바뀔 때마다 규칙을 고치던 일은 이제 이 기능이 대신해 줍니다. 남는 것은 올바르게 사용하기 위한 전제조건을 갖추는 일입니다. SNAT를 끄고 트래픽이 방화벽을 먼저 지나도록 라우팅을 맞춥니다. 로그의 참조 그룹 이름은 IP와 컨테이너를 잇는 인벤토리로 보완합니다. 나머지는 설계 단계에서 풀 수 있는 항목들입니다. EKS와 ECS 워크로드에 네트워크 계층의 세밀한 통제를 도입하려는 분들께 이 적용 경험이 실질적인 참고가 되기를 바랍니다.</p>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>참고 자료</h2></header><div class="prose">
+<ul>
+<li><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/aws-network-firewall-container-attributes-referencing/" target="_blank" rel="noopener">AWS Network Firewall의 컨테이너 속성 참조 지원 출시 공지</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/container-associations.html" target="_blank" rel="noopener">AWS Network Firewall 개발자 가이드: Container associations</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/APIReference/API_CreateContainerAssociation.html" target="_blank" rel="noopener">AWS Network Firewall API Reference: CreateContainerAssociation</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups-ip-set-references.html" target="_blank" rel="noopener">AWS Network Firewall 개발자 가이드: Rule Group의 IP 세트 참조</a></li>
+<li><a href="https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSNetworkFirewallServiceRolePolicy.html" target="_blank" rel="noopener">AWS 관리형 정책 레퍼런스: AWSNetworkFirewallServiceRolePolicy</a></li>
+<li><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-constraints.html" target="_blank" rel="noopener">Amazon ECS 개발자 가이드: Task placement constraints</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/firewall-logging-contents.html" target="_blank" rel="noopener">AWS Network Firewall 개발자 가이드: 방화벽 로그 콘텐츠</a></li>
+</ul>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/aws-network-firewall-container-attributes-referencing/" target="_blank" rel="noopener">On June 30, 2026</a>, AWS Network Firewall launched container attribute-based rules.</p>
+<p>You no longer need to list IP addresses in firewall rules. You only declare a condition such as “pods with this label” or “tasks running on instances with this attribute.” Network Firewall then tracks the IP addresses of the matching containers automatically. For workloads running on Amazon Elastic Kubernetes Service (Amazon EKS) or Amazon Elastic Container Service (Amazon ECS), pod and task IP addresses change with every scaling event and redeployment. Firewall rules, on the other hand, are written against IP addresses. There has always been a gap between the two. This feature closes that gap.</p>
+<p>After reading the official documentation, however, three questions remain. Beyond the built-in keys such as namespace that the documentation uses as examples, can you also filter on custom labels and container instance attributes that you define yourself? Which resources does this feature create in your account, and through which path does it collect IP addresses? And when a container starts or stops, how long does it take for that change to be reflected in the rules?</p>
+<p>This post answers these three questions and shows how to apply container attribute-based rules to real workloads.</p>
+<p>I set up container associations myself on two tracks, EKS and ECS, in the Asia Pacific (Seoul) Region (ap-northeast-2). I ran 12 allow and block cases twice each and tested 8 propagation delays triggered by containers starting and stopping. I also cross-referenced AWS CloudTrail and Amazon EventBridge to trace the internal path the service uses to collect IP addresses. Based on these results, the post walks through how the feature works internally, the prerequisites to have in place before you apply it, and a recommended adoption order.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Introducing container attribute-based rules</h2></header><div class="prose">
+<p>Container attribute-based rules are a Network Firewall feature that subscribes to container lifecycle events from EKS and ECS clusters. The feature maintains the IP addresses of containers that match the attributes as a dynamic IP set. Operators declare conditions instead of listing IP addresses, and the firewall's stateful rules (Suricata-compatible syntax) reference that set by an alias. According to the launch announcement, the feature can be combined with TLS inspection, FQDN filtering, URL category filtering, and GeoIP filtering, and there is no additional charge.</p>
+<p>The core resource is the container association. The announced feature name is container attribute-based rules. However, the <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/container-associations.html" target="_blank" rel="noopener">developer guide</a> describes the resource that implements the feature as a container association. In the API, you create it with the <a href="https://docs.aws.amazon.com/network-firewall/latest/APIReference/API_CreateContainerAssociation.html" target="_blank" rel="noopener">CreateContainerAssociation</a> operation. An association consists of a type (ECS or EKS, which cannot be changed after creation) and up to 5 monitoring configurations. Each configuration holds one cluster ARN and an optional list of attribute filters. The cluster must be in the same Region and the same account as the association, so cross-account configurations are not supported.</p>
+<p>This feature does not change the traffic path. The developer guide states that Network Firewall only collects IP information from lifecycle events and does not interact with the cluster's data path (the path that actual traffic flows through). No agent or controller is installed in the cluster, and the existing firewall endpoints still perform the inspection. The only thing that changes is how a rule identifies its targets, and the responsibility for making traffic pass through the firewall still rests on your routing design.</p>
+<h3>1.1 Newly added API operations</h3>
+<p>Five operations were added to the existing Network Firewall API. The tagging operations also support this resource type.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Operation</th><th>Role</th><th>What to watch for</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CreateContainerAssociation</code></td><td>Creates an association</td><td>The name must match ^[a-zA-Z0-9-]+$, and the type and name cannot be changed after creation</td></tr>
+<tr><td><code>DescribeContainerAssociation</code></td><td>Retrieves the status</td><td><code>ResolvedCidrCount</code> in the response is the only indicator of whether IP addresses are being collected</td></tr>
+<tr><td><code>UpdateContainerAssociation</code></td><td>Changes the monitoring targets</td><td>UpdateToken is required, and a mismatch returns InvalidTokenException</td></tr>
+<tr><td><code>DeleteContainerAssociation</code></td><td>Deletes an association</td><td>Returns <code>DELETING</code> asynchronously, and fails while a rule group still references the association</td></tr>
+<tr><td><code>ListContainerAssociations</code></td><td>Lists associations</td><td>Returns only names and ARNs, so query the status again with Describe</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> The five container association API operations and their key parameters</p>
+<h3>1.2 How to reference an association from a rule group</h3>
+<p>In a stateful rule group, map a variable name to the association ARN under <code>ReferenceSets.IPSetReferences</code>. You can then point to that set <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups-ip-set-references.html" target="_blank" rel="noopener">from the Suricata rule string as @variable_name</a>. The ECS rule group created for this setup references two associations at the same time, one filtered and one unfiltered. The following is an excerpt from the <code>create-rule-group</code> request for the abi-ecs-rg rule group.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "RulesSource": { "RulesString": "
+    reject tls @abi_ec2_tasks any -&gt; any any (msg:\"abi ecs-ec2 block amazon.com\";
+      flow:to_server; tls.sni; dotprefix; content:\".amazon.com\"; endswith; nocase; sid:3001; rev:1;)
+    alert  tls @abi_all_tasks any -&gt; any any (msg:\"abi ecs-all allow checkip\";
+      ... content:\".checkip.amazonaws.com\"; sid:3101; rev:1;)
+    reject tls @abi_all_tasks any -&gt; any any (msg:\"abi ecs-all block wikipedia\";
+      ... content:\".wikipedia.org\"; sid:3102; rev:1;)" },
+  "ReferenceSets": { "IPSetReferences": {
+    "abi_ec2_tasks": { "ReferenceArn": "arn:aws:network-firewall:ap-northeast-2:...:container-association/abi-ecs-ec2" },
+    "abi_all_tasks": { "ReferenceArn": "arn:aws:network-firewall:ap-northeast-2:...:container-association/abi-ecs-all" }
+  } }
+}    // ConsumedCapacity 3 / 100</code></pre></div>
+<h3>1.3 Quotas and structural constraints</h3>
+<p>Most of the quotas are fixed values. In particular, the limit of 30 references per rule group applies separately from the limit of 5 on existing IP set references that use prefix lists. A design that splits associations into fine-grained units is rarely blocked by a quota.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value</th><th>Adjustable</th></tr>
+</thead>
+<tbody>
+<tr><td>Associations per account, per Region</td><td>100</td><td>Yes</td></tr>
+<tr><td>Monitoring configurations per association</td><td>5</td><td>No</td></tr>
+<tr><td>Container association references per rule group</td><td>30</td><td>No</td></tr>
+<tr><td><code>ResolvedCidrCount</code> upper limit</td><td>1,000,000</td><td>No</td></tr>
+<tr><td>EKS filter keys</td><td>namespace, pod, cluster, custom label keys</td><td>Requires SNAT to be disabled</td></tr>
+<tr><td>ECS filter keys</td><td>Container instance attributes, EC2 launch type only</td><td>awsvpc mode only</td></tr>
+<tr><td>IaC support</td><td>Not supported in CloudFormation, merged in Terraform</td><td>CLI/SDK required</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Quotas and structural constraints</p>
+<p>IaC support is the most fluid of these items. At the time of writing, AWS CloudFormation has no resource type for it. For Terraform, the <code>aws_networkfirewall_container_association</code> resource <a href="https://github.com/hashicorp/terraform-provider-aws/pull/49321" target="_blank" rel="noopener">was merged</a> on August 6, 2026.</p>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>How it works internally: EKS and ECS behave differently</h2></header><div class="prose">
+<p>The API and the resource type are the same, but the internal implementations for EKS and ECS are not. The difference becomes clear when you cross-reference CloudTrail, EventBridge, EKS access entries, and the service-linked role policy. ECS leaves observable resources and calls in the customer account. EKS, in contrast, leaves almost nothing. This implementation difference is also the reason the two tracks show different propagation delays.</p>
+<figure class="fig"><div class="canvas wide"><img src="anfw-eks-ecs-assets/fig01-anfw-container-attr-rules-fig1-collection-path.png" alt="Diagram comparing the IP collection paths of EKS and ECS" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> IP collection paths. The EKS path at the top leaves neither resources nor periodic calls in the customer account, while the ECS path at the bottom is observable through an EventBridge rule in the account and calls made with the service-linked role. Both paths converge on the same IP set.</figcaption></figure>
+<h3>2.1 The EKS integration with Network Firewall creates no resources in the customer account</h3>
+<p>The developer guide states that an EKS-type association subscribes to pod lifecycle events through the Amazon EKS Pulse Event Service.</p>
+<p>First, the access entries, which register Kubernetes API access for IAM principals, contain no firewall-related entry. The cluster attached to an association and the control cluster without one have the same configuration.</p>
+<p>Second, the <a href="https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSNetworkFirewallServiceRolePolicy.html" target="_blank" rel="noopener">service-linked role policy</a> does not include any <code>eks:*</code> permissions.</p>
+<p>Third, in CloudTrail the <code>eks:DescribeCluster</code> call is recorded only once, when the association is created, and no periodic polling calls appear.</p>
+<p>In the <code>eks:DescribeCluster</code> record from creation time, <code>sourceIPAddress</code> and <code>userAgent</code> are both <code>network-firewall.amazonaws.com</code>. The session, however, belongs to the caller who created the association. In other words, this lookup runs with the caller's credentials rather than with service permissions, which is also consistent with the managed policy having no <code>eks:*</code> permissions.</p>
+<h3>2.2 The ECS integration with Network Firewall creates a rule in your account and polls periodically</h3>
+<p>When you create an ECS-type association, Network Firewall automatically provisions a managed rule in EventBridge in your account. In an actual test, one rule that I did not create myself appears, and it is scoped to the target cluster, which shows that rules are created per cluster. Unlike a typical EventBridge rule that points to a user resource such as AWS Lambda or Amazon SQS, the target is a service-owned ARN with neither an account ID nor a resource path. The developer guide also describes this rule as a resource whose lifecycle the service manages and states that you should not modify or delete it yourself. The following is the output of events describe-rule and list-targets-by-rule.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>Name        : NetworkFirewallManagedRule-abi-ecs-f95002052a4bc1e8
+Description : This rule is used to route ECS Task Events to AWS Network Firewall
+ManagedBy   : network-firewall.amazonaws.com
+State       : ENABLED
+EventPattern: {"source":["aws.ecs"],"detail-type":["ECS Task State Change"],
+               "detail":{"clusterArn":["arn:aws:ecs:ap-northeast-2:********6239:cluster/abi-ecs"]}}
+Target      : NetworkFirewallTarget -&gt; arn:aws:network-firewall:ap-northeast-2:::
+                                       # Service-owned ARN with no account ID or resource path</code></pre></div>
+<p>The processing that follows an event is also recorded as is in CloudTrail. Using a session that assumed the service-linked role, the service calls three ECS read APIs in sequence. These calls were observed in two waves (bursts of calls in the same order), one right after the association was created and one about 9 minutes later. The most decisive evidence is the filter string in the first call. The custom key placed in the attribute filter is translated directly into the ECS server-side attribute filter syntax and passed along. The following is the call sequence of the AWSServiceRoleForNetworkFirewall session recorded in CloudTrail.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>08:15:21Z  ecs:ListContainerInstances  cluster=abi-ecs  filter="attribute:abi-env == lab"
+08:15:21Z  ecs:ListTasks               cluster=abi-ecs  containerInstance=d0bc521b...  desiredStatus=RUNNING
+08:15:22Z  ecs:DescribeTasks           cluster=abi-ecs  tasks=[task/abi-ecs/ad040da6...]
+08:15:25Z  ecs:ListTasks               cluster=abi-ecs  desiredStatus=RUNNING   # for the unfiltered association
+08:15:25Z  ecs:DescribeTasks           cluster=abi-ecs  tasks=[task/abi-ecs/3fa22e0b..., task/abi-ecs/ad040da6...]
+
+08:24:01Z  # second wave in the same order about 9 minutes later</code></pre></div>
+<p>The actual propagation speed is determined by the event path. Propagation for the unfiltered association was measured at 1 second, a speed that polling at intervals of about 9 minutes cannot explain on its own.</p>
+<p>The following table summarizes the differences between the two tracks. The propagation delay figures in the last row of the table are covered in detail in the test results.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Criterion</th><th>EKS</th><th>ECS</th></tr>
+</thead>
+<tbody>
+<tr><td>Event delivery path</td><td>No resources created in the customer account, an internal subscription through the EKS Pulse Event Service according to the documentation</td><td>An EventBridge managed rule created in the customer account, with a service-owned ARN as the target</td></tr>
+<tr><td>Cluster validation at creation</td><td><code>eks:DescribeCluster</code>, once with the caller's session</td><td><code>ecs:DescribeClusters</code>, once with the caller's session</td></tr>
+<tr><td>Ongoing lookups afterward</td><td>None, nothing appears in CloudTrail</td><td>Periodic polling with service-linked role permissions, observed interval of about 9 minutes</td></tr>
+<tr><td>Kubernetes authentication path</td><td>Access entries not used, firewall-related entries 0 / 7</td><td>Not applicable</td></tr>
+<tr><td>Service-linked role permissions</td><td>No <code>eks:*</code> at all</td><td>Four ECS read permissions, added in policy v4</td></tr>
+<tr><td>Observed propagation delay</td><td>6 to 40 seconds</td><td>Unfiltered 1 second, filtered 39 to 45 seconds</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Internal behavior of EKS and ECS compared</p>
+<p>The table points to a single operating principle. The ECS integration can be audited from the customer account, and the EKS integration cannot. If you need to verify behavior on the EKS side, you have to check the <code>DescribeContainerAssociation</code> response for <code>ResolvedCidrCount</code> and look at actual traffic results, not CloudTrail.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Setting up the environment</h2></header><div class="prose">
+<p>I carried out the setup in the ap-northeast-2 Region with a single Network Firewall deployment. Two principles guided the configuration.</p>
+<p>First, the firewall and the EKS cluster that were already in use for other purposes are only read and never modified. The existing rule groups and associations are left as they are to serve as a baseline comparison group, and only references to the new rule groups are added to the firewall policy.</p>
+<p>Second, every new resource gets the abi- prefix so that the resources to clean up can be identified by name alone.</p>
+<p>The control group is the heart of the setup. Confirming only that containers with matching attributes are blocked does not tell you whether the rule is actually selective. You can say that the filter works only after you place a workload that lacks nothing but the attribute side by side in the same cluster, the same subnet, and the same image, and confirm that it gets through. For that reason, I placed one control workload in each track.</p>
+<figure class="fig"><div class="canvas wide"><img src="anfw-eks-ecs-assets/fig02-anfw-container-attr-rules-fig2-test-layout.png" alt="Diagram of the setup and control group placement" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Setup and control group placement. Dashed lines are paths that are intentionally not supposed to match. The Fargate task is excluded from the filtered association but included in the unfiltered one. As a result, you can observe in a single set the contrast of the same task matching one rule and not another.</figcaption></figure>
+<h3>3.1 Verification scheme and expected results</h3>
+<p>I simplified the verification scheme to domains with two roles, one for allow and one for block. <code>.checkip.amazonaws.com</code> is set to alert, which allows the traffic while leaving a log trail, and the domains to block are set to reject, which cuts the connection at the TLS handshake. On the client side, an allowed request shows an HTTP status code and a blocked one shows a connection failure, so the curl result inside the container is enough for a first-pass verdict.</p>
+<p>I built the ECS rule group from 3 rules so that the meaning of the two references can be told apart. It has one domain blocked through the filtered reference, one domain allowed through the unfiltered reference, and one domain blocked through the unfiltered reference. With that, the combination of results from the EC2 task and the Fargate task alone lets you work backward to which association collected which IP address.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Target</th><th>checkip</th><th>amazon.com</th><th>wikipedia.org</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS abi-curl (has the label)</td><td>Allowed</td><td>Blocked</td><td>Not applicable</td></tr>
+<tr><td>EKS abi-free (control)</td><td>Allowed</td><td>Allowed</td><td>Not applicable</td></tr>
+<tr><td>ECS EC2 task (has the attribute)</td><td>Allowed</td><td>Blocked</td><td>Blocked</td></tr>
+<tr><td>ECS Fargate task (control)</td><td>Allowed</td><td>Allowed</td><td>Blocked</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Expected results designed for each target</p>
+<p>I cross-checked the basis for each verdict at 3 layers. They are the client's response code, the association's <code>ResolvedCidrCount</code>, and the firewall alert logs. Traffic that got through because the IP set had not been updated yet and traffic that got through because it is outside the filter look identical from the client, so you must always look at the count and the logs together.</p>
+<p>There are two prerequisites to check before you apply the feature. On EKS, if source network address translation (SNAT) is turned on in the VPC CNI, traffic reaches the firewall with the pod IP address already replaced by the node IP address. As a result, the rule does not match. Because this shows up as a block rule being bypassed, it is easy to mistake a configuration problem for the feature not working. You can first check whether pod IP addresses are preserved with <code>AWS_VPC_K8S_CNI_EXTERNALSNAT=true</code>.</p>
+<p>The same goes for routing order. If subnet traffic passes through a NAT gateway first, the firewall sees only the NAT IP address, and every reference based on container IP addresses is rendered ineffective.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Behavior confirmed by testing</h2></header><div class="prose">
+<p>The behavior I confirmed falls into 4 areas: the allow and block matrix, initial resolution time, dynamic tracking delay, and log metadata. Every figure in this chapter is quoted as is from the JSON result files saved during the setup.</p>
+<h3>4.1 All 12 allow and block cases matched expectations</h3>
+<p>I ran the 12 cases twice, and all 24 results matched the expected values. What deserves attention is the 3 control cases rather than the number of PASS results. The pod without the label, the Fargate task outside the custom attribute filter, and the case where that same Fargate task is caught by the unfiltered reference all came out as designed.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>case</th><th>Target</th><th>Expected</th><th>Test result</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>T1-checkip-allow</td><td>EKS baseline</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T1-amazon-block</td><td>EKS baseline</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T2-restricted-checkip-allow</td><td>EKS with label</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T2-restricted-amazon-block</td><td>EKS with label</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T2-free-amazon-allow</td><td>EKS control</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T2-free-checkip-allow</td><td>EKS control</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-amazon-block</td><td>ECS EC2 task</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-checkip-allow</td><td>ECS EC2 task</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T4-ec2-wikipedia-block</td><td>ECS EC2 task</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+<tr><td>T5-fg-amazon-allow</td><td>ECS Fargate control</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T5-fg-checkip-allow</td><td>ECS Fargate</td><td>ALLOWED</td><td>ALLOWED</td><td>PASS</td></tr>
+<tr><td>T5-fg-wikipedia-block</td><td>ECS Fargate</td><td>BLOCKED</td><td>BLOCKED</td><td>PASS</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Results of the 12 allow and block cases, identical across 2 runs</p>
+<p>The raw evidence that explains this best is the logs of the two containers placed side by side. The cluster, the image, and the curl loop on a 30-second interval are all the same, yet the results for www.amazon.com are exact opposites. The HTTP:503 on the Fargate side is not a failed block but evidence that the TCP and TLS connections were established normally and the request got as far as a response from the origin server. The following is the curl loop output of the two tasks, taken from the <code>/ecs/abi</code> log group in Amazon CloudWatch Logs.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>ec2/curl/ad040da6...                      fg/curl/25cc5746...
+  checkip.amazonaws.com HTTP:200            checkip.amazonaws.com HTTP:200
+  www.amazon.com        FAIL                www.amazon.com        HTTP:503
+  en.wikipedia.org      FAIL                en.wikipedia.org      FAIL
+
+# The EC2 task matches the custom attribute filter, so amazon.com is blocked
+# The Fargate task is outside the filter, so the connection succeeds; only wikipedia, covered by the unfiltered reference, is blocked</code></pre></div>
+<h3>4.2 Initial resolution time for custom attribute filters</h3>
+<p>As for whether custom attributes are supported, both tracks were confirmed to support them. For EKS, the right answer was to use the label key as is, without a prefix such as <code>label:</code>. For ECS, rather than <code>put-attributes</code>, I used the instance <code>user-data</code> to set <code>ECS_INSTANCE_ATTRIBUTES</code>, and the <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-constraints.html" target="_blank" rel="noopener">container instance attribute</a> attached that way was recognized right away. On neither side did I need to run the fallback to the built-in keys that the documentation gives as examples.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>association</th><th>Filter</th><th>Resolution time</th><th>What was confirmed</th></tr>
+</thead>
+<tbody>
+<tr><td>abi-eks-label</td><td>Custom pod label</td><td>23 seconds</td><td>Only the 1 pod with the label out of 2 pods was resolved, selectivity confirmed by the count</td></tr>
+<tr><td>abi-ecs-ec2</td><td>Custom instance attribute</td><td>18 seconds</td><td>Confirmed in CloudTrail that the filter is translated into a server-side filter string and passed along</td></tr>
+<tr><td>abi-ecs-all</td><td>None</td><td>0 seconds</td><td>Task ENIs that already existed at creation time were collected immediately</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Initial resolution time after an association is created</p>
+<h3>4.3 For dynamic tracking delay, what matters is whether a filter is present</h3>
+<p>I measured 8 propagation delays for scaling changes and for tasks starting and stopping, polling at 5-second intervals. The developer guide says only “near real-time” and gives no figures or targets, so these values fill a gap in the documentation.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Track</th><th>Event</th><th>Delay</th><th>What was observed</th></tr>
+</thead>
+<tbody>
+<tr><td>EKS</td><td>eks-scale-out-1to3</td><td>23 seconds</td><td>Count from 1 to 3</td></tr>
+<tr><td>EKS</td><td>eks-newpod-enforcement</td><td>6 seconds</td><td>Blocking actually takes effect on a new pod</td></tr>
+<tr><td>EKS</td><td>eks-scale-in-3to1</td><td>40 seconds</td><td>Count from 3 to 1</td></tr>
+<tr><td>EKS</td><td>eks-pod-recreate-enforcement</td><td>29 seconds</td><td>Blocking takes effect again after re-creation</td></tr>
+<tr><td>ECS</td><td>ecs-runtask-ec2filter</td><td>39 seconds</td><td>Filtered reference count increases</td></tr>
+<tr><td>ECS</td><td>ecs-runtask-allfilter</td><td>1 second</td><td>Unfiltered reference count increases</td></tr>
+<tr><td>ECS</td><td>ecs-stoptask-ec2filter</td><td>45 seconds</td><td>Filtered reference count decreases</td></tr>
+<tr><td>ECS</td><td>ecs-stoptask-allfilter</td><td>1 second</td><td>Unfiltered reference count decreases</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 7.</b> The 8 dynamic tracking delays, with a 5-second polling interval</p>
+<p>Three things can be read from the table.</p>
+<p>First, with the same cluster and the same event, it takes 1 second without a filter and 39 to 45 seconds with a custom attribute filter. After receiving an event, the filtered path goes through listing instances, listing tasks, and describing tasks in sequence, which adds round trips. The call sequence observed in the internal behavior chapter lines up with the difference in delay, so the extra lookups appear to be the main cause of the delay. This is an inference based on the tests.</p>
+<p>Second, on EKS, actual blocking took effect faster than the count was updated. The scale-out count was reflected at 23 seconds, but it took only 6 seconds for blocking to apply to a new pod. <code>ResolvedCidrCount</code> is a metric that is reflected in the API response with eventual consistency. The data path that inspects actual packets can be updated independently of it, and earlier.</p>
+<p>Third, decreases are slower than increases. EKS took 23 seconds for an increase and 40 seconds for a decrease, and filtered ECS took 39 seconds for an increase and 45 seconds for a decrease. From a security standpoint, this asymmetry is unfavorable. It means that the allowed scope narrows late, so the IP address of a terminated container stays in the IP set for tens of seconds. This is therefore something to take into account when you apply policies.</p>
+<h3>4.4 The only container metadata in alert logs is the reference group name</h3>
+<p>I found all 7 rule signatures used in this setup in the alert logs, and when I scanned the entire schema with container-related regular expressions, exactly one path matched. Its value simply echoes back the @variable name that was used when the rule was written. At the time of writing, the <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/firewall-logging-contents.html" target="_blank" rel="noopener">log contents page</a> of the official developer guide did not document the JSON key for this field. The path shown below is the value confirmed by testing.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>sid</th><th>Track</th><th>container_association</th><th>action</th></tr>
+</thead>
+<tbody>
+<tr><td>1001</td><td>EKS baseline</td><td>nfw_test_pods</td><td>allowed</td></tr>
+<tr><td>1002</td><td>EKS baseline</td><td>nfw_test_pods</td><td>blocked</td></tr>
+<tr><td>2001</td><td>EKS label filter</td><td>abi_restricted_pods</td><td>allowed</td></tr>
+<tr><td>2002</td><td>EKS label filter</td><td>abi_restricted_pods</td><td>blocked</td></tr>
+<tr><td>3001</td><td>ECS attribute filter</td><td>abi_ec2_tasks</td><td>blocked</td></tr>
+<tr><td>3101</td><td>ECS no filter</td><td>abi_all_tasks</td><td>allowed</td></tr>
+<tr><td>3102</td><td>ECS no filter</td><td>abi_all_tasks</td><td>blocked</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 8.</b> Signatures and container_association values confirmed in the alert logs</p>
+<p>The following is the sid 3001 event excerpted from the <code>/aws/network-firewall/DMZVPC/alert</code> log group.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "firewall_name": "DMZVPC-nfw",
+  "availability_zone": "ap-northeast-2a",
+  "event": {
+    "src_ip": "10.11.37.87", "src_port": 57922,
+    "dest_ip": "184.29.45.254", "dest_port": 443,
+    "alert": {
+      "signature_id": 3001, "rev": 1,
+      "metadata": { "container_association": ["abi_ec2_tasks"] },   // the only container field
+      "signature": "abi ecs-ec2 block amazon.com",
+      "action": "blocked"
+    },
+    "verdict": { "action": "drop", "reject-target": "to_client", "reject": ["tcp-reset"] },
+    "tls": { "sni": "www.amazon.com", "version": "TLS 1.3" },
+    "aws_metadata": { "resource_arn": ".../stateful-rulegroup/abi-ecs-rg" },  // rule group ARN, not a container
+    "timestamp": "2026-08-12T13:53:34.086401+0000", "direction": "to_server"
+  }
+}</code></pre></div>
+<p>The pod name, namespace, ECS task ARN, task definition, container ID and image, cluster name, and the attribute value used for matching do not appear in any field. Two fields are easy to confuse. <code>aws_metadata.resource_arn</code> is the ARN of the matched rule group. <code>endpoint</code> is the firewall endpoint UUID, and it has the same value across all 7 signatures.</p>
+<p>As a result, for audits and incident response you have to cross-reference <code>src_ip</code> and the timestamp against the EKS or ECS API. Container IP addresses are short-lived, and after the fact you cannot trace back an IP address that has already been reclaimed, so separately loading an inventory that links IP addresses to containers in real time is effectively mandatory.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Limitations and what to check before adoption</h2></header><div class="prose">
+<p>The limitations fall into 2 kinds. One is the structural constraints of the feature itself, and the other is the mistakes that the verification procedure produces when you try to confirm that the feature is working. The former has to be decided at design time, and the latter recurs every time you script a check.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Limitation</th><th>Why it is a problem</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td>SNAT must be disabled</td><td>If the pod IP address is replaced by the node IP address, the reference misses and fails silently in the form of blocked traffic getting through</td><td>Check the VPC CNI SNAT setting first, and set up a separate approval process because the change affects the entire cluster</td></tr>
+<tr><td>Routing order</td><td>If traffic passes through NAT first, the firewall sees only the NAT IP address</td><td>Use the route table to confirm that the default route of the target subnet passes through the firewall endpoint first</td></tr>
+<tr><td>awsvpc mode only</td><td>The ECS bridge and host modes are not supported and have no per-task IP address</td><td>Check the network mode in the task definition, and if it is not awsvpc, treat the workload as out of scope for this feature</td></tr>
+<tr><td>No attribute filters for Fargate</td><td>There is no container instance, so filter matching cannot happen at all</td><td>To include Fargate, keep a separate unfiltered association and use both references together in the same rule group</td></tr>
+<tr><td>No mixing of IP set references</td><td>If you mix regular IP sets and container associations in one rule group, the request is rejected</td><td>Keep the existing prefix list-based rule groups and the container-based rule groups separate</td></tr>
+<tr><td>No inspection of east-west traffic on the same node</td><td>Traffic that does not pass through a firewall endpoint is not subject to control</td><td>Handle communication between pods on the same node with a separate mechanism such as network policies</td></tr>
+<tr><td>Propagation delay</td><td>The IP address of a terminated container stays in the allowed set for tens of seconds</td><td>Design rules with the delay in mind, and do not rely on this feature alone in scenarios that require immediate isolation</td></tr>
+<tr><td>Limited log metadata</td><td>Only the reference group name is recorded, so you cannot determine after the fact which pod or task it was</td><td>Load an inventory that links IP addresses to containers in real time so that it is ready to join with the logs</td></tr>
+<tr><td>No CloudFormation support</td><td>There is no resource type, so there are no CDK L1 or L2 constructs either</td><td>Create it with the CLI or an SDK, or use the Terraform resource, and a custom resource is also a possible workaround</td></tr>
+<tr><td>Fixed deletion order</td><td>An association cannot be deleted while a rule group references it</td><td>Proceed in this order: remove the rule group reference from the policy, delete the rule group, then delete the association</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 9.</b> Limitations and what to check before adoption</p>
+<p>Let me also point out the pitfalls on the verification side. With <code>cloudtrail lookup-events</code>, passing <code>--max-results</code> makes the AWS CLI turn off automatic pagination for that operation and return only the latest 50 events or fewer. In an account with constant background API traffic, events from a few hours ago are pushed off that page, so calls that actually exist show up as 0. In this verification as well, both EKS and ECS showed 0 at first, and after I switched to <code>--start-time</code> and <code>--max-items</code>, 1 EKS event and 12 ECS events came up.</p>
+<p>There are 2 more pitfalls of the same kind. <code>logs filter-log-events</code> applies <code>--query</code> to each page and concatenates the results, which breaks pipelines that expect a single JSON value. <code>ecs list-tasks --desired-status RUNNING</code> reports the desired status, not the actual status, so it lets tasks that failed to start pass as healthy.</p>
+<h3>5.1 Recommended adoption order</h3>
+<p>The adoption order has priorities. If you move on to step 2 and beyond without confirming step 1, you end up looking for the reason a rule does not work in the rule syntax, when the cause is in the network layer.</p>
+<ol>
+<li>Settle SNAT and routing order first. These 2 items are the prerequisites for this feature, and all other design work comes after them. As a check, it is enough to confirm that the original IP address of traffic leaving a pod appears as <code>src_ip</code> in the firewall logs.</li>
+<li>Split associations by purpose. Do not merge a filtered association and an unfiltered association into one. Separate the one for EC2 workloads from the one for everything including Fargate, and use both references together in the same rule group. Because their propagation delays differ, keeping them separate also makes it easier to interpret what you observe in operation.</li>
+<li>Add new rules as alert first, review the logs, and then switch them to block. If you turn on blocking before confirming that the filter captures the intended set, you risk cutting off workloads outside the target.</li>
+<li>Keep a control group in place permanently. Only if you can keep confirming that a workload without the attribute gets through can you catch a situation where the filter has silently widened. In this setup too, the control group accounted for half of the verdicts.</li>
+<li>Prepare an inventory that links IP addresses to containers. The reference group name in the alert logs is not enough for incident response, and IP addresses are reused within a short time, so the mapping cannot be reconstructed by looking it up after the fact.</li>
+</ol>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Closing</h2></header><div class="prose">
+<p>Custom attribute filters work on both EKS and ECS. EKS uses the pod label key as is, without a prefix, and ECS uses the custom container instance attribute attached through <code>ECS_INSTANCE_ATTRIBUTES</code> as is. There is no need to stick to the built-in keys just because the documentation has no example.</p>
+<p>The IP collection path differs by track. ECS creates an EventBridge managed rule in the customer account and polls with the service-linked role, so it can be audited from within the account. EKS, in contrast, works through an event subscription via the Pulse Event Service. Apart from a single lookup at creation time, it leaves no trace in CloudTrail. If you need to verify behavior on the EKS side, you have to look at <code>ResolvedCidrCount</code> and actual traffic results.</p>
+<p>Propagation delay depends on whether a filter is present. It takes 1 second without a filter and up to 45 seconds with a custom attribute filter, and because decreases are slower than increases, the IP address of a terminated container stays in the allowed set for tens of seconds. For scenarios that require immediate isolation, you have to factor this delay into the design.</p>
+<p>The work of editing rules every time a container IP address changes is now handled by this feature. What remains is putting in place the prerequisites for using it correctly. Turn off SNAT and align routing so that traffic passes through the firewall first. Supplement the reference group name in the logs with an inventory that links IP addresses to containers. The rest are items that can be resolved at design time. I hope this hands-on experience serves as a practical reference for anyone looking to bring fine-grained network-layer control to EKS and ECS workloads.</p>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>References</h2></header><div class="prose">
+<ul>
+<li><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/06/aws-network-firewall-container-attributes-referencing/" target="_blank" rel="noopener">Launch announcement: AWS Network Firewall support for referencing container attributes</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/container-associations.html" target="_blank" rel="noopener">AWS Network Firewall Developer Guide: Container associations</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/APIReference/API_CreateContainerAssociation.html" target="_blank" rel="noopener">AWS Network Firewall API Reference: CreateContainerAssociation</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups-ip-set-references.html" target="_blank" rel="noopener">AWS Network Firewall Developer Guide: IP set references in rule groups</a></li>
+<li><a href="https://docs.aws.amazon.com/aws-managed-policy/latest/reference/AWSNetworkFirewallServiceRolePolicy.html" target="_blank" rel="noopener">AWS Managed Policy Reference: AWSNetworkFirewallServiceRolePolicy</a></li>
+<li><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-placement-constraints.html" target="_blank" rel="noopener">Amazon ECS Developer Guide: Task placement constraints</a></li>
+<li><a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/firewall-logging-contents.html" target="_blank" rel="noopener">AWS Network Firewall Developer Guide: Firewall log contents</a></li>
+</ul>
+</div></section>
+</div>
+
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/anfw-eks-ecs/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-09-16 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/anfw-eks-ecs/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-09-16. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

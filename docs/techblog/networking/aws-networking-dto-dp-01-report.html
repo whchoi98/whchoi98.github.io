@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS 네트워크 데이터 전송 및 처리 요금, 아키텍처로 이해하기 [1부: 요금 구조와 인터넷 경계]</title>
+<meta name="description" content="AWS 네트워크 비용은 데이터 전송 요금과 데이터 처리 요금 두 가지로 정해집니다. 서울 리전 요금을 기준으로 인터넷 게이트웨이, 퍼블릭 IPv4 주소, NAT Gateway, VPC 엔드포인트, Amazon CloudFront에서 비용이 발생하는 경로와 줄이는 방법을 정리합니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-01/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-09-21</span><span class="l-en">Published 2026-09-21</span></span><span>Networking</span><span><span class="l-ko">읽는 시간 14분</span><span class="l-en">14 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-01/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-01/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">AWS 네트워크 데이터 전송 및 처리 요금, 아키텍처로 이해하기 [1부: 요금 구조와 인터넷 경계]</span><span class="l-en">Understanding AWS network data transfer and processing charges through architecture [Part 1: Pricing structure and the internet boundary]</span></h1>
+<p class="thesis"><span class="l-ko">AWS 네트워크 비용이 어느 경로에서 어떤 단위로 발생하고 설계 단계에서 어떻게 줄이는지를 다룹니다. 비용은 방향과 경계로 정해지는 데이터 전송 요금과 트래픽이 지나는 관리형 서비스가 부과하는 데이터 처리 요금 두 가지로 정해지며 같은 트래픽에 함께 과금될 수 있습니다. 같은 리전 안의 통신은 프라이빗 IP로 하고 AWS 서비스로 향하는 트래픽은 VPC 엔드포인트로 우회해 NAT Gateway 처리 요금을 없애거나 6분의 1로 줄입니다.</span><span class="l-en">This post asks on which paths and in what units AWS networking costs are incurred, and how to reduce them at the design stage. The cost is determined by two charges that can apply to the same traffic: a data transfer charge set by direction and boundary, and a data processing charge applied by the managed services the traffic passes through. The conclusion is to communicate over private IPs within a Region and to route traffic bound for AWS services through VPC endpoints, which removes the NAT gateway processing charge or cuts it to one sixth.</span></p>
+<div class="tags"><span>#Amazon VPC</span><span>#NAT Gateway</span><span>#VPC Endpoints</span><span>#AWS PrivateLink</span><span>#Amazon CloudFront</span><span>#Data Transfer</span><span>#Public IPv4</span><span>#AWS Cost and Usage Reports</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">데이터 전송 요금의 두 종류</a><a href="#ko-s3">청구서에서 데이터 전송 비용 찾기</a><a href="#ko-s4">인터넷 게이트웨이와 퍼블릭 IPv4 주소</a><a href="#ko-s5">NAT Gateway</a><a href="#ko-s6">VPC 엔드포인트</a><a href="#ko-s7">다른 리전의 AWS 서비스 접근</a><a href="#ko-s8">인터넷 콘텐츠 전송과 Amazon CloudFront</a><a href="#ko-s9">1부 체크리스트</a><a href="#ko-s10">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Two kinds of data transfer charges</a><a href="#en-s3">Finding data transfer costs on your bill</a><a href="#en-s4">Internet gateways and public IPv4 addresses</a><a href="#en-s5">NAT gateway</a><a href="#en-s6">VPC endpoints</a><a href="#en-s7">Accessing AWS services in another Region</a><a href="#en-s8">Internet content delivery and Amazon CloudFront</a><a href="#en-s9">Part 1 checklist</a><a href="#en-s10">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>이 글은 VPC, 서브넷, 가용 영역(Availability Zone, AZ)의 기본 개념을 아는 아키텍트와 운영 담당자를 대상으로 합니다. AWS 네트워크 비용이 어느 경로에서 어떤 단위로 발생하는지와 이를 설계 단계에서 최적화하는 방법을 다룹니다.</p>
+<p>데이터 전송 비용은 청구서에서 식별하기 어렵습니다. EC2 인스턴스나 RDS처럼 서비스 이름으로 묶이지 않고 여러 서비스에 흩어져 기록되기 때문입니다. 필자가 검토한 고객 사례들에서는 EC2-Other 항목이 전체 청구액의 8~12%를 차지해 상위 2~3위에 올랐습니다.</p>
+<p><code>EC2-Other</code>는 NAT Gateway 요금과 데이터 전송 요금이 함께 분류되는 항목입니다. 오픈 소스 기반의 자원들을 클러스터 형태로 여러 AZ에 걸쳐 운영하는 고객일수록 AZ 간 전송 요금이 분기마다 꾸준히 늘어났습니다(Apache Kafka, Elasticsearch, Cassandra, Redis 등). 이 비용은 아키텍처를 설계하는 순간에 대부분 결정됩니다. 인스턴스 타입이나 스토리지 클래스와 다르게 이후에 변경하기 어렵습니다. 그래서 설계 단계에서 요금 구조를 알고 있어야 합니다. 이 시리즈는 서울 리전(ap-northeast-2)의 공개 요금을 기준으로 AWS 네트워크 비용을 세 편에 걸쳐 정리합니다.</p>
+<ul>
+<li><b>1부(이 글): 데이터 전송 요금과 데이터 처리 요금의 구조, 청구서에서 비용을 찾는 방법, 인터넷 게이트웨이, 퍼블릭 IPv4 주소, NAT Gateway, VPC 엔드포인트, Amazon CloudFront</b></li>
+<li>2부: 리전 안의 트래픽. AZ 간 전송 규칙, Application Load Balancer와 Network Load Balancer, 데이터베이스와 캐시 계층(Valkey GLIDE의 AZ 친화도 포함), Amazon EKS (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">링크</a>)</li>
+<li>3부: VPC 간 연결과 하이브리드. VPC Peering, AWS Transit Gateway, AWS PrivateLink와 Amazon VPC Lattice, AWS Cloud WAN, AWS Direct Connect (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-03/" target="_blank" rel="noopener">링크</a>)</li>
+</ul>
+<p>이 글의 요금은 서울 리전(ap-northeast-2) 네트워크 요금을 기준으로 합니다. 다른 리전과의 연결 예시는 미국 동부(버지니아 북부, us-east-1)를 사용합니다. 별도 표기가 없으면 <b>GB당 미국 달러입니다. 월 시간 기준은 730시간, 1TB는 1,024GB로 계산</b>합니다. 요금은 변경될 수 있으므로 설계에 반영하기 전에 각 서비스 요금 페이지에서 최신 요금을 확인하시길 권고드립니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>데이터 전송 요금의 두 종류</h2></header><div class="prose">
+<p>AWS 네트워크 비용은 두 가지 요금으로 나뉩니다. 하나는 트래픽이 정해놓은 경계를 넘을 때 부과되는 데이터 전송(Data Transfer) 요금입니다. 다른 하나는 트래픽이 특정 서비스를 거칠 때 부과되는 데이터 처리(Data Processing) 요금입니다. 두 요금은 같은 트래픽에 동시에 과금될 수 있습니다. 프라이빗 서브넷의 EC2가 NAT Gateway를 거쳐 인터넷으로 1GB를 보내는 경우를 보겠습니다. NAT Gateway 데이터 처리 요금 $0.059와 인터넷 데이터 전송 요금 $0.126가 각각 부과되어 GB당 $0.185(0.059 + 0.126)가 됩니다. 반대로 인터넷에서 1GB를 받아오면 NAT Gateway 처리 요금 $0.059는 그대로 부과되지만 <b>인바운드 DTO는 무료</b>이므로 $0.059만 추가됩니다. 1GB를 왕복하면 $0.185 × 2인 $0.37이 아니라 $0.244입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig01-nat-gateway-round-trip.png" alt="AWS 데이터 전송 비용 예시" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 1.</b> AWS 데이터 전송 비용 예시</figcaption></figure>
+<h3>1.1 방향과 경계로 정해지는 데이터 전송 요금</h3>
+<p>데이터 전송 요금은 트래픽의 방향과 트래픽이 넘는 경계로 정해집니다. 방향은 DTI(Data Transfer In, 인바운드)와 DTO(Data Transfer Out, 아웃바운드)로 구분합니다. 대부분의 경계에서 DTI는 무료이고 DTO에만 요금이 과금됩니다. 예외는 같은 리전 안의 AZ 간 전송입니다. 이 구간은 In과 Out 양방향에 각각 $0.01가 부과됩니다.</p>
+<p>경계는 네 단계로 나뉩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>경계</th><th>서울 리전 요금</th><th>비고</th></tr>
+</thead>
+<tbody>
+<tr><td>AWS 외부(인터넷)로 전송</td><td>DTO $0.126 (월 10TB 구간)</td><td>DTI 무료. 계정 합산 월 100GB 무료</td></tr>
+<tr><td>리전 간 전송</td><td>서울 → us-east-1 $0.08</td><td>us-east-1에서 서울로는 $0.02. 출발 리전 기준으로 과금</td></tr>
+<tr><td>같은 리전, 다른 AZ</td><td>In $0.01 + Out $0.01</td><td>퍼블릭 IP로 통신하면 같은 AZ라도 동일 요금</td></tr>
+<tr><td>같은 AZ, 프라이빗 IP</td><td>$0</td><td>EC2, RDS, ElastiCache, ENI 간</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 트래픽이 넘는 경계에 따른 데이터 전송 요금(서울 리전)</p>
+<p>표에서 두 가지를 눈여겨볼 필요가 있습니다. 첫째, 리전 간 요금은 출발 리전 기준이고 리전마다 다릅니다. 서울에서 us-east-1로 10TB를 보내면 약 $819입니다. 반대 방향은 약 $205입니다. 리전 간 복제나 백업 방향을 정할 때 이 차이가 그대로 비용 차이가 됩니다. 둘째, 같은 AZ라도 퍼블릭 IP나 Elastic IP로 통신하면 양방향에 $0.01가 과금됩니다. AZ 간 요금과 같은 금액입니다. 같은 VPC 안의 서버 간 통신은 프라이빗 IP를 사용해야 무료($0)이며 이것이 비용 최적화의 기본입니다.</p>
+<h3>1.2 경로 위의 서비스가 부과하는 데이터 처리 요금</h3>
+<p>데이터 처리 요금은 트래픽이 지나가는 관리형 네트워크 서비스가 처리한 용량에 따라 부과됩니다. 방향과 무관하게 처리한 GB 수로 계산합니다. 대부분 시간당 요금이 함께 부과됩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>서비스</th><th>데이터 처리 요금</th><th>시간당 요금</th></tr>
+</thead>
+<tbody>
+<tr><td>NAT Gateway</td><td>$0.059</td><td>$0.059</td></tr>
+<tr><td>VPC 인터페이스 엔드포인트(AWS PrivateLink)</td><td>$0.01 (월 1PB까지), $0.006 (다음 4PB), $0.004 (5PB 초과)</td><td>AZ당 $0.013</td></tr>
+<tr><td>VPC 게이트웨이 엔드포인트(S3, DynamoDB)</td><td>$0</td><td>$0</td></tr>
+<tr><td>AWS Transit Gateway</td><td>$0.02</td><td>연결(Attachment)당 $0.07</td></tr>
+<tr><td>Amazon VPC Lattice 서비스</td><td>$0.0325 (AZ 간 전송 포함)</td><td>서비스당 $0.0325</td></tr>
+<tr><td>AWS Cloud WAN</td><td>$0.02</td><td>코어 네트워크 엣지당 $0.50, 연결당 리전별 요금</td></tr>
+<tr><td>Application Load Balancer</td><td>LCU 시간당 $0.008</td><td>로드 밸런서당 $0.0225</td></tr>
+<tr><td>Network Load Balancer</td><td>NLCU 시간당 $0.006</td><td>로드 밸런서당 $0.0225</td></tr>
+<tr><td>퍼블릭 IPv4 주소</td><td>해당 없음</td><td>IP당 $0.005</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 데이터 처리 요금과 시간당 요금(서울 리전)</p>
+<p>LCU(Load Balancer Capacity Unit)는 ALB가, NLCU(Network Load Balancer Capacity Unit)는 NLB가 시간당 처리한 용량을 측정하는 단위입니다. 신규 연결 수, 활성 연결 수, 처리한 바이트, 규칙 평가 수(ALB만 해당)의 차원 중 가장 큰 값을 그 시간의 사용량으로 계산합니다.</p>
+<p>2022년 4월부터 VPC 인터페이스 엔드포인트, Transit Gateway, AWS Client VPN은 같은 리전 안의 AZ 간 데이터 전송 요금을 부과하지 않습니다. 이 서비스들을 거치는 트래픽에는 데이터 처리 요금만 과금됩니다. VPC Lattice도 AZ 간 전송을 데이터 처리 요금에 포함해 별도로 부과하지 않습니다. 반면 VPC Peering은 관리형 처리 서비스가 아니기 때문에, AZ 간 전송 요금이 그대로 적용됩니다.</p>
+<h3>1.3 서울 리전 요금 구조 한눈에 보기</h3>
+<p>아래 그림은 서울 리전 VPC에서 출발한 트래픽이 인터넷, 다른 리전, 다른 AZ, 온프레미스로 향할 때 각 구간에 발생하는 요금을 한 장에 정리한 것입니다. 실선은 트래픽 방향입니다. 각 화살표의 라벨은 그 구간의 DTO와 데이터 처리 요금입니다. 이 시리즈는 이 그림의 각 경로를 하나씩 상세하게 살펴봅니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig02-networking-pricing-overview.png" alt="서울 리전 데이터 전송 요금과 데이터 처리 요금 구조" width="3450" height="1936" loading="lazy"></div><figcaption><b>그림 2.</b> 서울 리전 데이터 전송 요금과 데이터 처리 요금 구조</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>청구서에서 데이터 전송 비용 찾기</h2></header><div class="prose">
+<p>데이터 전송 비용은 서비스별 청구 항목에 나뉘어 기록되어 한눈에 파악하기 어렵습니다. Cost Explorer의 서비스 뷰만으로는 규모를 파악하기 어렵습니다. AWS Cost and Usage Report(CUR)의 <code>lineItem/UsageType</code> 열을 기준으로 보면 어느 경계에서 얼마가 발생했는지 정확히 구분됩니다. 서울 리전은 <code>APN2</code>, us-east-1은 <code>USE1</code> 접두어로 기록됩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>구분</th><th>Usage Type(서울 리전 예시)</th><th>의미</th></tr>
+</thead>
+<tbody>
+<tr><td>인터넷 전송</td><td><code>APN2-DataTransfer-Out-Bytes</code></td><td>서울 리전에서 인터넷으로 나간 트래픽. 인바운드는 무료</td></tr>
+<tr><td>AZ 간 전송</td><td><code>APN2-DataTransfer-Regional-Bytes</code></td><td>같은 리전 AZ 간 트래픽. 자원 하나당 In, Out 두 줄로 기록되며 Operation 값 InterZone-In/Out, PublicIP-In/Out으로 원인을 구분</td></tr>
+<tr><td>VPC Peering AZ 간 전송</td><td><code>APN2-VpcPeering-In-Bytes</code>, <code>APN2-VpcPeering-Out-Bytes</code></td><td>2025년 4월부터 Regional-Bytes에서 분리된 항목</td></tr>
+<tr><td>리전 간 전송</td><td><code>APN2-USE1-AWS-Out-Bytes</code>, <code>USE1-APN2-AWS-In-Bytes</code></td><td>Out 항목에만 요금이 과금되고 In 항목은 $0</td></tr>
+<tr><td>면제된 AZ 간 전송</td><td><code>APN2-DataTransfer-xAZ-In-Bytes</code>, <code>APN2-DataTransfer-xAZ-Out-Bytes</code></td><td>PrivateLink 인터페이스 엔드포인트, Transit Gateway, Client VPN의 AZ 간 트래픽. $0으로 기록</td></tr>
+<tr><td>Direct Connect</td><td><code>...-DataXfer-Out</code>, <code>...-DataXfer-Out:dc.3</code></td><td>퍼블릭 VIF는 <code>DataXfer-Out</code>, 프라이빗과 트랜짓 VIF는 <code>:dc.3</code> 접미어</td></tr>
+<tr><td>CloudFront</td><td><code>AP-DataTransfer-Out-Bytes</code>, <code>AP-DataTransfer-Out-OBytes</code></td><td>엣지에서 뷰어로 전송, 엣지에서 오리진으로 전송. 한국 엣지는 <code>AP</code> 접두어이며 ProductCode <code>AmazonCloudFront</code>로 EC2 인터넷 전송과 구분</td></tr>
+<tr><td>데이터 처리</td><td><code>APN2-NatGateway-Bytes</code>, <code>APN2-VpcEndpoint-Bytes</code>, <code>APN2-TransitGateway-Bytes</code></td><td>NAT Gateway, 인터페이스 엔드포인트, Transit Gateway가 처리한 용량</td></tr>
+<tr><td>로드 밸런서</td><td><code>APN2-LCUUsage</code>, <code>APN2-DataProcessing-Bytes</code></td><td>ALB와 NLB의 LCU 사용량, Classic Load Balancer의 처리 용량</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 데이터 전송 비용을 식별하는 주요 CUR Usage Type</p>
+<p>Cost Explorer에서 Usage Type으로 필터한 뒤 API Operation으로 그룹화해 보시기를 권고드립니다. <code>DataTransfer-Regional-Bytes</code>가 AZ 간 통신 때문인지 퍼블릭 IP 통신 때문인지 바로 식별됩니다. 리전 간 전송은 In과 Out 두 줄이 함께 기록됩니다. 요금은 Out 줄에만 있으므로 전송량을 집계할 때 In 줄을 제거해야 실제 전송량을 확인할 수 있습니다. 월 단위 추세를 보려면 CUR을 Amazon Athena로 조회해 Usage Type과 리소스 ID별로 집계하는 방법이 확실합니다. 쿼리 예시는 해당 블로그(<a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/understand-aws-data-transfer-details-in-depth-from-cost-and-usage-report-using-athena-query-and-quicksight/" target="_blank" rel="noopener">Understand AWS Data transfer details in depth from cost and usage report using Athena query and QuickSight</a>)에 있습니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>인터넷 게이트웨이와 퍼블릭 IPv4 주소</h2></header><div class="prose">
+<h3>3.1 인터넷 게이트웨이</h3>
+<p>인터넷 게이트웨이(Internet Gateway, IGW) 자체에는 요금이 없습니다. 시간당 요금도, 처리 요금도 없습니다. 비용은 IGW를 지나 인터넷으로 나가는 DTO에서 발생합니다. 서울 리전의 인터넷 DTO는 월 누적 전송량에 따라 구간별로 낮아집니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>월 누적 인터넷 DTO</th><th>GB당 요금</th></tr>
+</thead>
+<tbody>
+<tr><td>처음 100GB</td><td>$0 (계정 합산, 모든 리전과 서비스 공통)</td></tr>
+<tr><td>10TB까지</td><td>$0.126</td></tr>
+<tr><td>다음 40TB</td><td>$0.122</td></tr>
+<tr><td>다음 100TB</td><td>$0.117</td></tr>
+<tr><td>150TB 초과</td><td>$0.108</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 서울 리전 인터넷 DTO 구간별 요금</p>
+<p>구간은 EC2, S3, RDS, Lambda 등 모든 서비스의 인터넷 DTO를 계정 단위로 합산해 적용합니다. 인터넷에서 들어오는 트래픽은 무료입니다. IGW를 거치더라도 같은 리전의 AWS 서비스 퍼블릭 엔드포인트로 향하는 트래픽은 AWS 네트워크를 벗어나지 않으므로 DTO가 $0입니다. 퍼블릭 서브넷의 EC2가 같은 리전의 S3에 접근하는 경우가 여기에 해당합니다.</p>
+<p>주의할 경로는 같은 리전 안에서 퍼블릭 IP로 통신하는 경우입니다. 같은 VPC의 두 EC2가 서로의 퍼블릭 IP 주소를 직접 지정해 통신하면 목적지가 VPC CIDR 밖이므로 트래픽이 IGW로 라우팅되어 왕복합니다. 이 트래픽은 AWS 네트워크 안에 머물러 인터넷으로 나가지 않으므로 인터넷 DTO는 $0이지만 리전 내 데이터 전송 요금 $0.01가 양방향에 각각 과금됩니다. 같은 AZ라도 예외가 없습니다. 반면 EC2의 퍼블릭 DNS 호스트 이름을 같은 VPC 안에서 사용하면 프라이빗 IP로 해석되므로 이 요금이 발생하지 않습니다. 이 비용은 인터넷 경계 로드 밸런서의 DNS 이름을 내부 클라이언트가 호출하는 구성에서 자주 발생합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig03-igw-pricing.png" alt="인터넷 게이트웨이를 지나는 세 가지 경로와 요금" width="2560" height="1440" loading="lazy"></div><figcaption><b>그림 3.</b> 인터넷 게이트웨이를 지나는 세 가지 경로와 요금</figcaption></figure>
+<h3>3.2 퍼블릭 IPv4 주소와 Elastic IP</h3>
+<p>2024년 2월부터 모든 퍼블릭 IPv4 주소에 시간당 $0.005가 부과됩니다. 인스턴스에 연결된 주소와 연결되지 않은 유휴 Elastic IP 모두 같은 요금입니다. NAT Gateway, 로드 밸런서, RDS 퍼블릭 엔드포인트, Global Accelerator, Site-to-Site VPN 터널 엔드포인트에 할당된 주소도 모두 포함됩니다. 주소 하나당 월 약 $3.65이고 주소 100개면 월 $365가 됩니다. IPv6 주소에는 이 요금이 없습니다.</p>
+<p>따라서 세 가지를 점검하는 것을 권고드립니다. 첫째, 사용하지 않는 Elastic IP는 해제합니다. 둘째, 프라이빗 서브넷의 자원이 퍼블릭 IP를 갖고 있지 않은지 확인합니다. 인스턴스 시작 시 퍼블릭 IP 자동 할당 옵션이 켜진 서브넷이 흔한 원인입니다. 셋째, Amazon VPC IP Address Manager(IPAM)의 프리 티어에서 제공하는 Public IP Insights로 조직 전체의 퍼블릭 IPv4 사용 현황과 유휴 주소를 추가 비용 없이 확인합니다. 내부 통신에는 IPv6 또는 프라이빗 IPv4를 사용하고 인터넷 노출이 필요한 지점에만 퍼블릭 IPv4를 남기는 것이 최적화를 위한 권고입니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>NAT Gateway</h2></header><div class="prose">
+<p>NAT Gateway는 프라이빗 서브넷의 자원이 인터넷이나 AWS 서비스 퍼블릭 엔드포인트로 나갈 때 거치는 관리형 게이트웨이입니다. 요금은 세 가지가 부과됩니다. 시간당 $0.059, 처리한 GB당 $0.059, 그리고 목적지에 따른 데이터 전송 요금입니다. 인터넷으로 나가는 트래픽에는 DTO $0.126가 과금되고 같은 리전의 AWS 서비스로 향하는 트래픽은 $0입니다.</p>
+<p>프라이빗 서브넷의 EC2가 NAT Gateway를 거쳐 월 10TB를 인터넷으로 내보내는 경우를 계산해 보겠습니다. 처리 요금 10,240GB × $0.059 = $604.16, DTO 10,240GB × $0.126 = $1,290.24, 시간당 요금 730 × $0.059 = $43.07입니다. 합계는 약 $1,937이고 이 중 NAT Gateway 몫이 약 33%입니다.</p>
+<p>NAT Gateway와 EC2가 다른 AZ에 있으면 두 자원 사이에 AZ 간 요금이 추가로 과금됩니다. AZ마다 NAT Gateway를 하나씩 두고 각 AZ의 프라이빗 서브넷 라우팅 테이블이 자기 AZ의 NAT Gateway가 목적지가 되도록 구성해야 합니다. 시간당 요금은 AZ 수만큼 늘어나지만 AZ 간 요금이 사라지고 하나의 AZ 장애가 다른 AZ에 영향을 주지 않습니다. 리전별 가용성 모드(Regional Availability Mode)의 NAT Gateway를 사용하면 AZ 확장을 AWS가 처리합니다. 새 AZ에 자원이 생기면 최대 60분 안에 그 AZ로 확장되고 그 사이의 트래픽은 기존 AZ에서 처리되어 AZ 간 요금이 발생합니다. 이 경우에도 구성된 AZ마다 시간당 요금이 부과됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig04-nat-gw-az-option.png" alt="NAT Gateway를 AZ마다 배치할 때와 하나만 둘 때의 요금 차이" width="3450" height="1938" loading="lazy"></div><figcaption><b>그림 4.</b> NAT Gateway를 AZ마다 배치할 때와 하나만 둘 때의 요금 차이</figcaption></figure>
+<p>NAT Gateway 처리량의 큰 부분은 인터넷이 아니라 같은 리전의 AWS 서비스로 향하는 트래픽인 경우가 많습니다. S3 로그 업로드, ECR 이미지 풀, SQS와 Kinesis 메시지 전송이 여기에 해당합니다. 이 트래픽은 DTO가 $0인데도 NAT Gateway 처리 요금 $0.059는 그대로 과금됩니다. 다음 섹션의 VPC 엔드포인트가 이 비용을 줄이는 수단입니다.</p>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>VPC 엔드포인트</h2></header><div class="prose">
+<p>프라이빗 서브넷의 워크로드가 Amazon S3, Amazon Kinesis, Amazon ECR, Amazon SQS 같은 AWS 서비스에 접근하는 경로는 세 가지입니다. NAT Gateway를 거쳐 퍼블릭 엔드포인트로 가는 경로, 인터페이스 엔드포인트로 가는 경로, S3와 DynamoDB에만 해당하는 게이트웨이 엔드포인트 경로입니다. 데이터 전송 요금은 세 경로 모두 $0입니다. 차이는 데이터 처리 요금에서 생깁니다.</p>
+<h3>5.1 게이트웨이 엔드포인트</h3>
+<p>게이트웨이 엔드포인트는 S3와 DynamoDB 두 서비스에만 제공됩니다. 시간당 요금과 처리 요금이 모두 없습니다. 라우팅 테이블에 접두사 목록 경로가 추가되는 방식이라 ENI를 만들지 않고 AZ 개념도 없습니다. 프라이빗 서브넷에서 S3나 DynamoDB를 사용한다면 예외 없이 게이트웨이 엔드포인트를 생성하는 것을 권장합니다. NAT Gateway 처리량에서 S3가 가장 큰 비중을 차지하는 경우가 많습니다.</p>
+<h3>5.2 인터페이스 엔드포인트</h3>
+<p>인터페이스 엔드포인트는 AWS PrivateLink 기반으로 서브넷 안에 ENI를 만들어 서비스에 연결합니다. 요금은 엔드포인트가 배치된 AZ마다 시간당 $0.013, 처리 GB당 $0.01(월 1PB까지)입니다. NAT Gateway의 $0.059와 비교하면 처리 요금이 약 6분의 1입니다. 2022년 4월부터 인터페이스 엔드포인트를 거치는 AZ 간 트래픽에는 전송 요금이 과금되지 않습니다.</p>
+<p>월 10TB를 S3로 보내는 워크로드를 기준으로 세 경로를 비교해 보겠습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>경로</th><th>데이터 처리 요금</th><th>시간당 요금(2개 AZ)</th><th>월 합계</th></tr>
+</thead>
+<tbody>
+<tr><td>NAT Gateway</td><td>10,240GB × $0.059 = $604.16</td><td>2 × 730 × $0.059 = $86.14</td><td>약 $690</td></tr>
+<tr><td>인터페이스 엔드포인트</td><td>10,240GB × $0.01 = $102.40</td><td>2 × 730 × $0.013 = $18.98</td><td>약 $121</td></tr>
+<tr><td>게이트웨이 엔드포인트</td><td>$0</td><td>$0</td><td>$0</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 월 10TB를 같은 리전의 Amazon S3로 전송할 때 경로별 비용(서울 리전)</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig05-private-subnet-pricing-options.png" alt="프라이빗 서브넷에서 AWS 서비스에 접근하는 세 가지 경로와 요금" width="3450" height="1936" loading="lazy"></div><figcaption><b>그림 5.</b> 프라이빗 서브넷에서 AWS 서비스에 접근하는 세 가지 경로와 요금</figcaption></figure>
+<p>여기서 한 가지 고려사항이 있습니다. 인터페이스 엔드포인트는 서비스마다, AZ마다 시간당 요금이 부과됩니다. AZ 하나에 엔드포인트 하나를 두면 월 $9.49가 고정으로 나갑니다. NAT Gateway 대비 GB당 절감액은 $0.049입니다. 월 트래픽이 AZ당 약 194GB에 못 미치는 서비스라면 엔드포인트를 만드는 구조가 오히려 비용이 큽니다. 서비스 20개에 AZ 2개씩 엔드포인트를 만들면 월 $380 가까운 고정 비용이 생깁니다. 트래픽이 많은 서비스부터 선별해 엔드포인트를 구성하는 것을 권고드립니다. 서비스별 트래픽 규모는 NAT Gateway가 있는 서브넷의 VPC Flow Logs를 목적지 주소별로 집계하면 파악할 수 있습니다.</p>
+<p>컨테이너 이미지 풀은 놓치기 쉬운 항목입니다. Amazon ECR의 이미지 레이어는 S3에 저장됩니다. ECR 인터페이스 엔드포인트(<code>ecr.api</code>, <code>ecr.dkr</code>)와 S3 게이트웨이 엔드포인트를 함께 만들어야 이미지 풀 트래픽이 NAT Gateway를 우회합니다.</p>
+<p>인터페이스 엔드포인트는 다른 리전의 엔드포인트 서비스에도 연결할 수 있습니다. 이 경우 엔드포인트 시간당 요금과 처리 요금은 같은 리전과 동일합니다. 여기에 리전 간 데이터 전송 요금이 더해집니다. PrivateLink로 자체 서비스를 다른 VPC나 계정에 제공하는 구성, 그리고 리소스 엔드포인트와 서비스 네트워크 엔드포인트 같은 새 엔드포인트 유형은 3부에서 VPC Lattice와 함께 다룹니다.</p>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>다른 리전의 AWS 서비스 접근</h2></header><div class="prose">
+<p>서울 리전의 워크로드가 us-east-1의 S3 버킷이나 Kinesis 스트림에 접근하면 리전 간 데이터 전송 요금이 과금됩니다. 요금은 데이터가 나가는 리전 기준입니다. us-east-1의 버킷을 읽으면 데이터가 us-east-1에서 나가므로 GB당 $0.02가, 서울에서 그 버킷에 기록하면 서울에서 나가므로 GB당 $0.08가 과금됩니다. 퍼블릭 엔드포인트로 접근해도 인터넷 전송 요금 대신 리전 간 요금이 적용됩니다. NAT Gateway를 거치면 처리 요금 $0.059가 추가됩니다. 이 경우 게이트웨이 엔드포인트는 도움이 되지 않습니다. 게이트웨이 엔드포인트는 같은 리전의 S3와 DynamoDB에만 연결되기 때문입니다.</p>
+<p>리전 간 접근이 반복되는 구조라면 데이터를 워크로드가 있는 리전으로 복제해 두고 같은 리전 안에서 읽는 구조가 비용과 지연 시간 양쪽에서 유리합니다. 복제에는 리전 간 요금이 한 번 과금됩니다. 대신 읽을 때마다 발생하는 요금이 없어집니다. 복제 방향을 정할 때는 리전 간 요금의 비대칭도 고려하는 것을 권장합니다. us-east-1에서 서울로 보내는 요금($0.02)은 반대 방향($0.08)의 4분의 1입니다.</p>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>인터넷 콘텐츠 전송과 Amazon CloudFront</h2></header><div class="prose">
+<p>인터넷으로 콘텐츠를 제공하는 워크로드는 리전에서 직접 전송하는 대신 CloudFront를 앞에 두는 것이 비용 면에서도 유리합니다. 이유는 두 가지입니다. 첫째, S3, ALB, API Gateway 같은 AWS 오리진에서 CloudFront로 향하는 전송은 무료입니다. 둘째, 캐시 적중률이 높을수록 리전에서 나가는 트래픽 자체가 줄어듭니다. 적중률이 80%면 오리진에서 나가는 트래픽이 5분의 1이 됩니다. 요율 차이는 부수적입니다. 서울 리전에서 인터넷으로 직접 나가는 DTO는 $0.126이고 한국 엣지 로케이션에서 뷰어로 나가는 CloudFront DTO는 월 10TB 구간에서 $0.120입니다. CloudFront가 오리진으로 데이터를 보내는 방향(PUT, POST 같은 요청 본문)에는 한국 기준 GB당 $0.06가 과금됩니다.</p>
+<p>CloudFront 프리 티어는 매월 1TB의 DTO와 1,000만 건의 HTTP(S) 요청을 제공합니다. 리전에서 직접 나가는 인터넷 DTO의 무료 구간은 월 100GB이므로 10배 차이입니다. 최근에는 종량제 외에 CloudFront, AWS WAF, DDoS 보호를 하나로 묶은 정액 요금제도 제공됩니다. 트래픽 변동이 큰 웹 서비스는 두 방식을 비교해 볼 만합니다.</p>
+</div></section>
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>1부 체크리스트</h2></header><div class="prose">
+<div class="scroll"><table>
+<thead>
+<tr><th>점검 항목</th><th>비용 요인</th><th>권장</th></tr>
+</thead>
+<tbody>
+<tr><td>인터넷으로 나가는 트래픽</td><td>DTO $0.126, NAT Gateway 경유 시 +$0.059</td><td>필요한 트래픽만 인터넷으로, 콘텐츠는 CloudFront 경유</td></tr>
+<tr><td>같은 VPC 안의 서버 간 통신</td><td>퍼블릭 IP 통신 시 양방향 $0.01</td><td>프라이빗 IP와 내부 로드 밸런서 사용</td></tr>
+<tr><td>퍼블릭 IPv4 주소</td><td>주소당 시간당 $0.005</td><td>유휴 Elastic IP 해제, 자동 할당 옵션 점검, Public IP Insights 활용</td></tr>
+<tr><td>NAT Gateway 배치</td><td>다른 AZ의 EC2와 통신 시 AZ 간 $0.01</td><td>AZ별 NAT Gateway와 AZ별 라우팅 테이블</td></tr>
+<tr><td>프라이빗 서브넷에서 S3, DynamoDB 접근</td><td>NAT Gateway 처리 요금 $0.059</td><td>게이트웨이 엔드포인트 사용($0)</td></tr>
+<tr><td>프라이빗 서브넷에서 그 외 AWS 서비스 접근</td><td>NAT Gateway 처리 요금 $0.059</td><td>월 AZ당 약 194GB 이상이면 인터페이스 엔드포인트($0.01)</td></tr>
+<tr><td>컨테이너 이미지 풀</td><td>NAT Gateway 처리 요금</td><td>ECR 인터페이스 엔드포인트 + S3 게이트웨이 엔드포인트</td></tr>
+<tr><td>다른 리전의 AWS 서비스 접근</td><td>리전 간 $0.08</td><td>워크로드 리전으로 복제, 복제 방향은 요금이 낮은 쪽으로</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 1부 설계 체크리스트(서울 리전 요금 기준)</p>
+</div></section>
+<section class="sec" id="ko-s10"><header class="sec-head"><h2>마치며</h2></header><div class="prose">
+<p>1부에서는 AWS 네트워크 비용의 구조와 인터넷 경계에서 발생하는 비용을 살펴보았습니다. 핵심은 다음 세 가지입니다.</p>
+<ol>
+<li>네트워크 비용은 데이터 전송 요금과 데이터 처리 요금 두 가지로 정해집니다. 전송 요금은 방향과 경계에 따라, 처리 요금은 트래픽이 지나는 관리형 서비스에 따라 과금됩니다. 같은 1GB에 두 요금이 함께 과금될 수 있으므로 아키텍처 다이어그램의 화살표마다 두 값을 적어 보면 비용이 어디서 발생하는지 확인할 수 있습니다.</li>
+<li>인터넷 게이트웨이 자체는 무료이고 비용은 DTO와 퍼블릭 IPv4 주소에서 발생합니다. 같은 리전 안에서는 프라이빗 IP로 통신하고 인터넷 노출이 필요한 지점에만 퍼블릭 IPv4를 할당하는 것을 권장합니다.</li>
+<li>NAT Gateway 비용의 상당 부분은 같은 리전의 AWS 서비스로 향하는 트래픽입니다. S3와 DynamoDB는 게이트웨이 엔드포인트로, 트래픽이 많은 서비스는 인터페이스 엔드포인트로 우회하면 처리 요금이 사라지거나 6분의 1로 줄어듭니다.</li>
+</ol>
+<p>2부에서는 리전 안에서 발생하는 비용을 다룹니다. AZ 간 전송 요금이 양쪽 자원에 어떻게 과금되는지, Application Load Balancer와 Network Load Balancer의 교차 영역 요금이 왜 다른지 살펴봅니다. 데이터베이스와 Amazon EKS에서 AZ 경계를 넘는 트래픽을 어떻게 줄이는지도 살펴봅니다. (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">2부 링크</a>)</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>This post is for architects and operators who know the basics of VPCs, subnets, and Availability Zones (AZs). It covers which paths incur AWS networking costs, in what units they are charged, and how to optimize them at the design stage.</p>
+<p>Data transfer costs are hard to identify on a bill. Unlike EC2 instances or RDS, they are not grouped under one service name but are recorded across many services. In the customer cases I reviewed, the EC2-Other line item accounted for 8% to 12% of the total bill, which made it the second or third largest item.</p>
+<p><code>EC2-Other</code> is the line item where NAT gateway charges and data transfer charges are grouped together. Inter-AZ transfer charges grew steadily every quarter, especially for customers running open source systems such as Apache Kafka, Elasticsearch, Cassandra, and Redis as clusters across multiple AZs. Most of this cost is determined the moment the architecture is designed. Unlike an instance type or a storage class, it is hard to change afterward. That is why you need to understand the pricing structure at the design stage. This series covers AWS networking costs in three parts, based on public prices for the Asia Pacific (Seoul) Region (ap-northeast-2).</p>
+<ul>
+<li><b>Part 1 (this post): The structure of data transfer and data processing charges, how to find the costs on your bill, internet gateways, public IPv4 addresses, NAT gateways, VPC endpoints, and Amazon CloudFront</b></li>
+<li>Part 2: Traffic within a Region. Inter-AZ transfer rules, Application Load Balancer and Network Load Balancer, the database and cache tiers (including AZ affinity in Valkey GLIDE), and Amazon EKS (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">link</a>)</li>
+<li>Part 3: Connections between VPCs and hybrid networks. VPC peering, AWS Transit Gateway, AWS PrivateLink and Amazon VPC Lattice, AWS Cloud WAN, and AWS Direct Connect (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-03/" target="_blank" rel="noopener">link</a>)</li>
+</ul>
+<p>Prices in this post are based on networking prices for the Seoul Region (ap-northeast-2). Examples that involve another Region use US East (N. Virginia) (us-east-1). Unless noted otherwise, <b>prices are in US dollars per GB. A month is counted as 730 hours and 1 TB as 1,024 GB</b>. Prices can change, so I recommend checking the latest prices on each service's pricing page before you apply them to a design.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Two kinds of data transfer charges</h2></header><div class="prose">
+<p>AWS networking costs break down into two kinds of charges. One is the data transfer charge, which applies when traffic crosses a defined boundary. The other is the data processing charge, which applies when traffic passes through a specific service. Both charges can apply to the same traffic at the same time. Consider an EC2 instance in a private subnet that sends 1 GB to the internet through a NAT gateway. The NAT gateway data processing charge of $0.059 and the internet data transfer charge of $0.126 each apply, which comes to $0.185 per GB (0.059 + 0.126). In the other direction, when the instance receives 1 GB from the internet, the NAT gateway processing charge of $0.059 still applies, but <b>inbound data transfer is free</b>, so only $0.059 is added. A 1 GB round trip costs $0.244, not the $0.37 that $0.185 × 2 would give.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig01-nat-gateway-round-trip.png" alt="Example of AWS data transfer costs" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 1.</b> Example of AWS data transfer costs</figcaption></figure>
+<h3>1.1 Data transfer charges, determined by direction and boundary</h3>
+<p>A data transfer charge is determined by the direction of the traffic and the boundary it crosses. Direction is either DTI (Data Transfer In, inbound) or DTO (Data Transfer Out, outbound). At most boundaries, DTI is free and only DTO is charged. The exception is transfer between AZs in the same Region. On this segment, $0.01 is charged in each direction, In and Out.</p>
+<p>The boundaries fall into four levels.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Boundary</th><th>Seoul Region price</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Transfer out of AWS (to the internet)</td><td>DTO $0.126 (10 TB per month tier)</td><td>DTI is free. 100 GB per month free, aggregated across the account</td></tr>
+<tr><td>Inter-Region transfer</td><td>Seoul → us-east-1 $0.08</td><td>us-east-1 to Seoul is $0.02. Charged based on the source Region</td></tr>
+<tr><td>Same Region, different AZ</td><td>In $0.01 + Out $0.01</td><td>Same price even in the same AZ when communicating over public IPs</td></tr>
+<tr><td>Same AZ, private IP</td><td>$0</td><td>Between EC2, RDS, ElastiCache, and ENIs</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Data transfer charges by the boundary that traffic crosses (Seoul Region)</p>
+<p>Two things in the table deserve a closer look. First, the inter-Region price is based on the source Region and differs from Region to Region. Sending 10 TB from Seoul to us-east-1 costs about $819. The opposite direction costs about $205. When you decide the direction of inter-Region replication or backup, this difference translates directly into a cost difference. Second, even in the same AZ, communicating over a public IP or an Elastic IP address incurs $0.01 in each direction. That is the same amount as the inter-AZ charge. Communication between servers in the same VPC is free ($0) only when it uses private IPs, and this is the foundation of cost optimization.</p>
+<h3>1.2 Data processing charges, applied by the services on the path</h3>
+<p>A data processing charge is based on the volume processed by a managed networking service that the traffic passes through. It is calculated on the number of GB processed, regardless of direction. In most cases an hourly charge applies as well.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Service</th><th>Data processing charge</th><th>Hourly charge</th></tr>
+</thead>
+<tbody>
+<tr><td>NAT gateway</td><td>$0.059</td><td>$0.059</td></tr>
+<tr><td>VPC interface endpoint (AWS PrivateLink)</td><td>$0.01 (up to 1 PB per month), $0.006 (next 4 PB), $0.004 (over 5 PB)</td><td>$0.013 per AZ</td></tr>
+<tr><td>VPC gateway endpoint (S3, DynamoDB)</td><td>$0</td><td>$0</td></tr>
+<tr><td>AWS Transit Gateway</td><td>$0.02</td><td>$0.07 per attachment</td></tr>
+<tr><td>Amazon VPC Lattice service</td><td>$0.0325 (includes inter-AZ transfer)</td><td>$0.0325 per service</td></tr>
+<tr><td>AWS Cloud WAN</td><td>$0.02</td><td>$0.50 per core network edge, plus a per-attachment price that varies by Region</td></tr>
+<tr><td>Application Load Balancer</td><td>$0.008 per LCU-hour</td><td>$0.0225 per load balancer</td></tr>
+<tr><td>Network Load Balancer</td><td>$0.006 per NLCU-hour</td><td>$0.0225 per load balancer</td></tr>
+<tr><td>Public IPv4 address</td><td>Not applicable</td><td>$0.005 per IP</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Data processing charges and hourly charges (Seoul Region)</p>
+<p>An LCU (Load Balancer Capacity Unit) measures the capacity an ALB processes per hour, and an NLCU (Network Load Balancer Capacity Unit) does the same for an NLB. The usage for each hour is the largest value among these dimensions: new connections, active connections, processed bytes, and rule evaluations (ALB only).</p>
+<p>Since April 2022, VPC interface endpoints, Transit Gateway, and AWS Client VPN have not charged for data transfer between AZs in the same Region. Traffic through these services incurs only the data processing charge. VPC Lattice also includes inter-AZ transfer in its data processing charge and does not bill it separately. VPC peering, in contrast, is not a managed processing service, so the inter-AZ transfer charge applies as is.</p>
+<h3>1.3 Seoul Region pricing structure at a glance</h3>
+<p>The following figure puts on one page the charges for each segment when traffic leaves a VPC in the Seoul Region for the internet, another Region, another AZ, or an on-premises network. Solid lines show the direction of traffic. The label on each arrow is the DTO and data processing charge for that segment. This series looks at each path in this figure in detail, one at a time.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig02-networking-pricing-overview.png" alt="Structure of data transfer and data processing charges in the Seoul Region" width="3450" height="1936" loading="lazy"></div><figcaption><b>Figure 2.</b> Structure of data transfer and data processing charges in the Seoul Region</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Finding data transfer costs on your bill</h2></header><div class="prose">
+<p>Data transfer costs are split across the billing line items of each service, so they are hard to see at a glance. The service view in Cost Explorer alone does not show their scale. The <code>lineItem/UsageType</code> column of AWS Cost and Usage Reports (CUR) shows exactly how much was incurred at which boundary. The Seoul Region is recorded with the <code>APN2</code> prefix and us-east-1 with the <code>USE1</code> prefix.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Category</th><th>Usage type (Seoul Region example)</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>Internet transfer</td><td><code>APN2-DataTransfer-Out-Bytes</code></td><td>Traffic sent from the Seoul Region to the internet. Inbound is free</td></tr>
+<tr><td>Inter-AZ transfer</td><td><code>APN2-DataTransfer-Regional-Bytes</code></td><td>Traffic between AZs in the same Region. Recorded as two lines per resource, In and Out, and the Operation values InterZone-In/Out and PublicIP-In/Out identify the cause</td></tr>
+<tr><td>Inter-AZ transfer over VPC peering</td><td><code>APN2-VpcPeering-In-Bytes</code>, <code>APN2-VpcPeering-Out-Bytes</code></td><td>Line items separated from Regional-Bytes since April 2025</td></tr>
+<tr><td>Inter-Region transfer</td><td><code>APN2-USE1-AWS-Out-Bytes</code>, <code>USE1-APN2-AWS-In-Bytes</code></td><td>Only the Out line item is charged, and the In line item is $0</td></tr>
+<tr><td>Waived inter-AZ transfer</td><td><code>APN2-DataTransfer-xAZ-In-Bytes</code>, <code>APN2-DataTransfer-xAZ-Out-Bytes</code></td><td>Inter-AZ traffic of PrivateLink interface endpoints, Transit Gateway, and Client VPN. Recorded at $0</td></tr>
+<tr><td>Direct Connect</td><td><code>...-DataXfer-Out</code>, <code>...-DataXfer-Out:dc.3</code></td><td>Public VIFs use <code>DataXfer-Out</code>, and private and transit VIFs use the <code>:dc.3</code> suffix</td></tr>
+<tr><td>CloudFront</td><td><code>AP-DataTransfer-Out-Bytes</code>, <code>AP-DataTransfer-Out-OBytes</code></td><td>Transfer from edge to viewer, and from edge to origin. Edge locations in Korea use the <code>AP</code> prefix, and the ProductCode <code>AmazonCloudFront</code> separates them from EC2 internet transfer</td></tr>
+<tr><td>Data processing</td><td><code>APN2-NatGateway-Bytes</code>, <code>APN2-VpcEndpoint-Bytes</code>, <code>APN2-TransitGateway-Bytes</code></td><td>Volume processed by NAT gateways, interface endpoints, and Transit Gateway</td></tr>
+<tr><td>Load balancers</td><td><code>APN2-LCUUsage</code>, <code>APN2-DataProcessing-Bytes</code></td><td>LCU usage of ALBs and NLBs, and processed volume of Classic Load Balancers</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Main CUR usage types for identifying data transfer costs</p>
+<p>I recommend filtering by usage type in Cost Explorer and then grouping by API Operation. This shows right away whether <code>DataTransfer-Regional-Bytes</code> comes from inter-AZ communication or from public IP communication. Inter-Region transfer is recorded as two lines, In and Out. The charge is only on the Out line, so you have to remove the In line when you aggregate volume to see the actual amount transferred. To follow monthly trends, the reliable way is to query the CUR with Amazon Athena and aggregate by usage type and resource ID. Example queries are in this blog post (<a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/understand-aws-data-transfer-details-in-depth-from-cost-and-usage-report-using-athena-query-and-quicksight/" target="_blank" rel="noopener">Understand AWS Data transfer details in depth from cost and usage report using Athena query and QuickSight</a>).</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Internet gateways and public IPv4 addresses</h2></header><div class="prose">
+<h3>3.1 Internet gateway</h3>
+<p>An internet gateway (IGW) itself has no charge. There is no hourly charge and no processing charge. The cost comes from the DTO that leaves for the internet through the IGW. Internet DTO in the Seoul Region gets cheaper tier by tier as the cumulative monthly volume grows.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Cumulative monthly internet DTO</th><th>Price per GB</th></tr>
+</thead>
+<tbody>
+<tr><td>First 100 GB</td><td>$0 (aggregated across the account, shared by all Regions and services)</td></tr>
+<tr><td>Up to 10 TB</td><td>$0.126</td></tr>
+<tr><td>Next 40 TB</td><td>$0.122</td></tr>
+<tr><td>Next 100 TB</td><td>$0.117</td></tr>
+<tr><td>Over 150 TB</td><td>$0.108</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Internet DTO pricing tiers in the Seoul Region</p>
+<p>The tiers apply to the internet DTO of all services, such as EC2, S3, RDS, and Lambda, aggregated at the account level. Traffic coming in from the internet is free. Even when it goes through an IGW, traffic to the public endpoint of an AWS service in the same Region does not leave the AWS network, so its DTO is $0. An EC2 instance in a public subnet accessing S3 in the same Region is one such case.</p>
+<p>The path to watch is communication over public IPs within the same Region. When two EC2 instances in the same VPC communicate by specifying each other's public IP address directly, the destination is outside the VPC CIDR, so the traffic is routed to the IGW and makes a round trip through it. This traffic stays inside the AWS network and does not go out to the internet, so the internet DTO is $0, but the intra-Region data transfer charge of $0.01 applies in each direction. There is no exception even in the same AZ. In contrast, if you use the public DNS hostname of an EC2 instance from inside the same VPC, it resolves to the private IP, so this charge does not occur. This cost often shows up in setups where internal clients call the DNS name of an internet-facing load balancer.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig03-igw-pricing.png" alt="Three paths through an internet gateway and their charges" width="2560" height="1440" loading="lazy"></div><figcaption><b>Figure 3.</b> Three paths through an internet gateway and their charges</figcaption></figure>
+<h3>3.2 Public IPv4 addresses and Elastic IP addresses</h3>
+<p>Since February 2024, every public IPv4 address has been charged $0.005 per hour. Addresses attached to an instance and idle Elastic IP addresses that are not attached cost the same. Addresses assigned to NAT gateways, load balancers, RDS public endpoints, Global Accelerator, and Site-to-Site VPN tunnel endpoints are all included. That is about $3.65 per month for one address and $365 per month for 100 addresses. IPv6 addresses do not have this charge.</p>
+<p>I therefore recommend checking three things. First, release Elastic IP addresses that you are not using. Second, make sure that resources in private subnets do not have public IPs. A common cause is a subnet where the option to auto-assign a public IP at instance launch is turned on. Third, use Public IP Insights, which is provided in the Free Tier of Amazon VPC IP Address Manager (IPAM), to see public IPv4 usage and idle addresses across your organization at no additional cost. The recommendation for optimization is to use IPv6 or private IPv4 for internal communication and keep public IPv4 only where internet exposure is required.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>NAT gateway</h2></header><div class="prose">
+<p>A NAT gateway is the managed gateway that resources in a private subnet go through to reach the internet or the public endpoints of AWS services. Three charges apply. They are $0.059 per hour, $0.059 per GB processed, and a data transfer charge that depends on the destination. Traffic to the internet incurs DTO of $0.126, and traffic to AWS services in the same Region is $0.</p>
+<p>Let's calculate the case where an EC2 instance in a private subnet sends 10 TB per month to the internet through a NAT gateway. The processing charge is 10,240 GB × $0.059 = $604.16, DTO is 10,240 GB × $0.126 = $1,290.24, and the hourly charge is 730 × $0.059 = $43.07. The total is about $1,937, and the NAT gateway accounts for about 33% of it.</p>
+<p>When a NAT gateway and an EC2 instance are in different AZs, an inter-AZ charge is added between the two resources. You need to place one NAT gateway in each AZ and configure the route table of each AZ's private subnets so that the NAT gateway in its own AZ is the target. The hourly charge grows with the number of AZs, but the inter-AZ charge goes away and a failure in one AZ does not affect the others. With a NAT gateway in regional availability mode, AWS handles expansion across AZs. When a resource appears in a new AZ, the gateway expands to that AZ within 60 minutes at most, and until then the traffic is handled in an existing AZ and incurs inter-AZ charges. In this case too, the hourly charge applies for each AZ that is configured.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig04-nat-gw-az-option.png" alt="Cost difference between placing a NAT gateway in every AZ and using only one" width="3450" height="1938" loading="lazy"></div><figcaption><b>Figure 4.</b> Cost difference between placing a NAT gateway in every AZ and using only one</figcaption></figure>
+<p>A large part of NAT gateway throughput is often traffic bound not for the internet but for AWS services in the same Region. Log uploads to S3, image pulls from ECR, and message delivery to SQS and Kinesis fall into this category. The DTO for this traffic is $0, yet the NAT gateway processing charge of $0.059 still applies. The VPC endpoints in the next section are the way to reduce this cost.</p>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>VPC endpoints</h2></header><div class="prose">
+<p>Workloads in a private subnet have three paths to AWS services such as Amazon S3, Amazon Kinesis, Amazon ECR, and Amazon SQS. They are the path through a NAT gateway to the public endpoint, the path through an interface endpoint, and the gateway endpoint path that is available only for S3 and DynamoDB. The data transfer charge is $0 on all three paths. The difference comes from the data processing charge.</p>
+<h3>5.1 Gateway endpoints</h3>
+<p>Gateway endpoints are available for only two services, S3 and DynamoDB. They have no hourly charge and no processing charge. They work by adding a prefix list route to the route table, so they create no ENI and have no notion of an AZ. If you use S3 or DynamoDB from a private subnet, I recommend creating a gateway endpoint without exception. S3 is often the largest share of NAT gateway throughput.</p>
+<h3>5.2 Interface endpoints</h3>
+<p>Interface endpoints are based on AWS PrivateLink and connect to a service by creating an ENI in your subnet. The price is $0.013 per hour for each AZ where the endpoint is placed and $0.01 per GB processed (up to 1 PB per month). Compared with the NAT gateway's $0.059, the processing charge is about one sixth. Since April 2022, inter-AZ traffic through an interface endpoint has not incurred a transfer charge.</p>
+<p>Let's compare the three paths for a workload that sends 10 TB per month to S3.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Path</th><th>Data processing charge</th><th>Hourly charge (2 AZs)</th><th>Monthly total</th></tr>
+</thead>
+<tbody>
+<tr><td>NAT gateway</td><td>10,240 GB × $0.059 = $604.16</td><td>2 × 730 × $0.059 = $86.14</td><td>About $690</td></tr>
+<tr><td>Interface endpoint</td><td>10,240 GB × $0.01 = $102.40</td><td>2 × 730 × $0.013 = $18.98</td><td>About $121</td></tr>
+<tr><td>Gateway endpoint</td><td>$0</td><td>$0</td><td>$0</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Cost by path when sending 10 TB per month to Amazon S3 in the same Region (Seoul Region)</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-01-assets/fig05-private-subnet-pricing-options.png" alt="Three paths from a private subnet to AWS services and their charges" width="3450" height="1936" loading="lazy"></div><figcaption><b>Figure 5.</b> Three paths from a private subnet to AWS services and their charges</figcaption></figure>
+<p>There is one thing to consider here. Interface endpoints incur an hourly charge for each service and each AZ. One endpoint in one AZ is a fixed $9.49 per month. The saving per GB compared with a NAT gateway is $0.049. For a service whose monthly traffic is below about 194 GB per AZ, creating an endpoint actually costs more. Creating endpoints for 20 services in 2 AZs each results in a fixed cost of close to $380 per month. I recommend picking the services with the most traffic first when you set up endpoints. You can find the traffic volume of each service by aggregating the VPC Flow Logs of the subnet that has the NAT gateway by destination address.</p>
+<p>Container image pulls are easy to overlook. Amazon ECR image layers are stored in S3. You have to create both the ECR interface endpoints (<code>ecr.api</code>, <code>ecr.dkr</code>) and an S3 gateway endpoint for image pull traffic to bypass the NAT gateway.</p>
+<p>Interface endpoints can also connect to endpoint services in another Region. In that case, the endpoint's hourly charge and processing charge are the same as within one Region. The inter-Region data transfer charge is added on top. Part 3 covers, together with VPC Lattice, setups that offer your own service to other VPCs or accounts through PrivateLink, as well as newer endpoint types such as resource endpoints and service network endpoints.</p>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Accessing AWS services in another Region</h2></header><div class="prose">
+<p>When a workload in the Seoul Region accesses an S3 bucket or a Kinesis stream in us-east-1, the inter-Region data transfer charge applies. The price is based on the Region the data leaves. Reading from a bucket in us-east-1 means the data leaves us-east-1, so it costs $0.02 per GB, and writing to that bucket from Seoul means the data leaves Seoul, so it costs $0.08 per GB. Even when you access it through the public endpoint, the inter-Region price applies instead of the internet transfer price. Going through a NAT gateway adds the processing charge of $0.059. A gateway endpoint does not help in this case. That is because a gateway endpoint connects only to S3 and DynamoDB in the same Region.</p>
+<p>If cross-Region access is repeated, it is better for both cost and latency to replicate the data to the Region where the workload runs and read it within the same Region. Replication incurs the inter-Region charge once. In return, the charge that would occur on every read goes away. When you decide the replication direction, I recommend also considering the asymmetry of inter-Region prices. The price from us-east-1 to Seoul ($0.02) is one quarter of the opposite direction ($0.08).</p>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Internet content delivery and Amazon CloudFront</h2></header><div class="prose">
+<p>For workloads that serve content over the internet, putting CloudFront in front instead of sending directly from the Region is also better for cost. There are two reasons. First, transfer from AWS origins such as S3, ALB, and API Gateway to CloudFront is free. Second, the higher the cache hit ratio, the less traffic leaves the Region in the first place. At an 80% hit ratio, the traffic leaving the origin drops to one fifth. The difference in rates is secondary. DTO straight from the Seoul Region to the internet is $0.126, and CloudFront DTO from edge locations in Korea to viewers is $0.120 in the 10 TB per month tier. The direction in which CloudFront sends data to the origin (request bodies such as PUT and POST) is charged $0.06 per GB for Korea.</p>
+<p>The CloudFront Free Tier provides 1 TB of DTO and 10 million HTTP(S) requests every month. The free allowance for internet DTO straight from a Region is 100 GB per month, so that is a tenfold difference. Recently, in addition to pay-as-you-go pricing, flat-rate pricing plans that bundle CloudFront, AWS WAF, and DDoS protection have also become available. For web services with large swings in traffic, it is worth comparing the two options.</p>
+</div></section>
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Part 1 checklist</h2></header><div class="prose">
+<div class="scroll"><table>
+<thead>
+<tr><th>Check item</th><th>Cost driver</th><th>Recommendation</th></tr>
+</thead>
+<tbody>
+<tr><td>Traffic to the internet</td><td>DTO $0.126, +$0.059 when it goes through a NAT gateway</td><td>Send only necessary traffic to the internet, and deliver content through CloudFront</td></tr>
+<tr><td>Server-to-server communication in the same VPC</td><td>$0.01 in each direction when communicating over public IPs</td><td>Use private IPs and internal load balancers</td></tr>
+<tr><td>Public IPv4 addresses</td><td>$0.005 per hour per address</td><td>Release idle Elastic IP addresses, check the auto-assign option, and use Public IP Insights</td></tr>
+<tr><td>NAT gateway placement</td><td>Inter-AZ $0.01 when communicating with EC2 in another AZ</td><td>A NAT gateway per AZ and a route table per AZ</td></tr>
+<tr><td>Access to S3 and DynamoDB from private subnets</td><td>NAT gateway processing charge $0.059</td><td>Use gateway endpoints ($0)</td></tr>
+<tr><td>Access to other AWS services from private subnets</td><td>NAT gateway processing charge $0.059</td><td>Interface endpoints ($0.01) at about 194 GB or more per AZ per month</td></tr>
+<tr><td>Container image pulls</td><td>NAT gateway processing charge</td><td>ECR interface endpoints + S3 gateway endpoint</td></tr>
+<tr><td>Access to AWS services in another Region</td><td>Inter-Region $0.08</td><td>Replicate to the workload's Region, and replicate in the direction with the lower price</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Part 1 design checklist (based on Seoul Region prices)</p>
+</div></section>
+<section class="sec" id="en-s10"><header class="sec-head"><h2>Closing</h2></header><div class="prose">
+<p>Part 1 looked at the structure of AWS networking costs and the costs that arise at the internet boundary. The key points are the following three.</p>
+<ol>
+<li>Networking cost is determined by two charges, the data transfer charge and the data processing charge. The transfer charge depends on direction and boundary, and the processing charge depends on the managed services the traffic passes through. Both charges can apply to the same 1 GB, so writing both values on every arrow of your architecture diagram lets you see where the cost comes from.</li>
+<li>The internet gateway itself is free, and the cost comes from DTO and public IPv4 addresses. I recommend communicating over private IPs within the same Region and assigning public IPv4 only where internet exposure is required.</li>
+<li>A substantial part of NAT gateway cost is traffic to AWS services in the same Region. Routing S3 and DynamoDB through gateway endpoints and high-traffic services through interface endpoints removes the processing charge or cuts it to one sixth.</li>
+</ol>
+<p>Part 2 covers the costs that occur inside a Region. It looks at how the inter-AZ transfer charge is billed to the resources on both sides and why cross-zone charges differ between Application Load Balancer and Network Load Balancer. It also looks at how to reduce traffic that crosses AZ boundaries in databases and Amazon EKS. (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">Link to Part 2</a>)</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/ec2/pricing/on-demand/" target="_blank" rel="noopener">Amazon EC2 온디맨드 요금 - 데이터 전송</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://aws.amazon.com/ko/vpc/pricing/" target="_blank" rel="noopener">Amazon VPC 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://aws.amazon.com/ko/privatelink/pricing/" target="_blank" rel="noopener">AWS PrivateLink 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://aws.amazon.com/ko/cloudfront/pricing/" target="_blank" rel="noopener">Amazon CloudFront 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/cur/latest/userguide/cur-data-transfers-charges.html" target="_blank" rel="noopener">Understanding data transfer charges - AWS Data Exports User Guide</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/vpc/latest/ipam/view-public-ip-insights.html" target="_blank" rel="noopener">View public IP insights - Amazon VPC IPAM</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2022/04/aws-data-transfer-price-reduction-privatelink-transit-gateway-client-vpn-services/" target="_blank" rel="noopener">AWS Announces Data Transfer Price Reduction for AWS PrivateLink, AWS Transit Gateway, and AWS Client VPN services</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2021/07/aws-lowers-data-processing-charges-aws-privatelink/" target="_blank" rel="noopener">AWS lowers data processing charges for AWS PrivateLink</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2025/04/amazon-vpc-peering-billing/" target="_blank" rel="noopener">AWS simplifies Amazon VPC Peering billing</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://aws.amazon.com/ko/blogs/architecture/overview-of-data-transfer-costs-for-common-architectures/" target="_blank" rel="noopener">Overview of Data Transfer Costs for Common Architectures - AWS Architecture Blog</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-01/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-09-21 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-01/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-09-21. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>

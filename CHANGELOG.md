@@ -27,11 +27,12 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add archify interactive architecture maps plus inline archmap figures for all posts
 - Add Mac terminal style code blocks with copy buttons in report documents
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
-- Add the post "Amazon Bedrock Managed Agents: How to run OpenAI agents on AWS" (KO/EN), republished from the AWS Tech Blog with a link to the original
+- Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Rewrite README, `docs/architecture.md`, `docs/onboarding.md` and the project commands and skills for the new publishing flow (`build_post.py`, `check_post.py`, `place_post.py` of the `my-plugins:techblogs` skill replace `qa.py`)
 - Add a result-sample section to the six capstone lab pages linking the deployed sample apps on `whchoi.net` (clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)
 - Rebuild `ccw-hands-on-lab` from the 2026-09-19 "My Workshop" reader build with a shared `assets/` directory (common table of contents, search, dark mode, print view, reading history); archive the previous standalone build and legacy capstone labs A–D under `ccw-hands-on-lab/v1/`; update the workshop nav page (Capstone 2 row, v1 archive note)
 - Replace the theme entirely with a custom Jekyll theme (navy/orange card UI, dark mode, tag filter, workshop sidebar) after iterating through Chirpy, TeXt, and Just the Docs
@@ -41,6 +42,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Restructure Workshop navigation to a flat 3-level layout and rename the lab path to `ccw-hands-on-lab`
 
 ### Removed
+- Remove the 23 earlier posts in the old self-contained report format, together with their archify architecture maps (`<slug>-archmap.html`, `<slug>-archmap.png`) and the redirect stubs in `assets/reports/`
 - Remove three posts (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed
@@ -77,11 +79,12 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 전체 게시물에 archify 인터랙티브 아키텍처 맵과 인라인 archmap figure 추가
 - 리포트 문서에 복사 버튼이 있는 Mac 터미널 스타일 코드블록 추가
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
-- 게시물 추가: "Amazon Bedrock Managed Agents: OpenAI 에이전트를 AWS에서 운영하는 방법" (KO/EN) - AWS 기술 블로그 글을 원문 링크와 함께 옮겨 실음
+- 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- README, `docs/architecture.md`, `docs/onboarding.md`, 프로젝트 명령과 스킬을 새 게시 흐름에 맞게 수정 (`my-plugins:techblogs` 스킬의 `build_post.py`, `check_post.py`, `place_post.py`가 `qa.py`를 대체)
 - 캡스톤 랩 페이지 6개에 `whchoi.net`의 배포 샘플 앱(clawd-game, stock-monitoring, youtube-trend, quake-watch, newslens)을 연결하는 결과 샘플 섹션 추가
 - `ccw-hands-on-lab`을 2026-09-19 "My Workshop" 리더 빌드로 재구성(공용 `assets/` 디렉토리, 공통 목차·검색·다크 모드·인쇄·읽기 기록); 이전 독립 실행형 빌드와 레거시 캡스톤 랩 A–D를 `ccw-hands-on-lab/v1/`에 보관; 워크샵 네비게이션 페이지 갱신(Capstone 2 행, v1 아카이브 안내)
 - Chirpy, TeXt, Just the Docs를 거쳐 커스텀 Jekyll 테마로 전면 교체 (네이비/오렌지 카드 UI, 다크 모드, 태그 필터, 워크샵 사이드바)
@@ -91,6 +94,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Workshop 네비게이션을 평면 3레벨 구조로 재편, 랩 경로를 `ccw-hands-on-lab`으로 변경
 
 ### Removed
+- 구 형식(자립형 리포트)의 기존 게시물 23편과 archify 아키텍처 맵(`<slug>-archmap.html`, `<slug>-archmap.png`), `assets/reports/`의 이동 안내 파일 제거
 - 게시물 3편 제거 (security-hub, otel-eks, bedrock-rag)
 
 ### Fixed

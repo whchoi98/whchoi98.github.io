@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS 네트워크 데이터 전송 및 처리 요금, 아키텍처로 이해하기 [3부: VPC 간 연결과 하이브리드]</title>
+<meta name="description" content="VPC Peering, Transit Gateway, PrivateLink, VPC Lattice, Cloud WAN과 온프레미스 연결의 요금 구조를 서울 리전 기준으로 정리합니다. 서울과 us-east-1을 연결하는 비용도 경로별로 비교합니다.">
+<link rel="canonical" href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-03/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-09-21</span><span class="l-en">Published 2026-09-21</span></span><span>Networking</span><span><span class="l-ko">읽는 시간 16분</span><span class="l-en">16 min read</span></span><span class="wide"><span class="l-ko">원문 <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-03/" target="_blank" rel="noopener">AWS 기술 블로그</a></span><span class="l-en">First published on <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-03/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a></span></span></div>
+<h1><span class="l-ko">AWS 네트워크 데이터 전송 및 처리 요금, 아키텍처로 이해하기 [3부: VPC 간 연결과 하이브리드]</span><span class="l-en">Understanding AWS network data transfer and processing charges through architecture [Part 3: Inter-VPC connectivity and hybrid]</span></h1>
+<p class="thesis"><span class="l-ko">VPC 경계와 리전 경계를 넘는 트래픽에 어떤 요금이 과금되고 연결 방식별로 비용이 어떻게 달라지는지 답합니다. 리전 간 전송 요금은 어느 경로든 같고 경로에 따라 달라지는 것은 처리 요금과 고정 요금이므로 연결 방식은 고정 요금과 운영 모델로 선택합니다. 가장 큰 비용 절감은 같은 AZ 배치나 복제 방향 설계처럼 경로를 변경할 때 얻을 수 있습니다.</span><span class="l-en">This post answers which charges apply to traffic that crosses VPC and Region boundaries and how cost differs by connectivity option. The inter-Region transfer charge is the same on every path, and what varies by path is the processing charge and the fixed charge, so you choose a connectivity option by its fixed charges and operating model. The largest cost savings come from changing the path, such as same-AZ placement or replication direction design.</span></p>
+<div class="tags"><span>#VPC Peering</span><span>#AWS Transit Gateway</span><span>#AWS PrivateLink</span><span>#Amazon VPC Lattice</span><span>#AWS Cloud WAN</span><span>#AWS Direct Connect</span><span>#AWS Site-to-Site VPN</span><span>#Data Transfer</span></div>
+
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">VPC 연결 방식별 요금 구조 한눈에 보기</a><a href="#ko-s3">VPC Peering</a><a href="#ko-s4">AWS Transit Gateway</a><a href="#ko-s5">AWS PrivateLink와 VPC 리소스 공유</a><a href="#ko-s6">Amazon VPC Lattice 서비스</a><a href="#ko-s7">AWS Cloud WAN</a><a href="#ko-s8">온프레미스 연결</a><a href="#ko-s9">서울과 us-east-1을 연결하는 경로별 비용</a><a href="#ko-s10">3부 체크리스트</a><a href="#ko-s11">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">Pricing structure of VPC connectivity options at a glance</a><a href="#en-s3">VPC peering</a><a href="#en-s4">AWS Transit Gateway</a><a href="#en-s5">AWS PrivateLink and VPC resource sharing</a><a href="#en-s6">Amazon VPC Lattice services</a><a href="#en-s7">AWS Cloud WAN</a><a href="#en-s8">On-premises connectivity</a><a href="#en-s9">Cost by path between Seoul and us-east-1</a><a href="#en-s10">Part 3 checklist</a><a href="#en-s11">Closing</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>이 글은 여러 VPC와 계정, 온프레미스를 연결하는 네트워크를 설계하거나 운영하는 아키텍트와 네트워크 담당자를 대상으로 합니다. VPC 경계와 리전 경계를 넘는 트래픽에 어떤 요금이 과금되고 연결 방식별로 비용이 어떻게 달라지는지를 다룹니다.</p>
+<p>1부에서는 AWS 네트워크 비용이 데이터 전송 요금과 데이터 처리 요금 두 가지로 정해진다는 점과 인터넷 게이트웨이, NAT Gateway, VPC 엔드포인트의 요금을 살펴보았습니다. 2부에서는 같은 리전 안에서 AZ 경계를 넘는 트래픽이 양쪽 자원에 각각 $0.01씩 과금되는 규칙과 로드 밸런서, 데이터베이스, Amazon EKS에서 이를 줄이는 방법을 다뤘습니다. 3부는 VPC 경계를 넘는 트래픽을 다룹니다.</p>
+<ul>
+<li>1부: 데이터 전송 요금과 데이터 처리 요금의 구조, 청구서에서 비용을 찾는 방법, 인터넷 게이트웨이, 퍼블릭 IPv4 주소, NAT Gateway, VPC 엔드포인트, Amazon CloudFront (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-01/" target="_blank" rel="noopener">링크</a>)</li>
+<li>2부: 리전 안의 트래픽. AZ 간 전송 규칙, Application Load Balancer와 Network Load Balancer, 데이터베이스와 캐시 계층(Valkey GLIDE의 AZ 친화도 포함), Amazon EKS (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">링크</a>)</li>
+<li><b>3부(이 글): VPC 간 연결과 하이브리드. VPC Peering, AWS Transit Gateway, AWS PrivateLink와 Amazon VPC Lattice, AWS Cloud WAN, AWS Direct Connect</b></li>
+</ul>
+<p>VPC를 연결하는 방법은 VPC Peering, AWS Transit Gateway, AWS PrivateLink, Amazon VPC Lattice, AWS Cloud WAN 다섯 가지입니다. 온프레미스와 연결하는 방법은 AWS Site-to-Site VPN과 AWS Direct Connect 두 가지입니다. 각 방식은 시간당 요금, 데이터 처리 요금, AZ 간 요금 면제 여부가 다릅니다. 이 글에서는 연결 방식별 요금 구조를 정리합니다. 이어서 서울 리전과 미국 동부(버지니아 북부, us-east-1)를 연결하는 경우의 비용을 경로별로 비교합니다.</p>
+<p>이 글의 요금은 서울 리전(ap-northeast-2) 공개 요금 페이지를 기준으로 합니다. 별도 표기가 없으면 GB당 미국 달러입니다. 월 시간은 730시간, 1TB는 1,024GB, 1PB는 1,048,576GB로 계산합니다. 요금은 변경될 수 있으므로 설계에 반영하기 전에 각 서비스 요금 페이지에서 최신 요금을 확인하시길 권고드립니다.</p>
+</div></section>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>VPC 연결 방식별 요금 구조 한눈에 보기</h2></header><div class="prose">
+<p>다섯 가지 연결 방식은 요금이 과금되는 지점이 서로 다릅니다. 표 1은 각 방식의 요금 요소를, 표 2는 CIDR 중복 허용 여부처럼 선택에 영향을 주는 특성을 정리한 것입니다. 상세 요금과 예시는 이후 섹션에서 다룹니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>방식</th><th>시간당 요금</th><th>데이터 처리 요금</th><th>AZ 간 전송 요금</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC Peering</td><td>없음</td><td>없음</td><td>같은 AZ $0, 다른 AZ 양방향 각 $0.01</td></tr>
+<tr><td>Transit Gateway</td><td>연결당 $0.07</td><td>$0.02</td><td>없음</td></tr>
+<tr><td>PrivateLink 인터페이스 엔드포인트</td><td>AZ당 $0.013</td><td>$0.01 (월 1PB 구간)</td><td>없음</td></tr>
+<tr><td>VPC Lattice 서비스</td><td>서비스당 $0.0325</td><td>$0.0325 + 요청 요금</td><td>없음(처리 요금에 포함)</td></tr>
+<tr><td>VPC Lattice VPC 리소스</td><td>리소스 연결당 $0.13 또는 리소스 엔드포인트당 $0.026</td><td>소비자 $0.01 + 공급자 $0.006</td><td>없음</td></tr>
+<tr><td>Cloud WAN</td><td>코어 네트워크 엣지당 $0.50, 연결당 $0.09</td><td>$0.02</td><td>없음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> VPC 연결 방식별 요금 구조(서울 리전)</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>방식</th><th>CIDR 중복</th><th>지원 프로토콜</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC Peering</td><td>불가</td><td>모든 IP 트래픽</td></tr>
+<tr><td>Transit Gateway</td><td>불가</td><td>모든 IP 트래픽</td></tr>
+<tr><td>PrivateLink 인터페이스 엔드포인트</td><td>허용</td><td>TCP, UDP(소비자(Consumer)에서 공급자(Provider) 방향)</td></tr>
+<tr><td>VPC Lattice 서비스</td><td>허용</td><td>HTTP, HTTPS, TLS</td></tr>
+<tr><td>VPC Lattice VPC 리소스</td><td>허용</td><td>TCP</td></tr>
+<tr><td>Cloud WAN</td><td>불가</td><td>모든 IP 트래픽</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> VPC 연결 방식별 주요 특성</p>
+<p>리전 경계를 넘는 트래픽에는 어느 방식을 사용하든 출발 리전 기준의 리전 간 데이터 전송 요금이 그대로 과금됩니다. 서울에서 us-east-1로 보내면 $0.08, 반대 방향은 $0.02입니다. 연결 방식이 바꾸는 것은 이 위에 추가되는 처리 요금과 고정 요금입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig01-vpc-connect-options-pricing.png" alt="VPC를 연결하는 다섯 가지 방식과 요금이 과금되는 지점" width="3450" height="1938" loading="lazy"></div><figcaption><b>그림 1.</b> VPC를 연결하는 다섯 가지 방식과 요금이 과금되는 지점</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>VPC Peering</h2></header><div class="prose">
+<p>VPC Peering은 시간당 요금과 처리 요금이 없습니다. 2021년 5월부터 같은 AZ 안에 머무는 Peering 트래픽은 무료입니다. 서로 다른 AZ 간 트래픽이 발생하면 양방향 각 $0.01, 리전 간 트래픽이 발생하면 출발 리전의 리전 간 요금이 과금됩니다. 2025년 4월부터는 AZ 간 Peering 트래픽이 <code>VpcPeering-In/Out-Bytes</code>라는 별도 Usage Type으로 기록되어 청구서에서 바로 구분됩니다.</p>
+<p>Peering에서 비용을 줄이는 방법은 하나입니다. 서로 통신하는 자원을 같은 AZ에 두는 것입니다. 계정이 다르면 AZ ID(<code>apne2-az1</code> 형식) 기준으로 서브넷을 맞춰야 합니다. Peering은 전이 라우팅(transitive routing)을 지원하지 않으므로 VPC가 늘어나면 연결 수가 급격히 증가합니다. VPC가 두세 개일 때 가장 저렴하고 단순한 선택입니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>AWS Transit Gateway</h2></header><div class="prose">
+<p>Transit Gateway는 연결(Attachment)당 시간당 $0.07와 연결에서 Transit Gateway로 보낸 GB당 $0.02가 과금됩니다. 2022년 4월부터 같은 리전 안에서는 서로 다른 AZ 간 트래픽 전송에도 추가 전송 요금이 없습니다. 데이터 처리 요금은 트래픽을 보내는 쪽 VPC 소유자에게 부과됩니다.</p>
+<p>Transit Gateway Peering으로 다른 리전과 연결하면 요금이 세 가지 부과됩니다. 양쪽 Transit Gateway의 피어링 연결 시간 요금(서울 $0.07, us-east-1 $0.05), 출발 쪽 Transit Gateway의 처리 요금 $0.02, 그리고 출발 리전 기준 리전 간 전송 요금입니다. 피어링 연결로 들어온 데이터에는 도착 쪽 Transit Gateway에서는 데이터 처리 요금을 부과하지 않습니다. 서울 VPC에서 us-east-1 VPC로 1GB를 보내면 $0.02 + $0.08 = $0.10, 반대 방향은 $0.02 + $0.02 = $0.04입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig02-vpc-peering-tgw-pricing.png" alt="VPC Peering과 Transit Gateway를 거치는 트래픽의 요금 구조" width="3448" height="1934" loading="lazy"></div><figcaption><b>그림 2.</b> VPC Peering과 Transit Gateway를 거치는 트래픽의 요금 구조</figcaption></figure>
+<p>표 3은 두 VPC 사이에 월 10TB가 오간다고 가정했을 때의 비용입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>구성</th><th>시간당 요금</th><th>트래픽 요금</th><th>월 합계</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC Peering, 같은 AZ 안에서만 통신</td><td>$0</td><td>$0</td><td>$0</td></tr>
+<tr><td>VPC Peering, AZ 간 통신</td><td>$0</td><td>10,240GB × $0.02 = $204.80</td><td>약 $205</td></tr>
+<tr><td>Transit Gateway(연결 2개)</td><td>2 × 730 × $0.07 = $102.20</td><td>10,240GB × $0.02 = $204.80</td><td>약 $307</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 두 VPC 사이에 월 10TB가 오갈 때 연결 방식별 비용(서울 리전)</p>
+<p>VPC가 두세 개이고 통신하는 자원을 같은 AZ에 배치할 수 있다면 Peering이 가장 저렴합니다. VPC가 수십 개로 늘어나면 Transit Gateway의 중앙 집중 라우팅이 유리합니다. Transit Gateway를 선택하면 AZ 간 요금은 사라지지만 모든 트래픽에 처리 요금 $0.02가 과금됩니다. 이 금액은 VPC Peering 의 AZ 간 단방향 1GB 전송 시, 송신 측과 수신 측에 각각 GB 당 $0.01 씩 부과되는 요금의 합계와 같습니다. Transit Gateway로 옮기면 연결 수와 운영 부담이 줄어들고 트래픽 요금은 그대로입니다.</p>
+</div></section>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>AWS PrivateLink와 VPC 리소스 공유</h2></header><div class="prose">
+<p>Peering과 Transit Gateway는 VPC 사이에 IP 라우팅을 연결합니다. PrivateLink와 VPC Lattice는 라우팅을 연결하지 않고 서비스나 리소스 단위로 접근을 열어 줍니다. CIDR이 겹쳐도 되고 소비자(Consumer)에서 공급자(Provider) 방향으로만 연결이 열립니다. 요금도 라우팅이 아니라 엔드포인트와 서비스 단위로 과금됩니다.</p>
+<h3>4.1 PrivateLink 인터페이스 엔드포인트로 자체 서비스 공유</h3>
+<p>공급자 VPC의 NLB 뒤에 서비스를 두고 엔드포인트 서비스로 등록하면 소비자 VPC는 인터페이스 엔드포인트로 이 서비스에 연결합니다. 소비자는 엔드포인트가 배치된 AZ당 시간당 $0.013와 처리 GB당 $0.01를 부담합니다. 공급자는 NLB 시간당 요금과 NLCU 요금을 부담합니다. 2022년 4월부터 인터페이스 엔드포인트를 거치는 AZ 간 트래픽에는 전송 요금이 없습니다. 최근에는 UDP 트래픽과 다른 리전의 엔드포인트 서비스 연결도 지원합니다. 리전 간 연결에서는 소비자 쪽 엔드포인트 시간당 요금과 처리 요금이 같은 리전과 동일하고 여기에 출발 리전 기준 리전 간 전송 요금이 더해집니다. 처리 요금은 요청과 응답 양방향에 부과되고 양방향의 리전 간 전송 요금도 모두 엔드포인트 소유자인 소비자 계정에 청구됩니다. 공급자 쪽에는 리전 간 전송 요금이 없고 엔드포인트 서비스가 연결을 허용한 원격 리전마다 시간당 $0.05(서울 리전 기준)가 추가로 과금됩니다. 원격 리전 하나에 월 $36.50입니다.</p>
+<p>이 방식의 비용은 소비자 VPC 수에 비례해 늘어납니다. 소비자 VPC가 20개이고 각 VPC가 2개 AZ에 엔드포인트를 두면 시간당 요금만 월 20 × 2 × 730 × $0.013 = $379.60입니다. 같은 서비스를 여러 VPC에서 접근하는 구조에서 이 고정 비용을 줄이는 대안이 다음의 VPC Lattice입니다.</p>
+<h3>4.2 VPC 리소스에 연결하는 세 가지 방식</h3>
+<p>VPC Lattice는 RDS 인스턴스, EC2 인스턴스, IP 주소, 도메인 이름 같은 VPC 리소스를 다른 VPC나 계정에서 프라이빗하게 접근하게 하는 기능을 제공합니다. 공급자 VPC에는 리소스 게이트웨이(Resource Gateway)와 어느 리소스를 노출할지 정의하는 리소스 구성(Resource Configuration)을 둡니다. 소비자 쪽에서 연결하는 방식은 세 가지입니다.</p>
+<ul>
+<li><b>리소스 엔드포인트(Resource Endpoint, RE)</b>: PrivateLink 기반으로 소비자 VPC에 ENI를 만들어 리소스 구성 하나에 연결합니다.</li>
+<li><b>서비스 네트워크 엔드포인트(Service Network Endpoint, SNE)</b>: 소비자 VPC에 ENI를 만들어 VPC Lattice 서비스 네트워크에 연결합니다. 엔드포인트 하나로 서비스 네트워크에 속한 여러 리소스와 서비스에 접근합니다.</li>
+<li><b>VPC 연결(VPC Association)</b>: ENI 없이 소비자 VPC를 서비스 네트워크에 직접 연결합니다. AWS가 제공하는 링크 로컬 대역이 라우팅 테이블에 자동으로 추가됩니다.</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>리소스 엔드포인트</th><th>서비스 네트워크 엔드포인트</th><th>VPC 연결</th></tr>
+</thead>
+<tbody>
+<tr><td>엔드포인트 시간당 요금</td><td>$0.026</td><td>없음</td><td>없음</td></tr>
+<tr><td>리소스 구성을 서비스 네트워크에 연결하는 요금</td><td>해당 없음</td><td>리소스 구성당 $0.13</td><td>리소스 구성당 $0.13</td></tr>
+<tr><td>소비자 데이터 처리 요금</td><td>$0.01 (월 1PB 구간)</td><td>$0.01 (월 1PB 구간)</td><td>$0.01 (월 1PB 구간)</td></tr>
+<tr><td>공급자 데이터 처리 요금</td><td>$0.006</td><td>$0.006</td><td>$0.006</td></tr>
+<tr><td>VPC당 개수</td><td>여러 개</td><td>여러 개</td><td>1개</td></tr>
+<tr><td>온프레미스에서 접근</td><td>가능</td><td>가능</td><td>불가</td></tr>
+<tr><td>엔드포인트당 접근 리소스</td><td>1개</td><td>서비스 네트워크의 모든 리소스와 서비스</td><td>서비스 네트워크의 모든 리소스와 서비스</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> VPC 리소스에 연결하는 세 가지 방식의 요금과 특성(서울 리전)</p>
+<p>세 방식의 처리 요금은 같습니다. 차이는 고정 요금이 어디에 과금되는지입니다. 리소스 엔드포인트는 소비자 VPC마다 엔드포인트 요금이 과금됩니다. 서비스 네트워크 방식은 소비자 VPC 수와 무관하게 리소스 구성마다 연결 요금이 과금됩니다. 소비자 VPC 하나가 리소스 하나에 접근한다면 리소스 엔드포인트가 월 $18.98로 연결 요금 $94.90보다 저렴합니다. 소비자 VPC가 열 개면 리소스 엔드포인트 요금은 $189.80으로 늘어나고 서비스 네트워크 방식은 $94.90 그대로입니다. 공유하는 리소스 수가 적고 소비자가 많을수록 서비스 네트워크 방식이 유리합니다.</p>
+<p>표 5는 한 소비자 VPC가 월 1PB를 Aurora 클러스터 하나와 주고받는 경우를 계산한 결과입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>요금 항목</th><th>리소스 엔드포인트 방식</th><th>서비스 네트워크 방식</th></tr>
+</thead>
+<tbody>
+<tr><td>엔드포인트 시간당 요금</td><td>730 × $0.026 = $18.98</td><td>$0</td></tr>
+<tr><td>리소스 구성 연결 요금</td><td>$0</td><td>730 × $0.13 = $94.90</td></tr>
+<tr><td>소비자 데이터 처리 요금</td><td>1,048,576GB × $0.01 = $10,485.76</td><td>$10,485.76</td></tr>
+<tr><td>공급자 데이터 처리 요금</td><td>1,048,576GB × $0.006 = $6,291.46</td><td>$6,291.46</td></tr>
+<tr><td>월 합계</td><td>약 $16,796</td><td>약 $16,872</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 월 1PB를 처리하는 VPC 리소스 연결의 방식별 비용(서울 리전)</p>
+<p>두 방식 모두 비용의 대부분은 처리 요금입니다. 소비자 쪽 $0.01와 공급자 쪽 $0.006를 합친 GB당 $0.016는 Transit Gateway의 $0.02보다 낮습니다. 대신 리소스 단위로만 연결이 열리므로 라우팅 연결이 필요한 워크로드에는 맞지 않습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig03-vpc-endpoint-resource-gw-pricing.png" alt="리소스 엔드포인트, 서비스 네트워크 엔드포인트, VPC 연결의 요금 지점" width="3448" height="1934" loading="lazy"></div><figcaption><b>그림 3.</b> 리소스 엔드포인트, 서비스 네트워크 엔드포인트, VPC 연결의 요금 지점</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Amazon VPC Lattice 서비스</h2></header><div class="prose">
+<p>VPC Lattice 서비스는 리스너, 규칙, 대상 그룹으로 구성되는 애플리케이션 계층의 연결 단위입니다. EC2, ECS, EKS, Lambda, ALB를 대상으로 등록하고 HTTP, HTTPS, TLS 리스너로 노출합니다. 요금은 세 가지입니다. 서비스당 시간당 $0.0325, 서비스가 받은 요청과 응답을 합한 처리 GB당 $0.0325, 그리고 요청 요금입니다. 요청 요금은 서비스마다 시간당 처음 30만 건이 무료이고 이후 100만 건당 $0.13입니다. TLS 리스너는 HTTP 요청 대신 TCP 연결 수로 계산합니다. AZ 간 전송은 처리 요금에 포함되어 별도로 과금되지 않습니다. VPC 연결과 서비스 네트워크 엔드포인트에는 요금이 없습니다.</p>
+<p>표 6은 서비스 하나가 월 1PB를 처리하고 월 1억 건의 요청을 받는 경우를 계산한 결과입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>요금 항목</th><th>계산</th><th>월 비용</th></tr>
+</thead>
+<tbody>
+<tr><td>서비스 시간당 요금</td><td>730 × $0.0325</td><td>$23.73</td></tr>
+<tr><td>데이터 처리 요금</td><td>1,048,576GB × $0.0325</td><td>$34,078.72</td></tr>
+<tr><td>요청 요금</td><td>시간당 평균 약 13.7만 건으로 무료 구간 이내</td><td>$0</td></tr>
+<tr><td>월 합계</td><td></td><td>약 $34,102</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 월 1PB, 1억 요청을 처리하는 VPC Lattice 서비스의 비용(서울 리전)</p>
+<p>요청 요금은 시간 단위로 계산되므로 트래픽이 특정 시간대에 몰리면 발생합니다. 같은 1억 건이 100시간에 집중되면 시간당 100만 건이 되어 30만 건을 넘는 70만 건 × 100시간에 $9.10가 과금됩니다. 처리 요금 $0.0325는 Transit Gateway의 $0.02보다 높습니다. 대신 소비자 VPC마다 만들어야 했던 NLB와 인터페이스 엔드포인트가 사라집니다. 인증 정책과 L7 라우팅도 서비스에 포함됩니다. 트래픽이 적고 서비스 수가 많은 마이크로서비스 환경에서는 서비스당 시간 요금($23.73)이 비용의 중심입니다. 트래픽이 큰 서비스에서는 처리 요금이 중심이 됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig04-vpc-lattice-pricing.png" alt="VPC Lattice 서비스를 거치는 트래픽의 요금 지점" width="3450" height="1934" loading="lazy"></div><figcaption><b>그림 4.</b> VPC Lattice 서비스를 거치는 트래픽의 요금 지점</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>AWS Cloud WAN</h2></header><div class="prose">
+<p>Cloud WAN은 여러 리전과 온프레미스를 하나의 정책으로 연결하는 글로벌 네트워크 서비스입니다. 리전마다 코어 네트워크 엣지(Core Network Edge, CNE)를 배치하고 VPC, VPN, Direct Connect Gateway, SD-WAN을 연결합니다. 요금은 네 가지입니다. CNE당 시간당 $0.50(모든 리전 동일), 연결당 시간당 요금(서울 $0.09, us-east-1 $0.065), 연결에서 CNE로 보낸 GB당 처리 요금 $0.02(모든 리전 동일)가 있습니다. 네 번째는 CNE와 Transit Gateway 사이의 피어링 연결 시간당 요금입니다. CNE에서 연결로 나가는 방향과 CNE와 Transit Gateway 피어링 구간에는 처리 요금이 없습니다. 피어링 구간에는 대신 데이터 전송 요금이 과금됩니다. Cloud WAN 요금 페이지의 예시 기준으로 CNE에서 Transit Gateway로 보내는 방향은 GB당 $0.01입니다. Transit Gateway에서 CNE로 보내는 방향은 Transit Gateway 송신 $0.01과 CNE 수신 $0.01을 합쳐 GB당 $0.02입니다.</p>
+<p>CNE 시간 요금은 리전당 월 $365이고 서울 리전의 VPC 연결 하나는 월 730 × $0.09 = $65.70입니다. 두 요금은 트래픽이 없어도 부과되므로 CNE 수와 연결 수가 비용의 기준선이 됩니다. 서울에 VPC 5개를 연결하면 연결 요금만 월 $328.50로 CNE 하나의 비용과 유사합니다. 서울과 us-east-1에 CNE를 두고 서울 VPC에서 us-east-1 VPC로 1GB를 보내면 처리 요금 $0.02와 리전 간 전송 요금 $0.08를 합쳐 $0.10입니다. Transit Gateway Peering과 같은 금액입니다. 차이는 고정 요금과 운영 모델입니다. Cloud WAN은 세그먼트 기반 정책으로 리전 간 라우팅과 격리를 자동화하고 Transit Gateway는 리전마다 라우팅 테이블을 직접 관리합니다.</p>
+<p>계정이 여러 개일 때 요금은 나뉘어 청구됩니다. Cloud WAN을 만든 계정이 CNE, VPN 연결, SD-WAN 연결과 VPN 트래픽의 처리 요금을 부담합니다. VPC를 소유한 계정이 자기 VPC 연결과 그 VPC에서 나온 트래픽의 처리 요금을 부담합니다. Direct Connect Gateway 소유 계정이 Direct Connect 연결의 시간당 요금과 처리 요금을 부담합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig05-cloud-wan-pricing.png" alt="AWS Cloud WAN 코어 네트워크를 거치는 트래픽의 요금 지점" width="3446" height="1934" loading="lazy"></div><figcaption><b>그림 5.</b> AWS Cloud WAN 코어 네트워크를 거치는 트래픽의 요금 지점</figcaption></figure>
+</div></section>
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>온프레미스 연결</h2></header><div class="prose">
+<h3>7.1 AWS Site-to-Site VPN</h3>
+<p>Site-to-Site VPN은 인터넷 위에 IPsec 터널을 만드는 방식입니다. 연결당 시간당 $0.05가 과금됩니다. 온프레미스로 나가는 트래픽에는 인터넷 DTO 요금 $0.126가 그대로 적용됩니다. VPN을 Transit Gateway에 연결하면 Transit Gateway 연결 요금 $0.07/시간과 처리 요금 $0.02가 더해집니다. 구축이 빠르고 초기 비용이 없어 소규모 사이트나 Direct Connect의 백업 경로로 적합합니다.</p>
+<h3>7.2 AWS Direct Connect와 Direct Connect Gateway</h3>
+<p>Direct Connect는 AWS Direct Connect 로케이션에서 AWS 네트워크로 직접 연결하는 전용 회선입니다. 요금은 포트 시간과 DTO 두 가지로 구성되며 DTI는 무료입니다. 전용 연결(Dedicated Connection)의 포트 요금은 1Gbps 시간당 $0.30, 10Gbps $2.25, 100Gbps $22.50입니다. 파트너가 제공하는 호스팅 연결(Hosted Connection)은 50Mbps 시간당 $0.03부터 시작합니다.</p>
+<p>DTO 요금은 출발 리전과 Direct Connect 로케이션의 지역 조합으로 정해집니다. 서울 리전에서 한국 내 Direct Connect 로케이션으로 나가는 트래픽은 GB당 $0.041입니다. 같은 서울 리전이라도 미국의 Direct Connect 로케이션으로 나가면 $0.09입니다. 반대로 us-east-1 리전에서 한국 로케이션으로 나가면 $0.0491입니다.</p>
+<p>Direct Connect Gateway(DXGW)는 하나의 Direct Connect 연결을 여러 리전의 VPC나 Transit Gateway에 연결하는 글로벌 리소스입니다. DXGW 자체에는 추가 요금이 없고 여러 계정에서 공유해도 요금이 과금되지 않습니다. DXGW로 여러 리전을 하나의 연결에 묶으면 DTO는 트래픽이 출발하는 리전과 회선이 종단하는 로케이션의 조합으로 정해집니다. 서울 로케이션에 종단한 회선으로 us-east-1 VPC의 데이터를 받으면 $0.0491가 과금되는 식입니다.</p>
+<p>DXGW를 Transit Gateway에 연결하면 Transit Gateway 쪽에 Direct Connect 연결 시간 요금 $0.07와 온프레미스에서 들어오는 트래픽의 처리 요금 $0.02가 추가됩니다. 가상 프라이빗 게이트웨이(VGW)에 직접 연결하면 이 요금이 없습니다. 비용만 보면 각 VPC의 VGW를 DXGW에 직접 연결하는 구성이 유리합니다. 다만 DXGW 하나에 연결할 수 있는 VGW 수에 할당량(기본 20개, Transit Gateway는 6개)이 있고 VPC마다 연결과 라우팅을 따로 관리해야 합니다. Transit Gateway를 거치는 구성은 연결 하나로 수십 개 VPC를 묶고 라우팅을 중앙에서 관리하는 대신 처리 요금 $0.02와 연결 시간 요금이 추가됩니다. 관리 편의성과 비용 사이의 트레이드오프를 고려해 선택하는 것을 권장합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig06-direct-connect-pricing.png" alt="Direct Connect Gateway를 VGW에 직접 연결할 때와 Transit Gateway를 거칠 때의 요금 지점" width="3446" height="1936" loading="lazy"></div><figcaption><b>그림 6.</b> Direct Connect Gateway를 VGW에 직접 연결할 때와 Transit Gateway를 거칠 때의 요금 지점</figcaption></figure>
+<p>Direct Connect SiteLink를 활성화하면 Direct Connect 로케이션 사이를 AWS 백본으로 직접 연결할 수 있습니다. SiteLink에는 활성화한 가상 인터페이스(VIF)당 시간당 $0.50가 과금됩니다. 여기에 출발지와 목적지 지역 조합에 따른 데이터 전송 요금이 별도로 과금됩니다. 한국과 미국 사이는 양방향 모두 GB당 $0.09입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig07-onprem-connect-options-pricing.png" alt="Site-to-Site VPN과 Direct Connect, Direct Connect Gateway 경로별 요금 구성" width="3444" height="1930" loading="lazy"></div><figcaption><b>그림 7.</b> Site-to-Site VPN과 Direct Connect, Direct Connect Gateway 경로별 요금 구성</figcaption></figure>
+<p>두 방식의 손익 분기점은 간단히 계산할 수 있습니다. 1Gbps 전용 연결의 포트 요금은 월 약 $219입니다. VPN 연결 요금은 월 약 $36.5입니다. GB당 DTO 차이는 $0.085이므로 온프레미스로 나가는 트래픽이 월 약 2.1TB를 넘으면 Direct Connect의 총비용이 VPN보다 낮아집니다. 월 5TB를 내보내는 워크로드라면 VPN은 약 $682, Direct Connect는 약 $429입니다. 이 계산에는 Direct Connect 파트너의 회선 요금과 교차 연결(Cross Connect) 비용, 그리고 포트 이중화가 빠져 있습니다. Site-to-Site VPN 연결 하나는 터널 두 개를 제공하지만 Direct Connect 포트 하나는 단일 장애점이므로 AWS의 복원력 권고를 따르면 최소 2개 포트가 필요합니다. 2개 포트면 포트 요금이 월 약 $438로 늘어 손익 분기점은 약 4.6TB가 됩니다. 실제 견적에는 이 항목들을 더해서 비교하는 것을 권장합니다.</p>
+</div></section>
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>서울과 us-east-1을 연결하는 경로별 비용</h2></header><div class="prose">
+<p>리전 간 트래픽에는 어느 경로를 사용하든 출발 리전 기준의 리전 간 전송 요금이 과금됩니다. 경로에 따라 달라지는 것은 처리 요금과 고정 요금입니다. 표 7에 서울 VPC와 us-east-1 VPC 사이에 1GB를 보낼 때 트래픽 요금을 경로별로 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>경로</th><th>ap-northeast-2<br> →<br> us-east-1<br> (GB당)</th><th>us-east-1<br> →<br> ap-northeast-2<br> (GB당)</th><th>고정 요금</th></tr>
+</thead>
+<tbody>
+<tr><td>리전 간 VPC Peering</td><td>$0.08</td><td>$0.02</td><td>없음</td></tr>
+<tr><td>Transit Gateway Peering</td><td>$0.02 + $0.08 = $0.10</td><td>$0.02 + $0.02 = $0.04</td><td>양쪽 피어링 연결 시간 요금(서울 $0.07, us-east-1 $0.05)</td></tr>
+<tr><td>Cloud WAN(CNE 2개)</td><td>$0.02 + $0.08 = $0.10</td><td>$0.02 + $0.02 = $0.04</td><td>CNE 2 × $0.50/시간 + 연결당 시간 요금(서울 $0.09, us-east-1 $0.065)</td></tr>
+<tr><td>PrivateLink 리전 간 엔드포인트(소비자 서울)</td><td>요청 $0.01 + $0.08 = $0.09</td><td>응답 $0.01 + $0.02 = $0.03</td><td>엔드포인트 AZ당 $0.013/시간 + 공급자 원격 리전당 $0.05/시간. 양방향 전송 요금은 소비자 계정에 청구</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 7.</b> 서울과 us-east-1 사이 트래픽의 경로별 GB당 요금</p>
+<p>표에서 방향에 따른 차이가 가장 큽니다. 서울에서 us-east-1로 보내는 1GB는 어느 경로든 최소 $0.08이고 반대 방향은 $0.02입니다. 대량 복제나 백업이라면 us-east-1에서 서울로 보내는 방향으로 설계하는 것이 4분의 1 비용입니다. 처리 요금 $0.02가 과금되는 Transit Gateway와 Cloud WAN은 리전 간 VPC Peering보다 GB당 $0.02 비싸지만 연결 수와 라우팅 관리가 단순해지고 세그먼트 격리가 가능합니다.</p>
+</div></section>
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>3부 체크리스트</h2></header><div class="prose">
+<div class="scroll"><table>
+<thead>
+<tr><th>점검 항목</th><th>비용 요인</th><th>조치</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC 두세 개 연결</td><td>Peering AZ 간 양방향 각 $0.01</td><td>같은 AZ(AZ ID 기준) 배치로 $0</td></tr>
+<tr><td>VPC 수십 개 연결</td><td>TGW 연결 $0.07/시간 + 처리 $0.02</td><td>연결 수와 처리량으로 총비용 산정, AZ 간 요금은 없음</td></tr>
+<tr><td>서비스 하나를 여러 VPC에서 접근</td><td>소비자 VPC마다 인터페이스 엔드포인트 $0.013/AZ/시간</td><td>소비자가 많으면 VPC Lattice 서비스 네트워크 검토</td></tr>
+<tr><td>RDS, EC2 등 리소스 공유</td><td>리소스 엔드포인트 $0.026/시간 또는 리소스 구성 연결 $0.13/시간</td><td>소비자 1~4개는 리소스 엔드포인트, 그 이상은 서비스 네트워크</td></tr>
+<tr><td>VPC Lattice 서비스</td><td>서비스당 $0.0325/시간 + 처리 $0.0325 + 요청</td><td>서비스 수와 처리량으로 산정, 요청은 시간당 30만 건 무료 구간 확인</td></tr>
+<tr><td>글로벌 네트워크</td><td>CNE 리전당 $365/월 + 연결당 $0.09/시간(서울) + 처리 $0.02</td><td>CNE 배치 리전 수와 연결 수 최소화, TGW 피어링 구간 전송 요금(CNE → TGW $0.01, TGW → CNE $0.02) 확인</td></tr>
+<tr><td>리전 간 트래픽 방향</td><td>서울 → us-east-1 $0.08, 반대 $0.02</td><td>대량 전송은 us-east-1에서 서울 방향으로 설계</td></tr>
+<tr><td>온프레미스로 나가는 트래픽</td><td>VPN $0.126, DX $0.041</td><td>월 약 2TB 이상이면 Direct Connect</td></tr>
+<tr><td>Direct Connect Gateway 경유 다른 리전 접근</td><td>출발 리전 × 로케이션 조합 DTO</td><td>us-east-1 → 한국 로케이션 $0.0491 등 조합별 확인</td></tr>
+<tr><td>DXGW를 TGW에 연결</td><td>TGW 연결 $0.07/시간 + 처리 $0.02</td><td>관리 편의성과 비용의 트레이드오프 검토, VPC 수가 적으면 VGW 직접 연결</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 8.</b> 3부 설계 체크리스트(서울 리전 요금 기준)</p>
+</div></section>
+<section class="sec" id="ko-s11"><header class="sec-head"><h2>마치며</h2></header><div class="prose">
+<p>3부에서는 VPC 경계와 리전 경계를 넘는 트래픽의 요금과 연결 방식별 비용을 살펴보았습니다. 시리즈 전체의 핵심은 다음 세 가지입니다.</p>
+<ol>
+<li>네트워크 비용은 방향, 경계, 경로 위의 서비스 세 요소로 정해집니다. 인바운드는 대부분 무료입니다. AZ 간 전송은 양방향에 각각 $0.01가 과금됩니다. 리전 간 전송은 출발 리전 기준이라 서울에서 나가는 트래픽이 들어오는 트래픽보다 4배 비쌉니다. NAT Gateway, Transit Gateway, VPC Lattice, Cloud WAN 같은 관리형 서비스는 이 위에 처리 요금을 더합니다.</li>
+<li>연결 방식은 트래픽 요금이 아니라 고정 요금과 운영 모델로 선택합니다. 리전 간 전송 요금은 어느 경로든 같습니다. Peering은 고정 요금이 없고 Transit Gateway와 Cloud WAN은 처리 요금 $0.02와 연결 요금이 과금됩니다. PrivateLink와 VPC Lattice는 소비자 수와 리소스 수 중 어느 쪽이 많은지에 따라 유리한 방식이 바뀝니다.</li>
+<li>가장 큰 비용 절감은 경로를 변경할 때 얻을 수 있습니다. 1부의 게이트웨이 엔드포인트와 CloudFront, 2부의 AZ 독립 구성과 Topology Aware Routing, 3부의 같은 AZ Peering과 복제 방향 설계가 모두 같은 원리입니다. 트래픽이 지나는 경로를 그려 보고 화살표마다 전송 요금과 처리 요금을 적어 보면 비용이 어디서 발생하는지 식별할 수 있습니다.</li>
+</ol>
+<p>데이터 전송 비용은 서비스 요금표를 외우는 문제가 아니라 트래픽이 어떤 경로를 지나는지 그려 보는 문제입니다. 새 아키텍처를 검토할 때 세 편의 체크리스트를 옆에 두고 화살표마다 요금을 적어 보시기를 권고드립니다. 서울 리전에서 워크로드를 운영하는 분들께 실질적인 참고가 되기를 바랍니다. (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-01/" target="_blank" rel="noopener">1부 링크</a>, <a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">2부 링크</a>)</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>This post is for architects and network engineers who design or operate networks that connect multiple VPCs, accounts, and on-premises environments. It covers which charges apply to traffic that crosses VPC and Region boundaries and how cost differs by connectivity option.</p>
+<p>Part 1 showed that AWS network cost is determined by two components, data transfer charges and data processing charges, and looked at the pricing of internet gateways, NAT gateways, and VPC endpoints. Part 2 covered the rule that traffic crossing an Availability Zone (AZ) boundary within a Region is charged $0.01 to the resource on each side, and how to reduce that charge with load balancers, databases, and Amazon EKS. Part 3 covers traffic that crosses VPC boundaries.</p>
+<ul>
+<li>Part 1: The structure of data transfer charges and data processing charges, how to find these costs on your bill, internet gateways, public IPv4 addresses, NAT gateways, VPC endpoints, and Amazon CloudFront (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-01/" target="_blank" rel="noopener">link</a>)</li>
+<li>Part 2: Traffic within a Region. Inter-AZ transfer rules, Application Load Balancer and Network Load Balancer, the database and cache tiers (including AZ affinity in Valkey GLIDE), and Amazon EKS (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">link</a>)</li>
+<li><b>Part 3 (this post): Inter-VPC connectivity and hybrid. VPC peering, AWS Transit Gateway, AWS PrivateLink and Amazon VPC Lattice, AWS Cloud WAN, and AWS Direct Connect</b></li>
+</ul>
+<p>There are five ways to connect VPCs: VPC peering, AWS Transit Gateway, AWS PrivateLink, Amazon VPC Lattice, and AWS Cloud WAN. There are two ways to connect to on-premises environments: AWS Site-to-Site VPN and AWS Direct Connect. The options differ in their hourly charge, their data processing charge, and whether the inter-AZ charge is waived. This post lays out the pricing structure of each connectivity option. It then compares cost by path for connecting the Asia Pacific (Seoul) Region with the US East (N. Virginia) Region (us-east-1).</p>
+<p>Prices in this post are based on the public pricing pages for the Seoul Region (ap-northeast-2). Unless noted otherwise, they are in US dollars per GB. Calculations use 730 hours per month, 1 TB = 1,024 GB, and 1 PB = 1,048,576 GB. Prices are subject to change, so I recommend checking the latest prices on each service pricing page before you factor them into a design.</p>
+</div></section>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Pricing structure of VPC connectivity options at a glance</h2></header><div class="prose">
+<p>The five connectivity options differ in where charges apply. Table 1 summarizes the pricing elements of each option, and Table 2 summarizes characteristics that affect the choice, such as whether overlapping CIDRs are allowed. Detailed pricing and examples follow in the later sections.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Option</th><th>Hourly charge</th><th>Data processing charge</th><th>Inter-AZ transfer charge</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC peering</td><td>None</td><td>None</td><td>Same AZ $0, different AZs $0.01 in each direction</td></tr>
+<tr><td>Transit Gateway</td><td>$0.07 per attachment</td><td>$0.02</td><td>None</td></tr>
+<tr><td>PrivateLink interface endpoint</td><td>$0.013 per AZ</td><td>$0.01 (first 1 PB per month)</td><td>None</td></tr>
+<tr><td>VPC Lattice service</td><td>$0.0325 per service</td><td>$0.0325 + request charge</td><td>None (included in the processing charge)</td></tr>
+<tr><td>VPC Lattice VPC resource</td><td>$0.13 per resource configuration association or $0.026 per resource endpoint</td><td>Consumer $0.01 + provider $0.006</td><td>None</td></tr>
+<tr><td>Cloud WAN</td><td>$0.50 per core network edge, $0.09 per attachment</td><td>$0.02</td><td>None</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Pricing structure by VPC connectivity option (Seoul Region)</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Option</th><th>Overlapping CIDRs</th><th>Supported protocols</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC peering</td><td>Not allowed</td><td>All IP traffic</td></tr>
+<tr><td>Transit Gateway</td><td>Not allowed</td><td>All IP traffic</td></tr>
+<tr><td>PrivateLink interface endpoint</td><td>Allowed</td><td>TCP, UDP (from consumer to provider)</td></tr>
+<tr><td>VPC Lattice service</td><td>Allowed</td><td>HTTP, HTTPS, TLS</td></tr>
+<tr><td>VPC Lattice VPC resource</td><td>Allowed</td><td>TCP</td></tr>
+<tr><td>Cloud WAN</td><td>Not allowed</td><td>All IP traffic</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Key characteristics by VPC connectivity option</p>
+<p>For traffic that crosses a Region boundary, the inter-Region data transfer charge of the source Region applies as is, whichever option you use. Sending from Seoul to us-east-1 costs $0.08, and the opposite direction costs $0.02. What the connectivity option changes is the processing charge and the fixed charge added on top of this.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig01-vpc-connect-options-pricing.png" alt="Five ways to connect VPCs and where charges apply" width="3450" height="1938" loading="lazy"></div><figcaption><b>Figure 1.</b> Five ways to connect VPCs and where charges apply</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>VPC peering</h2></header><div class="prose">
+<p>VPC peering has no hourly charge and no processing charge. Since May 2021, peering traffic that stays within the same AZ has been free. Traffic between different AZs is charged $0.01 in each direction, and traffic between Regions is charged the inter-Region rate of the source Region. Since April 2025, inter-AZ peering traffic has been recorded under a separate usage type, <code>VpcPeering-In/Out-Bytes</code>, so you can identify it directly on your bill.</p>
+<p>There is one way to reduce cost with peering. Place the resources that communicate with each other in the same AZ. If the accounts differ, you must align the subnets by AZ ID (in the <code>apne2-az1</code> format). Peering does not support transitive routing, so the number of connections grows rapidly as you add VPCs. It is the cheapest and simplest choice when you have two or three VPCs.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>AWS Transit Gateway</h2></header><div class="prose">
+<p>Transit Gateway charges $0.07 per hour per attachment and $0.02 per GB sent from an attachment to the Transit Gateway. Since April 2022, there has been no additional transfer charge for traffic between different AZs within the same Region. The data processing charge is billed to the owner of the VPC that sends the traffic.</p>
+<p>Connecting to another Region with Transit Gateway peering incurs three charges. They are the peering attachment hourly charge on both Transit Gateways (Seoul $0.07, us-east-1 $0.05), the $0.02 processing charge on the source Transit Gateway, and the inter-Region transfer charge of the source Region. The destination Transit Gateway does not charge data processing for data that arrives over the peering attachment. Sending 1 GB from a Seoul VPC to a us-east-1 VPC costs $0.02 + $0.08 = $0.10, and the opposite direction costs $0.02 + $0.02 = $0.04.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig02-vpc-peering-tgw-pricing.png" alt="Pricing structure for traffic through VPC peering and Transit Gateway" width="3448" height="1934" loading="lazy"></div><figcaption><b>Figure 2.</b> Pricing structure for traffic through VPC peering and Transit Gateway</figcaption></figure>
+<p>Table 3 shows the cost when 10 TB per month is assumed to flow between two VPCs.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Configuration</th><th>Hourly charge</th><th>Traffic charge</th><th>Monthly total</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC peering, communication within the same AZ only</td><td>$0</td><td>$0</td><td>$0</td></tr>
+<tr><td>VPC peering, communication across AZs</td><td>$0</td><td>10,240 GB × $0.02 = $204.80</td><td>About $205</td></tr>
+<tr><td>Transit Gateway (2 attachments)</td><td>2 × 730 × $0.07 = $102.20</td><td>10,240 GB × $0.02 = $204.80</td><td>About $307</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Cost by connectivity option when 10 TB per month flows between two VPCs (Seoul Region)</p>
+<p>If you have two or three VPCs and can place the communicating resources in the same AZ, peering is the cheapest. Once you grow to dozens of VPCs, the centralized routing of Transit Gateway works in your favor. Choosing Transit Gateway removes the inter-AZ charge, but all traffic incurs the $0.02 processing charge. This amount equals the sum of the charges for sending 1 GB one way across AZs over VPC peering, where the sending side and the receiving side are each charged $0.01 per GB. Moving to Transit Gateway reduces the number of connections and the operational burden, and the traffic charge stays the same.</p>
+</div></section>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>AWS PrivateLink and VPC resource sharing</h2></header><div class="prose">
+<p>Peering and Transit Gateway connect IP routing between VPCs. PrivateLink and VPC Lattice do not connect routing and instead open access at the service or resource level. CIDRs can overlap, and connections open only from the consumer to the provider. Charges also apply per endpoint and per service rather than for routing.</p>
+<h3>4.1 Sharing your own services through PrivateLink interface endpoints</h3>
+<p>When you place a service behind an NLB in the provider VPC and register it as an endpoint service, consumer VPCs connect to that service through interface endpoints. The consumer pays $0.013 per hour for each AZ where an endpoint is deployed and $0.01 per GB processed. The provider pays the NLB hourly charge and the NLCU charge. Since April 2022, there has been no transfer charge for inter-AZ traffic through interface endpoints. More recently, PrivateLink also supports UDP traffic and connections to endpoint services in other Regions. For cross-Region connections, the consumer-side endpoint hourly charge and processing charge are the same as within a Region, and the inter-Region transfer charge of the source Region is added on top. The processing charge applies to both the request and the response, and the inter-Region transfer charges for both directions are all billed to the consumer account that owns the endpoint. The provider side has no inter-Region transfer charge, but it is charged an additional $0.05 per hour (Seoul Region pricing) for each remote Region that the endpoint service accepts connections from. That is $36.50 per month for one remote Region.</p>
+<p>The cost of this approach grows in proportion to the number of consumer VPCs. With 20 consumer VPCs that each place endpoints in 2 AZs, the hourly charge alone is 20 × 2 × 730 × $0.013 = $379.60 per month. In an architecture where many VPCs access the same service, VPC Lattice, covered next, is an alternative that reduces this fixed cost.</p>
+<h3>4.2 Three ways to connect to VPC resources</h3>
+<p>VPC Lattice lets other VPCs or accounts privately access VPC resources such as RDS instances, EC2 instances, IP addresses, and domain names. In the provider VPC, you set up a resource gateway and a resource configuration that defines which resources to expose. On the consumer side, there are three ways to connect.</p>
+<ul>
+<li><b>Resource endpoint (RE)</b>: Built on PrivateLink, it creates an ENI in the consumer VPC and connects to a single resource configuration.</li>
+<li><b>Service network endpoint (SNE)</b>: It creates an ENI in the consumer VPC and connects to a VPC Lattice service network. A single endpoint gives access to the multiple resources and services that belong to the service network.</li>
+<li><b>VPC association</b>: It connects the consumer VPC directly to the service network without an ENI. A link-local range provided by AWS is added to the route table automatically.</li>
+</ul>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Resource endpoint</th><th>Service network endpoint</th><th>VPC association</th></tr>
+</thead>
+<tbody>
+<tr><td>Endpoint hourly charge</td><td>$0.026</td><td>None</td><td>None</td></tr>
+<tr><td>Charge for associating a resource configuration with a service network</td><td>Not applicable</td><td>$0.13 per resource configuration</td><td>$0.13 per resource configuration</td></tr>
+<tr><td>Consumer data processing charge</td><td>$0.01 (first 1 PB per month)</td><td>$0.01 (first 1 PB per month)</td><td>$0.01 (first 1 PB per month)</td></tr>
+<tr><td>Provider data processing charge</td><td>$0.006</td><td>$0.006</td><td>$0.006</td></tr>
+<tr><td>Number per VPC</td><td>Multiple</td><td>Multiple</td><td>1</td></tr>
+<tr><td>Access from on premises</td><td>Supported</td><td>Supported</td><td>Not supported</td></tr>
+<tr><td>Resources accessible per endpoint</td><td>1</td><td>All resources and services in the service network</td><td>All resources and services in the service network</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Pricing and characteristics of the three ways to connect to VPC resources (Seoul Region)</p>
+<p>The processing charge is the same for all three. The difference is where the fixed charge applies. With resource endpoints, the endpoint charge applies to every consumer VPC. With the service network options, the association charge applies to every resource configuration, regardless of the number of consumer VPCs. If one consumer VPC accesses one resource, a resource endpoint costs $18.98 per month, which is cheaper than the $94.90 association charge. With ten consumer VPCs, the resource endpoint charge grows to $189.80 while the service network option stays at $94.90. The fewer resources you share and the more consumers you have, the more the service network option works in your favor.</p>
+<p>Table 5 shows the calculation for one consumer VPC that exchanges 1 PB per month with a single Aurora cluster.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Charge item</th><th>Resource endpoint option</th><th>Service network option</th></tr>
+</thead>
+<tbody>
+<tr><td>Endpoint hourly charge</td><td>730 × $0.026 = $18.98</td><td>$0</td></tr>
+<tr><td>Resource configuration association charge</td><td>$0</td><td>730 × $0.13 = $94.90</td></tr>
+<tr><td>Consumer data processing charge</td><td>1,048,576 GB × $0.01 = $10,485.76</td><td>$10,485.76</td></tr>
+<tr><td>Provider data processing charge</td><td>1,048,576 GB × $0.006 = $6,291.46</td><td>$6,291.46</td></tr>
+<tr><td>Monthly total</td><td>About $16,796</td><td>About $16,872</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Cost by option for a VPC resource connection that processes 1 PB per month (Seoul Region)</p>
+<p>With both options, most of the cost is the processing charge. The $0.01 on the consumer side and the $0.006 on the provider side add up to $0.016 per GB, which is lower than the $0.02 of Transit Gateway. In exchange, connections open only at the resource level, so this does not fit workloads that need routed connectivity.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig03-vpc-endpoint-resource-gw-pricing.png" alt="Charge points for resource endpoints, service network endpoints, and VPC associations" width="3448" height="1934" loading="lazy"></div><figcaption><b>Figure 3.</b> Charge points for resource endpoints, service network endpoints, and VPC associations</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Amazon VPC Lattice services</h2></header><div class="prose">
+<p>A VPC Lattice service is an application-layer unit of connectivity made up of listeners, rules, and target groups. You register EC2, ECS, EKS, Lambda, and ALB as targets and expose them through HTTP, HTTPS, and TLS listeners. There are three charges. They are $0.0325 per hour per service, $0.0325 per GB processed across the requests and responses the service handles, and a request charge. For the request charge, the first 300,000 requests per hour are free for each service, and every 1 million requests after that cost $0.13. TLS listeners are counted by the number of TCP connections instead of HTTP requests. Inter-AZ transfer is included in the processing charge and is not charged separately. There is no charge for VPC associations or service network endpoints.</p>
+<p>Table 6 shows the calculation for a single service that processes 1 PB per month and receives 100 million requests per month.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Charge item</th><th>Calculation</th><th>Monthly cost</th></tr>
+</thead>
+<tbody>
+<tr><td>Service hourly charge</td><td>730 × $0.0325</td><td>$23.73</td></tr>
+<tr><td>Data processing charge</td><td>1,048,576 GB × $0.0325</td><td>$34,078.72</td></tr>
+<tr><td>Request charge</td><td>About 137,000 requests per hour on average, within the free allowance</td><td>$0</td></tr>
+<tr><td>Monthly total</td><td></td><td>About $34,102</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Cost of a VPC Lattice service that processes 1 PB and 100 million requests per month (Seoul Region)</p>
+<p>The request charge is calculated per hour, so it appears when traffic is concentrated in particular hours. If the same 100 million requests are concentrated in 100 hours, that is 1 million requests per hour, and the 700,000 requests above the first 300,000 × 100 hours are charged $9.10. The $0.0325 processing charge is higher than the $0.02 of Transit Gateway. In exchange, the NLB and the interface endpoints that you had to create for every consumer VPC go away. Authentication policies and L7 routing are also included in the service. In a microservices environment with low traffic and many services, the hourly charge per service ($23.73) is the main part of the cost. For high-traffic services, the processing charge becomes the main part.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig04-vpc-lattice-pricing.png" alt="Charge points for traffic through a VPC Lattice service" width="3450" height="1934" loading="lazy"></div><figcaption><b>Figure 4.</b> Charge points for traffic through a VPC Lattice service</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>AWS Cloud WAN</h2></header><div class="prose">
+<p>Cloud WAN is a global network service that connects multiple Regions and on-premises environments under a single policy. You deploy a core network edge (CNE) in each Region and attach VPCs, VPNs, Direct Connect gateways, and SD-WAN. There are four charges. They include $0.50 per hour per CNE (the same in all Regions), an hourly charge per attachment (Seoul $0.09, us-east-1 $0.065), and a $0.02 processing charge per GB sent from an attachment to the CNE (the same in all Regions). The fourth is the hourly charge for the peering attachment between a CNE and a Transit Gateway. There is no processing charge in the direction from the CNE out to an attachment or on the peering segment between a CNE and a Transit Gateway. The peering segment is charged for data transfer instead. Based on the example on the Cloud WAN pricing page, the direction from the CNE to the Transit Gateway costs $0.01 per GB. In the direction from the Transit Gateway to the CNE, $0.01 for Transit Gateway egress and $0.01 for CNE ingress add up to $0.02 per GB.</p>
+<p>The CNE hourly charge comes to $365 per month per Region, and one VPC attachment in the Seoul Region costs 730 × $0.09 = $65.70 per month. Both charges apply even when there is no traffic, so the number of CNEs and the number of attachments set the cost baseline. Attaching 5 VPCs in Seoul costs $328.50 per month in attachment charges alone, which is close to the cost of one CNE. With CNEs in Seoul and us-east-1, sending 1 GB from a Seoul VPC to a us-east-1 VPC combines the $0.02 processing charge and the $0.08 inter-Region transfer charge for a total of $0.10. This is the same amount as Transit Gateway peering. The difference is the fixed charges and the operating model. Cloud WAN automates inter-Region routing and isolation with segment-based policies, while with Transit Gateway you manage the route tables yourself in each Region.</p>
+<p>With multiple accounts, the charges are billed separately. The account that created the Cloud WAN core network pays for the CNEs, the VPN attachments, the SD-WAN attachments, and the processing charge for VPN traffic. The account that owns a VPC pays for its own VPC attachment and the processing charge for traffic that leaves that VPC. The account that owns the Direct Connect gateway pays the hourly charge and the processing charge for the Direct Connect attachment.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig05-cloud-wan-pricing.png" alt="Charge points for traffic through an AWS Cloud WAN core network" width="3446" height="1934" loading="lazy"></div><figcaption><b>Figure 5.</b> Charge points for traffic through an AWS Cloud WAN core network</figcaption></figure>
+</div></section>
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>On-premises connectivity</h2></header><div class="prose">
+<h3>7.1 AWS Site-to-Site VPN</h3>
+<p>Site-to-Site VPN builds IPsec tunnels over the internet. It is charged $0.05 per hour per connection. Traffic going out to on premises is charged the internet DTO rate of $0.126 as is. Attaching the VPN to a Transit Gateway adds the Transit Gateway attachment charge of $0.07/hour and the $0.02 processing charge. It is quick to set up and has no upfront cost, which makes it a good fit for small sites or as a backup path for Direct Connect.</p>
+<h3>7.2 AWS Direct Connect and Direct Connect gateway</h3>
+<p>Direct Connect is a dedicated line that connects directly to the AWS network from an AWS Direct Connect location. Pricing has two components, port hours and DTO, and DTI is free. The port charge for a dedicated connection is $0.30 per hour for 1 Gbps, $2.25 for 10 Gbps, and $22.50 for 100 Gbps. Hosted connections provided by partners start at $0.03 per hour for 50 Mbps.</p>
+<p>The DTO rate is determined by the combination of the source Region and the geography of the Direct Connect location. Traffic that leaves the Seoul Region through a Direct Connect location in Korea costs $0.041 per GB. From the same Seoul Region, traffic that leaves through a Direct Connect location in the United States costs $0.09. Conversely, traffic that leaves the us-east-1 Region through a location in Korea costs $0.0491.</p>
+<p>A Direct Connect gateway (DXGW) is a global resource that connects a single Direct Connect connection to VPCs or Transit Gateways in multiple Regions. The DXGW itself has no additional charge, and sharing it across multiple accounts incurs no charge either. When you tie multiple Regions to one connection through a DXGW, DTO is determined by the combination of the Region where the traffic originates and the location where the circuit terminates. For example, receiving data from a us-east-1 VPC over a circuit that terminates at a Seoul location is charged $0.0491.</p>
+<p>Attaching a DXGW to a Transit Gateway adds, on the Transit Gateway side, a Direct Connect attachment hourly charge of $0.07 and a $0.02 processing charge for traffic that comes in from on premises. Connecting directly to a virtual private gateway (VGW) has none of these charges. On cost alone, connecting the VGW of each VPC directly to the DXGW is the better configuration. However, there is a quota on the number of VGWs that you can connect to one DXGW (20 by default, and 6 for Transit Gateways), and you have to manage the connections and routing separately for each VPC. The configuration through a Transit Gateway ties dozens of VPCs together with a single attachment and manages routing centrally, but it adds the $0.02 processing charge and the attachment hourly charge. I recommend choosing with the trade-off between manageability and cost in mind.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig06-direct-connect-pricing.png" alt="Charge points when a Direct Connect gateway connects directly to VGWs and when it goes through a Transit Gateway" width="3446" height="1936" loading="lazy"></div><figcaption><b>Figure 6.</b> Charge points when a Direct Connect gateway connects directly to VGWs and when it goes through a Transit Gateway</figcaption></figure>
+<p>Enabling Direct Connect SiteLink lets you connect Direct Connect locations directly to each other over the AWS backbone. SiteLink is charged $0.50 per hour for each virtual interface (VIF) on which it is enabled. On top of that, a data transfer charge that depends on the combination of source and destination geographies is charged separately. Between Korea and the United States, it is $0.09 per GB in both directions.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-networking-dto-dp-03-assets/fig07-onprem-connect-options-pricing.png" alt="Charges by path for Site-to-Site VPN, Direct Connect, and Direct Connect gateway" width="3444" height="1930" loading="lazy"></div><figcaption><b>Figure 7.</b> Charges by path for Site-to-Site VPN, Direct Connect, and Direct Connect gateway</figcaption></figure>
+<p>The break-even point between the two options is simple to calculate. The port charge for a 1 Gbps dedicated connection is about $219 per month. The VPN connection charge is about $36.5 per month. The difference in DTO per GB is $0.085, so once the traffic going out to on premises exceeds about 2.1 TB per month, the total cost of Direct Connect falls below that of VPN. For a workload that sends out 5 TB per month, VPN costs about $682 and Direct Connect costs about $429. This calculation leaves out the circuit charges of the Direct Connect partner, the cross connect cost, and port redundancy. A single Site-to-Site VPN connection provides two tunnels, but a single Direct Connect port is a single point of failure, so following the AWS resiliency recommendations requires at least 2 ports. With 2 ports, the port charge rises to about $438 per month and the break-even point becomes about 4.6 TB. For an actual quote, I recommend adding these items before you compare.</p>
+</div></section>
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Cost by path between Seoul and us-east-1</h2></header><div class="prose">
+<p>For inter-Region traffic, the inter-Region transfer charge of the source Region applies whichever path you use. What varies by path is the processing charge and the fixed charge. Table 7 summarizes the traffic charge by path for sending 1 GB between a Seoul VPC and a us-east-1 VPC.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Path</th><th>ap-northeast-2<br> →<br> us-east-1<br> (per GB)</th><th>us-east-1<br> →<br> ap-northeast-2<br> (per GB)</th><th>Fixed charge</th></tr>
+</thead>
+<tbody>
+<tr><td>Inter-Region VPC peering</td><td>$0.08</td><td>$0.02</td><td>None</td></tr>
+<tr><td>Transit Gateway peering</td><td>$0.02 + $0.08 = $0.10</td><td>$0.02 + $0.02 = $0.04</td><td>Peering attachment hourly charge on both sides (Seoul $0.07, us-east-1 $0.05)</td></tr>
+<tr><td>Cloud WAN (2 CNEs)</td><td>$0.02 + $0.08 = $0.10</td><td>$0.02 + $0.02 = $0.04</td><td>2 CNEs × $0.50/hour + hourly charge per attachment (Seoul $0.09, us-east-1 $0.065)</td></tr>
+<tr><td>PrivateLink cross-Region endpoint (consumer in Seoul)</td><td>Request $0.01 + $0.08 = $0.09</td><td>Response $0.01 + $0.02 = $0.03</td><td>Endpoint $0.013/hour per AZ + $0.05/hour per remote Region for the provider. Transfer charges for both directions are billed to the consumer account</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 7.</b> Per-GB charges by path for traffic between Seoul and us-east-1</p>
+<p>The largest difference in the table comes from direction. Sending 1 GB from Seoul to us-east-1 costs at least $0.08 on any path, and the opposite direction costs $0.02. For bulk replication or backup, designing the flow to go from us-east-1 to Seoul costs one quarter as much. Transit Gateway and Cloud WAN, which add the $0.02 processing charge, cost $0.02 more per GB than inter-Region VPC peering, but they simplify the number of connections and routing management and make segment isolation possible.</p>
+</div></section>
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Part 3 checklist</h2></header><div class="prose">
+<div class="scroll"><table>
+<thead>
+<tr><th>Check item</th><th>Cost driver</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td>Connecting two or three VPCs</td><td>Peering across AZs, $0.01 in each direction</td><td>$0 by placing resources in the same AZ (by AZ ID)</td></tr>
+<tr><td>Connecting dozens of VPCs</td><td>TGW attachment $0.07/hour + processing $0.02</td><td>Estimate the total cost from the number of attachments and the volume processed; there is no inter-AZ charge</td></tr>
+<tr><td>Accessing one service from many VPCs</td><td>Interface endpoint in every consumer VPC, $0.013/AZ/hour</td><td>Consider a VPC Lattice service network when there are many consumers</td></tr>
+<tr><td>Sharing resources such as RDS and EC2</td><td>Resource endpoint $0.026/hour or resource configuration association $0.13/hour</td><td>Resource endpoints for 1 to 4 consumers, a service network beyond that</td></tr>
+<tr><td>VPC Lattice service</td><td>$0.0325/hour per service + processing $0.0325 + requests</td><td>Estimate from the number of services and the volume processed, and check the free allowance of 300,000 requests per hour</td></tr>
+<tr><td>Global network</td><td>CNE $365/month per Region + $0.09/hour per attachment (Seoul) + processing $0.02</td><td>Minimize the number of Regions with a CNE and the number of attachments, and check the transfer charge on the TGW peering segment (CNE → TGW $0.01, TGW → CNE $0.02)</td></tr>
+<tr><td>Direction of inter-Region traffic</td><td>Seoul → us-east-1 $0.08, opposite $0.02</td><td>Design bulk transfers to flow from us-east-1 to Seoul</td></tr>
+<tr><td>Traffic going out to on premises</td><td>VPN $0.126, DX $0.041</td><td>Direct Connect at about 2 TB per month or more</td></tr>
+<tr><td>Accessing another Region through a Direct Connect gateway</td><td>DTO by source Region × location combination</td><td>Check each combination, such as us-east-1 → Korea location $0.0491</td></tr>
+<tr><td>Attaching a DXGW to a TGW</td><td>TGW attachment $0.07/hour + processing $0.02</td><td>Weigh the trade-off between manageability and cost, and connect VGWs directly when there are few VPCs</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 8.</b> Part 3 design checklist (based on Seoul Region pricing)</p>
+</div></section>
+<section class="sec" id="en-s11"><header class="sec-head"><h2>Closing</h2></header><div class="prose">
+<p>Part 3 looked at the charges for traffic that crosses VPC and Region boundaries and the cost of each connectivity option. The whole series comes down to three points.</p>
+<ol>
+<li>Network cost is determined by three factors: direction, boundary, and the services on the path. Inbound traffic is mostly free. Inter-AZ transfer is charged $0.01 in each direction. Inter-Region transfer is priced by the source Region, so traffic that leaves Seoul costs 4 times as much as traffic that comes in. Managed services such as NAT gateway, Transit Gateway, VPC Lattice, and Cloud WAN add processing charges on top of this.</li>
+<li>Choose a connectivity option by its fixed charges and operating model, not by its traffic charge. The inter-Region transfer charge is the same on every path. Peering has no fixed charge, while Transit Gateway and Cloud WAN are charged the $0.02 processing charge and attachment charges. With PrivateLink and VPC Lattice, the better option depends on which is larger, the number of consumers or the number of resources.</li>
+<li>The largest cost savings come from changing the path. Gateway endpoints and CloudFront in Part 1, AZ-independent architecture and Topology Aware Routing in Part 2, and same-AZ peering and replication direction design in Part 3 all follow the same principle. Draw the path that your traffic takes and write the transfer charge and the processing charge on each arrow, and you can identify where the cost arises.</li>
+</ol>
+<p>Data transfer cost is not a matter of memorizing service price lists but a matter of drawing out which path your traffic takes. When you review a new architecture, I recommend keeping the checklists from the three parts at hand and writing the charge on each arrow. I hope this serves as a practical reference for those who run workloads in the Seoul Region. (<a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-01/" target="_blank" rel="noopener">Part 1 link</a>, <a href="https://whchoi98.github.io/docs/techblog/networking/aws-networking-dto-dp-02/" target="_blank" rel="noopener">Part 2 link</a>)</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/ec2/pricing/on-demand/" target="_blank" rel="noopener">Amazon EC2 온디맨드 요금 - 데이터 전송</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://aws.amazon.com/ko/vpc/pricing/" target="_blank" rel="noopener">Amazon VPC 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://aws.amazon.com/ko/transit-gateway/pricing/" target="_blank" rel="noopener">AWS Transit Gateway 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://aws.amazon.com/ko/privatelink/pricing/" target="_blank" rel="noopener">AWS PrivateLink 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://aws.amazon.com/ko/vpc/lattice/pricing/" target="_blank" rel="noopener">Amazon VPC Lattice 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://aws.amazon.com/ko/cloud-wan/pricing/" target="_blank" rel="noopener">AWS Cloud WAN 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://aws.amazon.com/ko/directconnect/pricing/" target="_blank" rel="noopener">AWS Direct Connect 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://aws.amazon.com/ko/vpn/pricing/" target="_blank" rel="noopener">AWS VPN 요금</a></td><td class="nowrap"><span class="l-ko">AWS 페이지</span><span class="l-en">AWS page</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/network-manager/latest/cloudwan/cloudwan-dxattach-about.html" target="_blank" rel="noopener">Direct Connect gateway attachments in AWS Cloud WAN - AWS Network Manager</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2021/05/amazon-vpc-announces-pricing-change-for-vpc-peering/" target="_blank" rel="noopener">Amazon VPC Announces Pricing Change for VPC Peering</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2022/04/aws-data-transfer-price-reduction-privatelink-transit-gateway-client-vpn-services/" target="_blank" rel="noopener">AWS Announces Data Transfer Price Reduction for AWS PrivateLink, AWS Transit Gateway, and AWS Client VPN services</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2025/04/amazon-vpc-peering-billing/" target="_blank" rel="noopener">AWS simplifies Amazon VPC Peering billing</a></td><td class="nowrap"><span class="l-ko">새 소식</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-15</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/when-and-how-to-centralize-aws-privatelink-interface-endpoints-with-amazon-vpc-lattice/" target="_blank" rel="noopener">When and how to centralize AWS PrivateLink Interface endpoints with Amazon VPC Lattice - Networking &amp; Content Delivery Blog</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-15</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>원문</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-03/" target="_blank" rel="noopener">AWS 기술 블로그</a>, 2026-09-21 게시. 이 페이지는 같은 글을 옮겨 실으면서 문장을 다듬은 것입니다.</span><span class="l-en"><b>Original</b> <a href="https://aws.amazon.com/ko/blogs/tech/aws-networking-dto-dp-03/" target="_blank" rel="noopener">AWS Tech Blog (Korean)</a>, published 2026-09-21. This page republishes the same post with edited wording; the English text is a translation.</span></li>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
