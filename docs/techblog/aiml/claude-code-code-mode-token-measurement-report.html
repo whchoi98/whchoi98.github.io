@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code의 Code Mode는 토큰을 얼마나 줄이는가: 54회 측정한 결과</title>
+<meta name="description" content="Claude Code v2.1.325에서 Code Mode를 끈 세션과 켠 세션을 Sonnet 5.5로 54회 비교했습니다. 기본 도구 작업은 총 토큰이 42%, 비용이 13% 줄었고 MCP 도구 작업은 총 토큰이 19% 늘었습니다. 켜는 방법, Amazon Bedrock과 OpenTelemetry 제약, 측정 방법도 정리했습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-code-mode-token-measurement/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-16</span><span class="l-en">Published 2026-11-16</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 15분</span><span class="l-en">15 min read</span></span></div>
+<h1><span class="l-ko">Claude Code의 Code Mode는 토큰을 얼마나 줄이는가: 54회 측정한 결과</span><span class="l-en">How many tokens does Code Mode save in Claude Code? Results from 54 measured runs</span></h1>
+<p class="thesis"><span class="l-ko">Claude Code의 Code Mode를 켜면 토큰과 비용이 얼마나 줄어드는가에 답하는 글입니다. API 요청에 실리는 도구가 16개에서 3개로 줄어 기본 도구 작업에서는 총 토큰이 42%, 비용이 13% 줄었습니다. MCP 도구 작업에서는 도구를 찾는 왕복이 더해져 총 토큰이 19% 늘었습니다. 지금은 Anthropic API에 직접 연결한 대화형 터미널 세션에서만 동작합니다.</span><span class="l-en">This post answers how much Code Mode in Claude Code cuts tokens and cost. The tools in each API request went from 16 to 3, so tasks on built-in tools used 42% fewer total tokens and cost 13% less. Tasks on MCP tools needed extra round trips to find the tools and used 19% more total tokens. For now it runs only in an interactive terminal session connected directly to the Anthropic API.</span></p>
+<div class="tags"><span>#Claude Code</span><span>#Code Mode</span><span>#MCP</span><span>#Prompt Caching</span><span>#Token Economics</span></div>
+<ul class="facts"><li><span class="l-ko"><b>도구 정의</b>: API 요청의 도구가 16개에서 3개로 줄고 첫 요청의 입력이 35.0k에서 22.8k 토큰으로 줄었습니다.</span><span class="l-en"><b>Tool definitions</b>: the tools in an API request went from 16 to 3, and the first request's input went from 35.0k to 22.8k tokens.</span></li><li><span class="l-ko"><b>기본 도구 작업 5종</b>: 총 토큰 42% 감소, 비용 13% 감소, 왕복 12% 감소.</span><span class="l-en"><b>Five tasks on built-in tools</b>: 42% fewer total tokens, 13% lower cost, 12% fewer round trips.</span></li><li><span class="l-ko"><b>MCP 도구 작업 3종</b>: 왕복 64% 증가, 총 토큰 19% 증가, 비용 5% 증가.</span><span class="l-en"><b>Three tasks on MCP tools</b>: 64% more round trips, 19% more total tokens, 5% higher cost.</span></li><li><span class="l-ko"><b>제약</b>: Amazon Bedrock, <code>claude -p</code>, OpenTelemetry 내보내기와는 함께 사용할 수 없습니다.</span><span class="l-en"><b>Limits</b>: it cannot be used with Amazon Bedrock, <code>claude -p</code>, or OpenTelemetry export.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">들어가며</a><a href="#ko-s2">Code Mode가 바꾸는 것</a><a href="#ko-s3">켜는 방법과 시작 조건</a><a href="#ko-s4">측정 방법</a><a href="#ko-s5">기본 도구 작업의 결과</a><a href="#ko-s6">MCP 도구 작업의 결과</a><a href="#ko-s7">권한 규칙과 훅</a><a href="#ko-s8">언제 켤 것인가</a><a href="#ko-s9">한계</a><a href="#ko-s10">마치며</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Introduction</a><a href="#en-s2">What Code Mode changes</a><a href="#en-s3">Turning it on, and what it needs</a><a href="#en-s4">How I measured</a><a href="#en-s5">Results for tasks on built-in tools</a><a href="#en-s6">Results for tasks on MCP tools</a><a href="#en-s7">Permission rules and hooks</a><a href="#en-s8">When to turn it on</a><a href="#en-s9">Limitations</a><a href="#en-s10">Conclusion</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>들어가며</h2></header><div class="prose">
+<p>Claude Code v2.1.323에 Code Mode가 추가됐습니다. npm 게시일은 2026년 11월 12일입니다. <a href="https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md" target="_blank" rel="noopener">변경 기록</a>은 이 기능을 Claude가 JavaScript를 작성해 도구를 호출하는 실험적 옵트인 기능으로 소개합니다.</p>
+<p>이 방식으로 줄이려는 것은 왕복(round trip)과 도구 정의(tool definitions)입니다. 여러 도구 호출을 코드 하나로 묶으면 모델과 주고받는 왕복이 줄고 요청마다 실리는 도구 정의도 줄어듭니다. 필자는 이 효과가 얼마나 되는지 확인하려고 같은 작업을 Code Mode를 끈 세션과 켠 세션에서 실행해 토큰, 비용, 왕복 횟수를 비교했습니다. 버전은 v2.1.325, 모델은 Sonnet 5.5이고 측정은 54회입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig01-overview.png" alt="작업 8종의 총 토큰을 Code Mode를 끈 세션과 켠 세션으로 나눠 비교한 막대 그래프. 기본 도구 작업 5종은 34%에서 56% 줄었고 MCP 도구 작업 3종은 6% 감소에서 79% 증가까지 갈렸다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 작업별 총 토큰 비교. 기본 도구 작업은 모두 줄었고 MCP 도구 작업은 결과가 갈렸습니다</figcaption></figure>
+<p>먼저 결론입니다.</p>
+<ul>
+<li><b>도구 정의</b>: API 요청에 실리는 도구가 16개에서 3개로 줄었습니다. 첫 요청의 입력은 35.0k에서 22.8k 토큰으로 35% 줄었습니다.</li>
+<li><b>기본 도구 작업 5종</b>: Bash, Read, Edit 같은 기본 도구만 사용하는 작업에서 총 토큰이 42%, 비용이 13% 줄었습니다. 왕복은 12% 줄었습니다.</li>
+<li><b>MCP 도구 작업 3종</b>: 결과가 반대였습니다. 왕복이 64%, 총 토큰이 19%, 비용이 5% 늘었습니다. Code Mode에서는 MCP 도구의 이름과 스키마가 프롬프트에 없어서 모델이 도구부터 찾아야 합니다.</li>
+<li><b>제약</b>: Anthropic API에 직접 연결한 대화형 터미널 세션에서만 동작합니다. Amazon Bedrock, <code>claude -p</code>, OpenTelemetry 내보내기와는 함께 사용할 수 없습니다.</li>
+</ul>
+<blockquote><p>Code Mode는 실험 기능이고 기본값은 꺼짐입니다. 공식 문서는 어느 릴리스에서든 바뀌거나 없어질 수 있다고 밝힙니다. 이 글의 수치는 2026년 11월 15일에 v2.1.325에서 측정한 값입니다.</p></blockquote>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Code Mode가 바꾸는 것</h2></header><div class="prose">
+<p><a href="https://code.claude.com/docs/en/code-mode" target="_blank" rel="noopener">공식 문서</a>에 따르면 Code Mode가 없을 때 Claude는 Bash, Read, Edit 같은 도구 호출을 직접 요청하고 결과를 하나씩 읽은 뒤 다음 행동을 정합니다. Code Mode에서는 Claude가 도구 호출을 담은 JavaScript를 작성하고 Claude Code가 그 코드를 세션 안에서 실행합니다. 코드 하나가 명령을 병렬로 실행하고 앞 호출의 결과를 다음 호출에 넘기며 Claude가 읽어야 할 부분만 돌려줍니다.</p>
+<p>아래는 공식 문서의 예시입니다. 재시도 한도를 올려 달라는 요청에 Claude가 파일을 찾아 수정하고 테스트까지 실행하는 코드를 작성합니다. 마지막 줄이 수정한 파일의 경로와 테스트 출력을 Claude에게 돌려줍니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>const files = await $`rg -l "function retryPolicy" src`.text();
+const target = files.trim().split("\n")[0];
+await edit(target, "maxAttempts: 3", "maxAttempts: 5");
+({ edited: target, tests: $`npm test -- retryPolicy`.nothrow() });</code></pre></div>
+<p>대화 화면에는 코드 대신 수정 diff 같은 도구 호출이 표시됩니다. 코드를 보려면 <code>Ctrl+O</code>로 기록 보기(transcript viewer)를 열고 접혀 있는 Code 행을 펼칩니다.</p>
+<h3>API 요청에서 달라지는 것</h3>
+<p>Claude Code는 세션 기록 파일에 API로 보낸 요청의 형태를 남깁니다. 같은 프로젝트에서 Code Mode를 끈 세션과 켠 세션의 기록을 비교했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig02-request.png" alt="Code Mode를 끈 세션은 요청마다 도구 정의 16개를 싣고 도구 호출 결과를 읽을 때마다 모델에 다시 요청합니다. 켠 세션은 도구 3개만 싣고 스크립트 하나가 여러 도구를 호출한 뒤 필요한 결과만 돌려주는 구조를 나란히 놓은 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> Code Mode를 끈 세션과 켠 세션의 요청 구조</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>Code Mode 끔</th><th>Code Mode 켬</th></tr>
+</thead>
+<tbody>
+<tr><td>API 요청의 도구 수</td><td class="num">16개</td><td>3개 (<code>REPL</code>, <code>Poll</code>, <code>advisor</code>)</td></tr>
+<tr><td>도구 정의 크기</td><td class="num">74,886자</td><td>36,392자. 이 가운데 REPL 설명문이 32,392자</td></tr>
+<tr><td>첫 요청의 입력 토큰</td><td class="num">35.0k</td><td class="num">22.8k</td></tr>
+<tr><td><code>/context</code>의 System tools 추정치</td><td class="num">21.9k</td><td class="num">6.1k</td></tr>
+<tr><td>MCP 도구 9개를 연결했을 때</td><td>이름만 먼저 싣고 ToolSearch 뒤에 스키마를 불러와 26개</td><td>그대로 3개</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> Code Mode를 끈 세션과 켠 세션의 API 요청 비교. v2.1.325, Sonnet 5.5, 플러그인과 MCP 서버를 뺀 구성</p>
+<p>장보기 심부름에 비유하면 이해하기 쉽습니다. 집에서 살 것을 정하는 사람이 모델이고 가게를 다니는 사람이 Claude Code입니다. Code Mode를 끄면 심부름하는 사람은 가게에 들를 때마다 집에 전화해 다음에 무엇을 살지 묻습니다. 전화할 때마다 지금까지 산 물건과 동네 가게 16곳의 안내문을 처음부터 다시 읽어 줍니다. Code Mode를 켜면 집에 있는 사람이 "우유가 없으면 두유를 사고 결과는 마지막에 한 번만 알려 달라"는 쪽지를 써 줍니다. 심부름하는 사람은 쪽지대로 여러 가게에 들른 뒤 한 번만 전화합니다. 안내문은 3장으로 줄고 단골 가게 15곳의 주문 방법은 그중 한 장에 요약돼 있습니다. 처음 가는 가게인 MCP 도구는 이 요약에 없어서 위치와 주문 방법부터 물어봐야 합니다.</p>
+<p>비유와 실제가 다른 점이 두 가지 있습니다. Code Mode를 끈 세션에서도 전화 한 통에 여러 가게 심부름을 함께 맡길 수 있습니다. 다시 읽어 주는 내용은 프롬프트 캐시(prompt cache)에서 읽어 낮은 단가로 계산됩니다. 측정 결과가 기대와 달랐던 이유가 이 두 가지입니다. 요청마다 앞부분을 다시 보내는 구조와 캐시의 관계는 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-token-economy-01/" target="_blank" rel="noopener">Claude Code 토큰 비용 최적화하기 1부</a>에서 다뤘습니다.</p>
+<h3>REPL 도구 하나에 담긴 것</h3>
+<p>Claude가 작성한 코드는 <code>REPL</code>이라는 도구로 실행됩니다. 도구 수는 줄었지만 기존 도구가 없어진 것은 아닙니다. REPL 설명문 안에 Bash, Read, Edit, Write, Glob, Grep, Agent를 포함한 도구 15개가 TypeScript 시그니처로 들어 있습니다. 덜 사용하는 기본 도구 20개는 이름만 나열돼 있고 <code>describeTool(name)</code>으로 스키마를 조회합니다. MCP 도구는 이름도 실리지 않으며 설명문은 <code>searchTools</code>로 찾으라고 안내합니다.</p>
+<p>설명문은 비용 구조도 모델에게 직접 알려 줍니다. REPL 호출 하나하나가 모델 왕복이고 그때마다 대화 전체를 다시 읽지만 스크립트 안에서 하는 일은 상대적으로 비용이 들지 않는다는 내용입니다. 왕복을 줄이는 것이 설계 의도라는 점은 여기서 확인됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>켜는 방법과 시작 조건</h2></header><div class="prose">
+<p>환경 변수 <code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE</code>를 <code>1</code>로 설정하고 <code>claude</code>를 시작합니다. 한 번 시험할 때는 셸에 넣고 새 세션마다 켜려면 사용자 설정 <code>~/.claude/settings.json</code>의 <code>env</code>에 넣습니다. 프로젝트 설정 파일에 넣은 값은 무시됩니다. 내려받은 저장소가 사용자 모르게 Code Mode를 켜지 못하게 막는 동작입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude</code></pre></div>
+<p>처음 실행하면 확인 화면이 나타납니다. 켜지 않고 시작(No, start without it)이 기본 선택이어서 Enter만 누르면 켜지지 않습니다. Code Mode 켜기(Yes, turn on Code Mode)를 고르면 Claude Code가 다시 시작하고 세션 위쪽에 아래 문구가 표시됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>Code Mode (experimental) is on · this session can be resumed only with Code Mode on</code></pre></div>
+<p><code>/status</code>에도 상태가 나옵니다. 필자의 화면에는 <code>Code Mode: on (experimental)</code>과 함께 변수를 셸 환경에서 읽었다는 설명이 표시됐습니다.</p>
+<h3>요구 사항</h3>
+<p>공식 문서가 밝힌 요구 사항을 옮겼습니다.</p>
+<ul>
+<li><b>버전</b>: Claude Code v2.1.323 이상</li>
+<li><b>계정</b>: Claude 구독 또는 Console 계정. 게이트웨이, Amazon Bedrock, Claude Platform on AWS, Google Cloud의 Agent Platform, Microsoft Foundry를 거치면 사용할 수 없습니다.</li>
+<li><b>조직</b>: HIPAA 구성이나 무보존(zero data retention)을 사용하지 않는 조직</li>
+<li><b>모델</b>: Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.2</li>
+<li><b>실행 환경</b>: 터미널의 대화형 <code>claude</code> 세션. <code>-p</code>, Agent SDK, VS Code 패널, 데스크톱 앱, 클라우드 세션에서는 동작하지 않습니다.</li>
+<li><b>설치</b>: 네이티브 빌드. Windows에서는 Git for Windows가 필요합니다.</li>
+<li><b>함께 켤 수 없는 설정</b>: API 키 헬퍼, 에이전트 팀, OpenTelemetry 내보내기, <code>DISABLE_TELEMETRY</code></li>
+</ul>
+<p>Code Mode 세션에서는 Remote Control, Claude in Chrome, computer use도 사용할 수 없습니다. 세션을 데스크톱 앱이나 백그라운드 세션으로 옮기지도 못합니다. 백그라운드로 실행되지 않는 코드는 10분이 지나면 멈춥니다.</p>
+<h3>시작되지 않는 조건을 화면에서 확인</h3>
+<p>조건이 맞지 않으면 Claude Code는 Code Mode 없이 시작하고 세션 위쪽에 <code>Code Mode (experimental) isn't available</code>과 이유를 표시합니다. 표 2는 프롬프트를 보내지 않고 시작 화면만 확인한 결과입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>조건</th><th>결과</th><th>화면에 표시된 이유</th></tr>
+</thead>
+<tbody>
+<tr><td>OpenTelemetry 내보내기 켬 (<code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>)</td><td><span class="pill bad">시작 안 됨</span></td><td><code>OpenTelemetry is on (...), and Code Mode doesn't yet send it an event for each tool call</code></td></tr>
+<tr><td>Amazon Bedrock (<code>CLAUDE_CODE_USE_BEDROCK=1</code>)</td><td><span class="pill bad">시작 안 됨</span></td><td><code>for now it only works with the Anthropic API</code></td></tr>
+<tr><td>Sonnet 4.5</td><td><span class="pill bad">시작 안 됨</span></td><td><code>for now it only works with Opus 5.5, Sonnet 5.5 and later models</code></td></tr>
+<tr><td><code>claude -p</code></td><td><span class="pill warn">적용 안 됨</span></td><td>문구 없음. 도구 목록에 <code>REPL</code>이 없고 기존 도구로 실행</td></tr>
+<tr><td>셸에는 1, <code>--settings</code>에는 0</td><td><span class="pill warn">꺼짐</span></td><td>문구 없음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 시작 조건 시험 결과. v2.1.325에서 2026년 11월 15일에 확인</p>
+<p>필자의 장비는 평소 OpenTelemetry Collector로 사용량을 내보내고 있어서 환경 변수만 넣어서는 켜지지 않았습니다. 사용자 설정은 그대로 두고 <code>--settings</code>로 텔레메트리 변수만 0으로 덮어쓰자 시작됐습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --settings '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}'</code></pre></div>
+<p>사용량 수집이 조직의 정책이라면 이 방법을 사용하지 않는 것을 권고합니다. 이렇게 시작한 세션의 사용량은 OpenTelemetry로 나가지 않기 때문입니다.</p>
+<h3>세션 재개</h3>
+<p>Code Mode로 시작한 세션은 Code Mode를 켠 터미널에서만 재개됩니다. 변수 없이 <code>claude --resume</code>을 실행하자 세션이 재개되지 않고 종료 코드 1로 끝났습니다. 화면 문구는 <code>This session was started in Code Mode (experimental), which is off, so it can't be resumed.</code>입니다. 일반 세션을 변수를 켠 채 재개하면 기존 도구로 계속 진행합니다.</p>
+<h3>조직 단위로 막기</h3>
+<p>관리 설정(managed settings)의 <code>env</code>에 같은 변수를 값 <code>0</code>으로 넣으면 조직의 누구도 Code Mode를 사용하지 못합니다. 문서에 따르면 이미 Code Mode 세션 안에 있는 사용자는 종료하거나 다시 시작할 때까지 그대로 유지됩니다. 그 뒤로는 Code Mode 없이 시작하고 기존 Code Mode 세션도 재개하지 못합니다. 관리 설정으로 사용자의 Code Mode를 켜 주는 방법은 없습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "0"
+  }
+}</code></pre></div>
+<p>필자는 조직 관리 설정 자체는 시험하지 않았습니다. 설정을 바꾸면 조직 전체에 적용되기 때문입니다. <code>--settings</code>로 넘긴 0이 셸의 1보다 우선한다는 것까지만 확인했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>측정 방법</h2></header><div class="prose">
+<p>Code Mode는 <code>-p</code>에서 동작하지 않고 OpenTelemetry가 켜져 있으면 시작되지 않습니다. 평소에 사용하던 헤드리스 실행과 OTel 지표를 둘 다 사용할 수 없어서 방법을 바꿨습니다.</p>
+<p>대화형 세션은 의사 터미널(PTY)에서 시작하고 터미널 에뮬레이터 라이브러리(pexpect, pyte)로 화면을 읽어 확인 화면과 권한 화면을 넘겼습니다. 토큰은 세션 기록 파일에 남은 응답별 <code>usage</code>를 더해 구했습니다. 두 세션의 실행 옵션은 같고 켠 세션에만 <code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1</code>을 넣었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude --session-id &lt;uuid&gt; --setting-sources project,local --strict-mcp-config --model sonnet "&lt;prompt&gt;"</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>값</th></tr>
+</thead>
+<tbody>
+<tr><td>버전과 모델</td><td>Claude Code v2.1.325, Sonnet 5.5, effort medium(기본값), 권한 모드 auto</td></tr>
+<tr><td>계정</td><td>Claude 구독 계정. Anthropic API에 직접 연결</td></tr>
+<tr><td>구성</td><td>사용자 설정 제외(플러그인, 훅, MCP 서버 없음), 자동 메모리 끔</td></tr>
+<tr><td>실험 프로젝트</td><td>파일 54개인 Node 프로젝트. 서비스 모듈 20개, Markdown 25개. 정답은 생성 스크립트가 미리 계산</td></tr>
+<tr><td>MCP 서버</td><td>주문, 고객, 상품, 재고, 배송을 조회하는 읽기 전용 도구 9개. 서버가 받은 호출을 파일에 기록</td></tr>
+<tr><td>반복</td><td>작업마다 모드별 3회. 어느 모드를 먼저 실행할지 번갈아 바꿈</td></tr>
+<tr><td>총 토큰</td><td>주 대화의 모든 API 응답에서 입력, 캐시 쓰기, 캐시 읽기, 출력 토큰을 더한 값</td></tr>
+<tr><td>비용</td><td>세션 기록의 <code>totalCostUSD</code>. Claude Code가 계산한 세션 전체 값이며 구독 계정이므로 API 요금 기준 환산치</td></tr>
+<tr><td>턴 시간</td><td>세션 기록의 <code>turn_duration</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 측정 조건. 2026년 11월 15일, Linux aarch64</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>작업</th><th>프롬프트 요지</th><th>성격</th></tr>
+</thead>
+<tbody>
+<tr><td>T1</td><td>모든 Markdown 파일에서 존재하지 않는 로컬 파일을 가리키는 링크 찾기(공식 문서의 예시 프롬프트)</td><td>여러 파일 읽기와 검사</td></tr>
+<tr><td>T2</td><td>서비스 20개의 <code>maxAttempts</code>를 3에서 5로 바꾸고 <code>npm test</code> 실행</td><td>반복 수정</td></tr>
+<tr><td>T3</td><td><code>src</code> 아래 할 일 주석을 담당자별로 집계</td><td>검색 후 집계</td></tr>
+<tr><td>T4</td><td><code>package.json</code>의 버전 확인</td><td>호출 한 번인 대조군</td></tr>
+<tr><td>T5</td><td>실패하는 테스트의 원인을 찾아 고치고 통과 확인</td><td>단계가 서로 의존</td></tr>
+<tr><td>M1</td><td>2026년 10월 출고 주문의 매출 합계와 상위 고객 3곳</td><td>MCP 호출 13회, 여러 도구 조합</td></tr>
+<tr><td>M2</td><td>주문 한 건의 상태와 운송사</td><td>MCP 호출 2회인 대조군</td></tr>
+<tr><td>M3</td><td>재고가 재주문 기준보다 적은 상품</td><td>MCP 호출 31회, 상품마다 한 번씩 조회</td></tr>
+<tr><td>S1</td><td>한 세션에서 M2, M3, M1을 차례로 요청</td><td>여러 턴 세션</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 측정에 사용한 작업. T는 기본 도구, M은 MCP 도구, S는 여러 턴 세션</p>
+<h3>세션 기록에서 토큰 읽기</h3>
+<p>세션 기록은 <code>~/.claude/projects/</code> 아래에 세션 ID 이름으로 저장되고 한 줄에 JSON 하나씩 쌓입니다. 필자가 v2.1.325의 기록에서 확인한 바로는 <code>requestId</code>가 있는 assistant 줄이 API 응답이고 <code>message.usage</code>에 토큰이 들어 있습니다. 응답 하나가 여러 줄로 나뉘어 기록되므로 <code>message.id</code>로 묶어야 중복으로 세지 않습니다. Code Mode 스크립트 안에서 일어난 도구 호출은 <code>requestId</code>가 없는 줄로 남고 토큰은 0입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>import json, sys
+
+seen = {}
+for line in open(sys.argv[1]):
+    try:
+        r = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    # requestId가 없는 줄은 스크립트 안에서 일어난 도구 호출입니다
+    if r.get("type") != "assistant" or r.get("isSidechain") or not r.get("requestId"):
+        continue
+    m = r["message"]
+    seen[m["id"]] = m.get("usage", {})   # 한 응답이 여러 줄로 나뉘므로 message.id로 묶습니다
+
+keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"]
+total = {k: sum(u.get(k, 0) for u in seen.values()) for k in keys}
+print(len(seen), "API responses", total, "total", sum(total.values()))</code></pre></div>
+<p>이 형식은 문서로 공개된 규격이 아니어서 버전이 바뀌면 달라질 수 있습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>기본 도구 작업의 결과</h2></header><div class="prose">
+<p>30회 모두 정답이었습니다. 표 5의 값은 3회 평균이고 화살표 왼쪽이 Code Mode를 끈 세션, 오른쪽이 켠 세션입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>작업</th><th>API 왕복</th><th>총 토큰</th><th>총 토큰 변화</th><th>출력 토큰 변화</th><th>비용(USD)</th><th>비용 변화</th><th>턴 시간(초)</th></tr>
+</thead>
+<tbody>
+<tr><td>T1 깨진 링크</td><td class="num">3.0 → 2.0</td><td class="num">108,433 → 48,185</td><td class="num">-56%</td><td class="num">-22%</td><td class="num">0.0604 → 0.0488</td><td class="num">-19%</td><td class="num">11.0 → 11.5</td></tr>
+<tr><td>T2 반복 수정</td><td class="num">3.0 → 3.0</td><td class="num">107,340 → 71,316</td><td class="num">-34%</td><td class="num">-16%</td><td class="num">0.0480 → 0.0435</td><td class="num">-9%</td><td class="num">6.2 → 10.0</td></tr>
+<tr><td>T3 할 일 주석 집계</td><td class="num">2.0 → 2.0</td><td class="num">70,570 → 46,551</td><td class="num">-34%</td><td class="num">+30%</td><td class="num">0.0389 → 0.0369</td><td class="num">-5%</td><td class="num">4.4 → 5.4</td></tr>
+<tr><td>T4 단일 조회</td><td class="num">2.0 → 2.0</td><td class="num">70,261 → 45,984</td><td class="num">-35%</td><td class="num">-28%</td><td class="num">0.0322 → 0.0283</td><td class="num">-12%</td><td class="num">2.9 → 3.5</td></tr>
+<tr><td>T5 버그 수정</td><td class="num">3.7 → 3.0</td><td class="num">133,797 → 73,335</td><td class="num">-45%</td><td class="num">-28%</td><td class="num">0.0578 → 0.0488</td><td class="num">-16%</td><td class="num">8.6 → 8.8</td></tr>
+<tr><td><b>합계</b></td><td class="num">13.7 → 12.0</td><td class="num">490,401 → 285,372</td><td class="num">-42%</td><td class="num">-18%</td><td class="num">0.2372 → 0.2062</td><td class="num">-13%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 기본 도구 작업 5종의 결과. 각 칸은 Code Mode 끔과 켬의 순서이고 작업마다 3회 평균. 비용은 API 요금 기준 환산치</p>
+<p>총 토큰은 다섯 작업 모두에서 34% 이상 줄었지만 왕복은 두 작업에서만 줄었습니다.</p>
+<ul>
+<li><b>절감은 대부분 도구 정의에서 나옵니다.</b> 첫 요청의 입력이 켠 세션에서 12.2k 토큰 작고 이 차이가 왕복마다 반복됩니다. T2, T3, T4는 왕복 횟수가 같아서 절감분 전체가 이 차이로 설명됩니다. T1은 절감분의 41%, T5는 61%가 도구 정의 몫이고 나머지가 왕복 감소 몫입니다.</li>
+<li><b>끈 세션도 이미 묶어서 처리합니다.</b> T1에서 끈 세션은 Bash 안에 Python 스크립트를 작성해 파일 25개를 한 번에 검사했고 T2에서는 <code>sed</code> 한 줄로 파일 20개를 고쳤습니다. 켠 세션은 같은 일을 REPL 스크립트 하나로 했습니다. T1의 스크립트는 한 번 실행에 내부 도구 호출이 126회였습니다.</li>
+<li><b>토큰 감소율과 비용 감소율은 다릅니다.</b> 줄어든 205,030 토큰 가운데 204,767 토큰이 캐시 읽기 토큰입니다. <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing" target="_blank" rel="noopener">요금표</a>에 따르면 Sonnet 5.5의 캐시 읽기 단가는 기본 입력 단가의 0.05배입니다. 단가가 높은 캐시 쓰기 토큰(약 3.3만)과 출력 토큰은 두 세션이 비슷했습니다. 토큰 42% 절감을 비용 42% 절감으로 옮기면 틀립니다.</li>
+<li><b>빨라지지는 않았습니다.</b> 턴 시간은 같거나 길었습니다. T2는 <code>edit()</code>를 20번 차례로 호출하느라 6.2초에서 10.0초로 늘었습니다.</li>
+</ul>
+<p>아래는 T2에서 Claude가 작성한 스크립트입니다. 대상 파일을 찾아 차례로 수정한 뒤 남은 곳이 없는지 확인하고 테스트를 실행합니다. 결과가 모델에게 전달되는 것은 마지막 줄 한 번입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>const files = (await $`grep -rl "maxAttempts: 3," src/services`.text()).trim().split('\n');
+for (const f of files) await edit(f, 'maxAttempts: 3,', 'maxAttempts: 5,');
+const left = await $`grep -rn "maxAttempts" src/services | grep -v "maxAttempts: 5,"`.nothrow().text();
+const t = await $`npm test 2&gt;&amp;1`.nothrow();
+({n: files.length, left, code: t.exitCode, out: t.stdout.slice(-2500)})</code></pre></div>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>MCP 도구 작업의 결과</h2></header><div class="prose">
+<p>18회 모두 정답이었습니다. M3의 4회는 검증 스크립트가 답변의 설명 문장에 나온 상품 ID까지 목록으로 세는 문제가 있었습니다. 검증 스크립트를 고친 뒤 저장해 둔 답변으로 다시 판정했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>작업</th><th>API 왕복</th><th>총 토큰</th><th>총 토큰 변화</th><th>출력 토큰 변화</th><th>비용(USD)</th><th>비용 변화</th><th>턴 시간(초)</th></tr>
+</thead>
+<tbody>
+<tr><td>M1 매출 집계 (호출 13회)</td><td class="num">4.0 → 5.7</td><td class="num">152,134 → 150,826</td><td class="num">-1%</td><td class="num">-26%</td><td class="num">0.0825 → 0.0822</td><td class="num">0%</td><td class="num">12.1 → 14.9</td></tr>
+<tr><td>M2 단건 조회 (호출 2회)</td><td class="num">3.0 → 6.7</td><td class="num">117,766 → 210,486</td><td class="num">+79%</td><td class="num">+184%</td><td class="num">0.0675 → 0.1012</td><td class="num">+50%</td><td class="num">4.8 → 14.3</td></tr>
+<tr><td>M3 재고 점검 (호출 31회)</td><td class="num">4.0 → 5.7</td><td class="num">153,171 → 144,088</td><td class="num">-6%</td><td class="num">-57%</td><td class="num">0.0939 → 0.0716</td><td class="num">-24%</td><td class="num">15.6 → 13.3</td></tr>
+<tr><td><b>합계</b></td><td class="num">11.0 → 18.0</td><td class="num">423,072 → 505,400</td><td class="num">+19%</td><td class="num">-29%</td><td class="num">0.2439 → 0.2550</td><td class="num">+5%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> MCP 도구 작업 3종의 결과. 각 칸은 Code Mode 끔과 켬의 순서이고 작업마다 3회 평균. 비용은 API 요금 기준 환산치</p>
+<p>세 작업 모두 켠 세션의 왕복이 더 많았습니다. Code Mode에서는 MCP 도구가 프롬프트에 없기 때문입니다. MCP 서버를 연결해도 켠 세션의 첫 요청은 17 토큰만 늘었습니다. 끈 세션은 도구 이름 목록이 실려 150 토큰 늘었습니다. <a href="https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search" target="_blank" rel="noopener">MCP 문서</a>에 따르면 끈 세션에서도 도구 검색(tool search)이 기본값이어서 시작할 때는 도구 이름만 실립니다.</p>
+<p>그림 3은 호출 2회짜리 작업 M2의 한 실행을 왕복 순서대로 놓은 것입니다. 끈 세션은 ToolSearch 한 번으로 스키마를 받고 두 도구를 한 응답에서 병렬로 호출해 3회 만에 끝났습니다. 켠 세션은 7회가 걸렸습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig03-mcp-roundtrips.png" alt="주문 한 건을 조회하는 작업에서 Code Mode를 끈 세션은 도구 검색, 병렬 호출, 답변의 3회 왕복으로 끝나고 켠 세션은 도구 검색, 목록 확인, 인자 이름 오류, 재호출, 스키마 조회, 배송 조회, 답변의 7회 왕복이 걸리는 과정을 비교한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 주문 한 건을 조회하는 작업 M2의 왕복 순서. 실행 한 번의 기록</figcaption></figure>
+<p>켠 세션에서 Claude가 차례로 작성한 스크립트 여섯 개입니다. 한 줄이 왕복 한 번입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>// 1. 도구 찾기
+const r = await searchTools("acme order status shipment carrier", 10); r
+// 2. 도구 목록과 주변 파일 확인
+const l = tools.list().filter(n=&gt;/acme|order|ship/i.test(n)); ({l, all: tools.list().length, ls: await $`ls -la; cat .mcp.json 2&gt;/dev/null; ls ~/.claude 2&gt;/dev/null`.nothrow().text()})
+// 3. 인자 이름을 추측해 호출. 서버에 보내지 않고 거부됨 ("does not declare `order_id` ... It takes: id")
+const o = await tools.mcp__acme__get_order({order_id:"ORD-1017"}); o
+// 4. 이름을 고쳐 다시 호출
+const o2 = await tools.mcp__acme__get_order({id:"ORD-1017"}); o2
+// 5. 다음 도구는 스키마부터 조회
+const d = await describeTool('mcp__acme__get_shipment'); d.inputSchema
+// 6. 배송 조회
+await tools.mcp__acme__get_shipment({orderId:"ORD-1017"})</code></pre></div>
+<ul>
+<li><b>탐색에 왕복을 사용합니다.</b> 켠 세션은 처음 두세 번의 왕복을 <code>searchTools</code>, <code>tools.list()</code>, <code>describeTool</code>에 사용했습니다. 반환 형태를 몰라 <code>o.items||o.lines||o.lineItems</code>처럼 여러 이름을 대비한 스크립트도 나왔습니다.</li>
+<li><b>끈 세션은 병렬 호출로 왕복을 줄입니다.</b> ToolSearch로 스키마를 받은 뒤 응답 하나에 호출 10개 또는 30개를 담았습니다. 왕복 횟수로는 Code Mode가 유리하지 않았습니다.</li>
+<li><b>유리한 지점은 출력 토큰입니다.</b> 호출이 31회인 M3에서 끈 세션은 도구 호출 블록 30개를 출력해야 해서 출력 토큰이 평균 2,338이었습니다. 켠 세션은 반복문 하나로 끝내 평균 1,011이었습니다. 출력 토큰의 단가가 높아서 왕복이 더 많았는데도 비용이 24% 줄었습니다.</li>
+<li><b>호출이 적으면 탐색 비용만 남습니다.</b> 호출이 2회뿐인 M2는 총 토큰이 79% 늘었습니다.</li>
+</ul>
+<h3>한 세션에서 이어서 실행하면</h3>
+<p>도구 탐색 비용이 첫 턴 뒤로 분산되는지 보려고 M2, M3, M1을 한 세션에서 차례로 요청했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>모드</th><th>정답</th><th>API 왕복</th><th>총 토큰</th><th>출력 토큰</th><th>비용(USD)</th><th>실행별 API 왕복</th></tr>
+</thead>
+<tbody>
+<tr><td>끔</td><td class="num">2/3</td><td class="num">9.7</td><td class="num">430,288</td><td class="num">4,198</td><td class="num">0.1813</td><td class="num">10, 9, 10</td></tr>
+<tr><td>켬</td><td class="num">3/3</td><td class="num">14.7</td><td class="num">513,346</td><td class="num">2,904</td><td class="num">0.1804</td><td class="num">17, 15, 12</td></tr>
+<tr><td><b>변화</b></td><td></td><td class="num">+52%</td><td class="num">+19%</td><td class="num">-31%</td><td class="num">0%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 7.</b> MCP 작업 3개를 한 세션에서 이어서 실행한 결과. 모드별 3회 평균</p>
+<p>세 턴으로 늘려도 켠 세션의 왕복과 총 토큰이 더 많았고 비용은 같은 수준이었습니다. 탐색은 첫 턴에 몰리지만 뒤 턴에서도 처음 사용하는 도구는 다시 조회했습니다. 켠 세션은 실행마다 12회에서 17회로 편차가 컸고 끈 세션은 9회에서 10회로 일정했습니다. 끈 세션의 오답 1건은 매출 합계와 상위 고객 3곳을 맞혔지만 고객 이름 대신 고객 ID만 적은 답입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>권한 규칙과 훅</h2></header><div class="prose">
+<p>스크립트 하나가 도구를 수십 번 호출한다면 권한 규칙이 그대로 적용되는지가 중요합니다. 문서에 따르면 Claude의 코드가 하는 도구 호출 하나하나가 <code>deny</code>와 <code>ask</code> 권한 규칙, <code>PreToolUse</code> 훅을 거칩니다. auto 모드에서는 분류기가 도구 호출이 아니라 코드를 실행 전에 검토합니다.</p>
+<p>필자는 <code>curl</code> 차단 규칙과 모든 도구 호출을 기록하는 <code>PreToolUse</code> 훅을 걸고 <code>git --version</code>과 <code>curl --version</code>을 실행하게 했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>권한 모드</th><th>Code Mode를 켠 세션에서 일어난 일</th></tr>
+</thead>
+<tbody>
+<tr><td>default</td><td>훅이 <code>REPL</code> 호출(스크립트 원문 포함)과 스크립트 안의 <code>Bash</code> 호출을 모두 받았습니다. 차단 규칙은 스크립트 안의 <code>curl</code> 호출만 거부했고 스크립트는 계속 실행됐습니다. 스크립트 안의 <code>git</code> 호출에는 평소와 같은 승인 화면이 나타났습니다.</td></tr>
+<tr><td>auto</td><td>분류기가 스크립트를 실행 전에 통째로 거부했습니다. <code>git</code>도 실행되지 않았고 훅은 <code>REPL</code> 호출만 받았습니다.</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 8.</b> 권한 모드별 동작. curl 차단 규칙과 PreToolUse 훅을 건 상태</p>
+<p>default 모드의 결과는 문서의 설명과 일치합니다. auto 모드의 결과는 1회 관측이고 프롬프트 문구가 default 시험과 조금 달랐으므로 일반화하기는 어렵습니다.</p>
+<p>문서에 따르면 auto 모드의 분류기는 검색 결과에서 얻은 경로처럼 실행 중에 계산되는 값을 보지 못합니다. 반드시 통제해야 하는 호출에는 규칙이나 훅을 남겨 둡니다. 스크립트 자체를 검사하려면 <code>REPL</code>에 매칭되는 <code>PreToolUse</code> 훅을 작성하고 <code>tool_input.code</code>에서 JavaScript를 읽습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>언제 켤 것인가</h2></header><div class="prose">
+<p>이번 측정을 근거로 한 필자의 판단입니다. 모델과 작업이 달라지면 결과도 달라질 수 있습니다.</p>
+<ul>
+<li><b>기본 도구 위주의 작업</b>에는 켜 볼 만합니다. 다섯 작업에서 총 토큰이 34%에서 56%, 비용이 5%에서 19% 줄었고 정답률은 같았습니다. 속도는 기대하지 않는 편이 맞습니다.</li>
+<li><b>MCP 도구를 수십 번 호출하는 반복 작업</b>에서는 출력 토큰이 줄어 비용이 내려갈 가능성이 있습니다. 호출 31회인 작업에서 비용이 24% 줄었습니다.</li>
+<li><b>MCP 도구를 한두 번 호출하는 짧은 조회</b>가 많다면 끄는 편이 낫습니다. 호출 2회인 작업에서 총 토큰이 79%, 비용이 50% 늘었습니다.</li>
+<li><b>Amazon Bedrock, <code>claude -p</code> 자동화, OpenTelemetry로 사용량을 수집하는 환경</b>에서는 지금은 사용할 수 없습니다.</li>
+</ul>
+<h3>다른 구현의 수치를 옮길 때</h3>
+<p>Code Mode라는 이름은 다른 도구에서도 사용됩니다. <a href="https://mcp-toolkit.nuxt.dev/advanced/code-mode" target="_blank" rel="noopener">Nuxt MCP Toolkit 문서</a>는 Claude Sonnet 벤치마크(도구 9개, 작업 7개)에서 전체 토큰 15%, 복잡한 배치 작업에서 최대 33% 절감을 보고합니다. 이 기능은 MCP 서버 쪽에 구현한 것이고 문서에 모델 버전, 총 토큰의 정의, 원자료가 없습니다. Claude Code의 기대 절감률로 옮기기는 어렵습니다. 이번 측정에서 도구 9개인 MCP 서버 조건의 결과는 총 토큰 19% 증가였습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>한계</h2></header><div class="prose">
+<ul>
+<li><b>모델</b>: Sonnet 5.5 하나입니다. Opus 5.5, Haiku 5.5, Fable 5.2에서는 호출을 묶는 성향이 다를 수 있습니다.</li>
+<li><b>반복 횟수</b>: 작업마다 3회입니다. 기본 도구 작업은 실행 간 차이가 거의 없었지만 MCP 작업의 켠 세션은 편차가 컸습니다.</li>
+<li><b>작업 크기</b>: 왕복 2회에서 7회로 끝나는 짧은 작업이고 프로젝트도 파일 54개로 작습니다. 긴 세션, 큰 출력, 오래 실행되는 스크립트는 측정하지 않았습니다.</li>
+<li><b>구성</b>: 플러그인과 MCP 서버를 뺀 구성입니다. 플러그인 40개를 설치한 평소 설정에서는 <code>/context</code> 추정치만 비교했고 시작 컨텍스트가 50.1k에서 35.2k로 줄었습니다.</li>
+<li><b>MCP 서버</b>: 도구 9개인 시험용 서버이고 출력 스키마가 없습니다. 출력 스키마가 있으면 탐색 비용이 달라지는지는 확인하지 않았습니다.</li>
+<li><b>비용</b>: Claude Code가 계산한 환산치입니다. 캐시 유지 시간이 1시간이어서 조건마다 첫 실행만 캐시 쓰기 비용을 더 냈고 이 영향은 두 세션에 비슷하게 들어갔습니다.</li>
+<li><b>시험하지 않은 조건</b>: 조직 관리 설정으로 막는 동작, HIPAA와 무보존 조직, API 키 헬퍼, 에이전트 팀, Windows입니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><h2>마치며</h2></header><div class="prose">
+<p>Code Mode가 토큰을 얼마나 줄이는지는 작업이 어떤 도구를 사용하는지에 따라 달랐습니다. 기본 도구만 사용하는 작업에서는 도구 정의가 16개에서 3개로 줄어든 효과로 총 토큰이 42% 줄었습니다. MCP 도구를 사용하는 작업에서는 도구를 찾는 왕복이 더해져 총 토큰이 19% 늘었습니다. 비용 변화는 두 경우 모두 토큰 변화보다 작았습니다.</p>
+<p>왕복을 줄인다는 설계 의도는 분명하지만 Code Mode를 끈 세션도 셸 한 줄과 병렬 호출로 이미 왕복을 줄이고 있습니다. 필자의 측정에서 차이를 만든 것은 왕복 횟수보다 요청마다 실리는 도구 정의의 크기였습니다. 자신의 작업에서 켜기 전에 세션 기록으로 두 모드의 토큰을 직접 비교해 보는 것을 권고합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Introduction</h2></header><div class="prose">
+<p>Claude Code v2.1.323 added Code Mode. It was published to npm on November 12, 2026. The <a href="https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md" target="_blank" rel="noopener">changelog</a> introduces it as an experimental opt-in in which Claude writes JavaScript to call its tools.</p>
+<p>The approach aims to cut two things: round trips and tool definitions. When several tool calls are packed into one piece of code, the model is consulted fewer times, and fewer tool definitions ride along with each request. To see how large the effect is, I ran the same tasks in sessions with Code Mode off and on and compared tokens, cost, and round trips. The version was v2.1.325, the model was Sonnet 5.5, and there were 54 measured runs.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig01-overview-en.png" alt="Bar chart of total tokens for eight tasks in sessions with Code Mode off and on. The five tasks on built-in tools used 34% to 56% fewer tokens, and the three tasks on MCP tools ranged from 6% fewer to 79% more" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> Total tokens per task. Every task on built-in tools used fewer tokens, and the tasks on MCP tools went both ways</figcaption></figure>
+<p>The conclusions first.</p>
+<ul>
+<li><b>Tool definitions</b>: the tools in an API request went from 16 to 3. The input of the first request went from 35.0k to 22.8k tokens, 35% less.</li>
+<li><b>Five tasks on built-in tools</b>: on tasks that use only built-in tools such as Bash, Read, and Edit, total tokens fell 42% and cost fell 13%. Round trips fell 12%.</li>
+<li><b>Three tasks on MCP tools</b>: the result was the opposite. Round trips rose 64%, total tokens 19%, and cost 5%. In Code Mode the names and schemas of MCP tools are not in the prompt, so the model has to find the tools first.</li>
+<li><b>Limits</b>: it runs only in an interactive terminal session connected directly to the Anthropic API. It cannot be used with Amazon Bedrock, <code>claude -p</code>, or OpenTelemetry export.</li>
+</ul>
+<blockquote><p>Code Mode is experimental and off by default. The official documentation says it may change or be removed in any release. The numbers in this post were measured on November 15, 2026 with v2.1.325.</p></blockquote>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>What Code Mode changes</h2></header><div class="prose">
+<p>According to the <a href="https://code.claude.com/docs/en/code-mode" target="_blank" rel="noopener">official documentation</a>, without Code Mode Claude asks for tool calls such as Bash, Read, or Edit directly and reads each result before it decides what to do next. With Code Mode, Claude writes JavaScript that makes the tool calls, and Claude Code runs that code in the session. One piece of code can run commands in parallel, pass one result to the next call, and return only the part that Claude needs to read.</p>
+<p>The example below is from the official documentation. Asked to raise a retry limit, Claude writes code that finds the file, edits it, and runs the tests. The last line returns the path of the edited file and the test output to Claude.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>const files = await $`rg -l "function retryPolicy" src`.text();
+const target = files.trim().split("\n")[0];
+await edit(target, "maxAttempts: 3", "maxAttempts: 5");
+({ edited: target, tests: $`npm test -- retryPolicy`.nothrow() });</code></pre></div>
+<p>The conversation shows the tool calls, such as the diff of an edit, in place of the code. To read the code, press <code>Ctrl+O</code> to open the transcript viewer and expand a collapsed Code row.</p>
+<h3>What changes in the API request</h3>
+<p>Claude Code records the shape of each request it sends to the API in the session transcript. I compared the transcripts of a session with Code Mode off and a session with it on, in the same project.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig02-request-en.png" alt="Side by side: a session with Code Mode off sends 16 tool definitions with every request and goes back to the model after each tool result, and a session with Code Mode on sends 3 tools while one script calls several tools and returns only the needed result" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Request shape in sessions with Code Mode off and on</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Code Mode off</th><th>Code Mode on</th></tr>
+</thead>
+<tbody>
+<tr><td>Tools in the API request</td><td class="num">16</td><td>3 (<code>REPL</code>, <code>Poll</code>, <code>advisor</code>)</td></tr>
+<tr><td>Size of the tool definitions</td><td class="num">74,886 characters</td><td>36,392 characters, of which the REPL description is 32,392</td></tr>
+<tr><td>Input tokens of the first request</td><td class="num">35.0k</td><td class="num">22.8k</td></tr>
+<tr><td>System tools estimate in <code>/context</code></td><td class="num">21.9k</td><td class="num">6.1k</td></tr>
+<tr><td>With 9 MCP tools connected</td><td>Names only at first, then 26 tools after ToolSearch loads the schemas</td><td>Still 3</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> API requests in sessions with Code Mode off and on. v2.1.325, Sonnet 5.5, plugins and MCP servers removed</p>
+<p>A grocery errand makes this easier to picture. The person at home who decides what to buy is the model, and the person who goes to the shops is Claude Code. With Code Mode off, the person on the errand phones home at every shop to ask what to buy next. On every call they read out, from the top, everything bought so far and the leaflets of all 16 shops in the neighborhood. With Code Mode on, the person at home writes a note such as "if there is no milk, buy soy milk, and tell me the result once at the end." The person on the errand visits several shops as the note says and phones only once. The leaflets shrink to 3, and one of them summarizes how to order at the 15 regular shops. An MCP tool is a shop they have never visited. It is not in that summary, so they have to ask where it is and how to order there first.</p>
+<p>The analogy differs from the real thing in two ways. A session with Code Mode off can also hand over errands for several shops in one phone call. And what gets read out again is read from the prompt cache and billed at a low rate. These two points are why the measured results differed from what I expected. I covered how each request resends its prefix and how the cache relates to that in <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-token-economy-01/" target="_blank" rel="noopener">Optimizing Claude Code token costs, Part 1</a>.</p>
+<h3>What the single REPL tool holds</h3>
+<p>The code Claude writes runs through a tool named <code>REPL</code>. There are fewer tools, but the existing ones are not gone. The REPL description holds TypeScript signatures of 15 tools, including Bash, Read, Edit, Write, Glob, Grep, and Agent. Twenty less used built-in tools are listed by name only, and <code>describeTool(name)</code> returns their schemas. MCP tools are not listed even by name, and the description says to find them with <code>searchTools</code>.</p>
+<p>The description also tells the model the cost structure directly. Each REPL call is a model round trip that rereads the whole conversation, while the work inside a script costs comparatively little. This confirms that fewer round trips is the design intent.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Turning it on, and what it needs</h2></header><div class="prose">
+<p>Set the environment variable <code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE</code> to <code>1</code> and start <code>claude</code>. To try it once, set it in the shell. To turn it on for every new session, put it in <code>env</code> in the user settings file <code>~/.claude/settings.json</code>. A value in a project settings file is ignored. This keeps a repository you cloned from turning on Code Mode without your knowing.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude</code></pre></div>
+<p>The first run shows a confirmation screen. The default choice is "No, start without it", so pressing Enter alone does not turn it on. If you select "Yes, turn on Code Mode", Claude Code restarts and shows the line below near the top of the session.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>Code Mode (experimental) is on · this session can be resumed only with Code Mode on</code></pre></div>
+<p><code>/status</code> shows the state too. On my screen it showed <code>Code Mode: on (experimental)</code> together with a note that the variable was read from the shell environment.</p>
+<h3>Requirements</h3>
+<p>These are the requirements stated in the official documentation.</p>
+<ul>
+<li><b>Version</b>: Claude Code v2.1.323 or later</li>
+<li><b>Account</b>: a Claude subscription or Console account. It cannot be used through a gateway, Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform, or Microsoft Foundry.</li>
+<li><b>Organization</b>: an organization that does not use the HIPAA configuration or zero data retention</li>
+<li><b>Model</b>: Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, or Fable 5.2</li>
+<li><b>Surface</b>: an interactive <code>claude</code> session in a terminal. It does not work with <code>-p</code>, the Agent SDK, the VS Code panel, the Desktop app, or cloud sessions.</li>
+<li><b>Installation</b>: the native build. On Windows, Git for Windows is required.</li>
+<li><b>Settings that cannot be on at the same time</b>: an API key helper, agent teams, OpenTelemetry export, <code>DISABLE_TELEMETRY</code></li>
+</ul>
+<p>A Code Mode session also cannot use Remote Control, Claude in Chrome, or computer use. The session cannot be moved to the Desktop app or turned into a background session. Code that does not run in the background stops after ten minutes.</p>
+<h3>Checking on screen when it does not start</h3>
+<p>When a condition is not met, Claude Code starts without Code Mode and shows <code>Code Mode (experimental) isn't available</code> with the reason near the top of the session. Table 2 lists what the start screen showed, with no prompt sent.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Condition</th><th>Result</th><th>Reason shown on screen</th></tr>
+</thead>
+<tbody>
+<tr><td>OpenTelemetry export on (<code>CLAUDE_CODE_ENABLE_TELEMETRY=1</code>)</td><td><span class="pill bad">Does not start</span></td><td><code>OpenTelemetry is on (...), and Code Mode doesn't yet send it an event for each tool call</code></td></tr>
+<tr><td>Amazon Bedrock (<code>CLAUDE_CODE_USE_BEDROCK=1</code>)</td><td><span class="pill bad">Does not start</span></td><td><code>for now it only works with the Anthropic API</code></td></tr>
+<tr><td>Sonnet 4.5</td><td><span class="pill bad">Does not start</span></td><td><code>for now it only works with Opus 5.5, Sonnet 5.5 and later models</code></td></tr>
+<tr><td><code>claude -p</code></td><td><span class="pill warn">Not applied</span></td><td>No message. The tool list has no <code>REPL</code>, and the run uses the ordinary tools</td></tr>
+<tr><td>1 in the shell, 0 in <code>--settings</code></td><td><span class="pill warn">Off</span></td><td>No message</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Start conditions tested. Checked on November 15, 2026 with v2.1.325</p>
+<p>My machine normally exports usage to an OpenTelemetry Collector, so setting the environment variable alone did not turn Code Mode on. It started once I left the user settings as they were and overrode only the telemetry variable to 0 with <code>--settings</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude --settings '{"env":{"CLAUDE_CODE_ENABLE_TELEMETRY":"0"}}'</code></pre></div>
+<p>If collecting usage is your organization's policy, I recommend not using this method. The usage of a session started this way is not sent to OpenTelemetry.</p>
+<h3>Resuming a session</h3>
+<p>A session started in Code Mode resumes only in a terminal with Code Mode on. When I ran <code>claude --resume</code> without the variable, the session did not resume and the command exited with code 1. The message was <code>This session was started in Code Mode (experimental), which is off, so it can't be resumed.</code> An ordinary session resumed with the variable set continues with the ordinary tools.</p>
+<h3>Blocking it for an organization</h3>
+<p>Putting the same variable with the value <code>0</code> in <code>env</code> of the managed settings keeps everyone in the organization from using Code Mode. According to the documentation, users who are already in a Code Mode session stay in it until they exit or restart. After that they start without Code Mode and cannot resume their Code Mode sessions. Managed settings cannot turn Code Mode on for users.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE": "0"
+  }
+}</code></pre></div>
+<p>I did not test the organization's managed settings themselves, because a change there applies to the whole organization. I only confirmed that a 0 passed with <code>--settings</code> wins over a 1 in the shell.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>How I measured</h2></header><div class="prose">
+<p>Code Mode does not work with <code>-p</code> and does not start while OpenTelemetry is on. Neither headless runs nor OTel metrics, my usual tools, were available, so I changed the method.</p>
+<p>I started each interactive session in a pseudo-terminal (PTY) and read the screen with terminal emulation libraries (pexpect, pyte) to get past the confirmation and permission screens. Tokens came from adding up the <code>usage</code> of each response in the session transcript. Both sessions used the same launch options, and only the session with Code Mode on had <code>CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude --session-id &lt;uuid&gt; --setting-sources project,local --strict-mcp-config --model sonnet "&lt;prompt&gt;"</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Version and model</td><td>Claude Code v2.1.325, Sonnet 5.5, effort medium (the default), permission mode auto</td></tr>
+<tr><td>Account</td><td>A Claude subscription account, connected directly to the Anthropic API</td></tr>
+<tr><td>Configuration</td><td>User settings left out (no plugins, hooks, or MCP servers), auto memory off</td></tr>
+<tr><td>Test project</td><td>A Node project of 54 files: 20 service modules and 25 Markdown files. A generator script computed the right answers in advance</td></tr>
+<tr><td>MCP server</td><td>Nine read-only tools that look up orders, customers, products, inventory, and shipments. The server logs each call it receives to a file</td></tr>
+<tr><td>Repetitions</td><td>Three runs per task and mode, alternating which mode runs first</td></tr>
+<tr><td>Total tokens</td><td>Input, cache write, cache read, and output tokens added over every API response of the main conversation</td></tr>
+<tr><td>Cost</td><td><code>totalCostUSD</code> in the session transcript. It is the whole-session value computed by Claude Code, and since this is a subscription account it is an API-price equivalent</td></tr>
+<tr><td>Turn time</td><td><code>turn_duration</code> in the session transcript</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Measurement conditions. November 15, 2026, Linux aarch64</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Task</th><th>Prompt in brief</th><th>Kind</th></tr>
+</thead>
+<tbody>
+<tr><td>T1</td><td>Find links in every Markdown file that point to local files that do not exist (the example prompt in the official documentation)</td><td>Reading and checking many files</td></tr>
+<tr><td>T2</td><td>Change <code>maxAttempts</code> from 3 to 5 in 20 services and run <code>npm test</code></td><td>Repeated edit</td></tr>
+<tr><td>T3</td><td>Count the to-do comments under <code>src</code> per owner</td><td>Search, then aggregate</td></tr>
+<tr><td>T4</td><td>Read the version in <code>package.json</code></td><td>Control with a single call</td></tr>
+<tr><td>T5</td><td>Find why a test fails, fix it, and confirm it passes</td><td>Steps that depend on each other</td></tr>
+<tr><td>M1</td><td>Total revenue of orders shipped in October 2026 and the top three customers</td><td>13 MCP calls across several tools</td></tr>
+<tr><td>M2</td><td>The status and the carrier of one order</td><td>Control with 2 MCP calls</td></tr>
+<tr><td>M3</td><td>Products with inventory below their reorder level</td><td>31 MCP calls, one lookup per product</td></tr>
+<tr><td>S1</td><td>M2, M3, and M1 asked in turn in one session</td><td>Multi-turn session</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Tasks used. T uses built-in tools, M uses MCP tools, S is a multi-turn session</p>
+<h3>Reading tokens from the session transcript</h3>
+<p>A session transcript is stored under <code>~/.claude/projects/</code> in a file named after the session ID, one JSON object per line. From what I saw in v2.1.325 transcripts, an assistant line with a <code>requestId</code> is an API response, and <code>message.usage</code> holds its tokens. One response is written across several lines, so group by <code>message.id</code> to avoid counting it twice. A tool call made inside a Code Mode script is written as a line without a <code>requestId</code>, with zero tokens.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>import json, sys
+
+seen = {}
+for line in open(sys.argv[1]):
+    try:
+        r = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    # a line without a requestId is a tool call made inside a script
+    if r.get("type") != "assistant" or r.get("isSidechain") or not r.get("requestId"):
+        continue
+    m = r["message"]
+    seen[m["id"]] = m.get("usage", {})   # one response spans several lines, so group by message.id
+
+keys = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"]
+total = {k: sum(u.get(k, 0) for u in seen.values()) for k in keys}
+print(len(seen), "API responses", total, "total", sum(total.values()))</code></pre></div>
+<p>This format is not a documented specification, so it can change between versions.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Results for tasks on built-in tools</h2></header><div class="prose">
+<p>All 30 runs gave the right answer. The values in Table 5 are means of three runs, with the session with Code Mode off on the left of the arrow and the session with it on on the right.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Task</th><th>API round trips</th><th>Total tokens</th><th>Total token change</th><th>Output token change</th><th>Cost (USD)</th><th>Cost change</th><th>Turn time (s)</th></tr>
+</thead>
+<tbody>
+<tr><td>T1 Broken links</td><td class="num">3.0 → 2.0</td><td class="num">108,433 → 48,185</td><td class="num">-56%</td><td class="num">-22%</td><td class="num">0.0604 → 0.0488</td><td class="num">-19%</td><td class="num">11.0 → 11.5</td></tr>
+<tr><td>T2 Bulk edit</td><td class="num">3.0 → 3.0</td><td class="num">107,340 → 71,316</td><td class="num">-34%</td><td class="num">-16%</td><td class="num">0.0480 → 0.0435</td><td class="num">-9%</td><td class="num">6.2 → 10.0</td></tr>
+<tr><td>T3 To-do report</td><td class="num">2.0 → 2.0</td><td class="num">70,570 → 46,551</td><td class="num">-34%</td><td class="num">+30%</td><td class="num">0.0389 → 0.0369</td><td class="num">-5%</td><td class="num">4.4 → 5.4</td></tr>
+<tr><td>T4 Single read</td><td class="num">2.0 → 2.0</td><td class="num">70,261 → 45,984</td><td class="num">-35%</td><td class="num">-28%</td><td class="num">0.0322 → 0.0283</td><td class="num">-12%</td><td class="num">2.9 → 3.5</td></tr>
+<tr><td>T5 Bug fix</td><td class="num">3.7 → 3.0</td><td class="num">133,797 → 73,335</td><td class="num">-45%</td><td class="num">-28%</td><td class="num">0.0578 → 0.0488</td><td class="num">-16%</td><td class="num">8.6 → 8.8</td></tr>
+<tr><td><b>Total</b></td><td class="num">13.7 → 12.0</td><td class="num">490,401 → 285,372</td><td class="num">-42%</td><td class="num">-18%</td><td class="num">0.2372 → 0.2062</td><td class="num">-13%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Results for the five tasks on built-in tools. Each cell reads Code Mode off, then on, as the mean of three runs per task. Cost is the API-price equivalent</p>
+<p>Total tokens fell by 34% or more on all five tasks, but round trips fell on only two.</p>
+<ul>
+<li><b>Most of the saving comes from the tool definitions.</b> The first request's input is 12.2k tokens smaller in the session with Code Mode on, and that difference repeats on every round trip. T2, T3, and T4 had the same number of round trips, so this difference explains their whole saving. For T1 the tool definitions account for 41% of the saving and for T5 61%, and fewer round trips account for the rest.</li>
+<li><b>The session with Code Mode off already batches.</b> On T1 it wrote a Python script inside Bash and checked 25 files in one go, and on T2 it fixed 20 files with one <code>sed</code> line. The session with Code Mode on did the same work with one REPL script. The T1 script made 126 inner tool calls in a single run.</li>
+<li><b>The token saving and the cost saving are different numbers.</b> Of the 205,030 tokens saved, 204,767 were cache read tokens. According to the <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching#pricing" target="_blank" rel="noopener">pricing table</a>, a cache read on Sonnet 5.5 costs 0.05 times the base input price. Cache write tokens (about 33k) and output tokens, which are priced higher, were similar in both sessions. Turning a 42% token saving into a 42% cost saving is wrong.</li>
+<li><b>It was not faster.</b> Turn time was the same or longer. T2 went from 6.2 to 10.0 seconds because it called <code>edit()</code> 20 times in sequence.</li>
+</ul>
+<p>Below is the script Claude wrote for T2. It finds the target files, edits them one by one, checks that none is left, and runs the tests. The result reaches the model once, in the last line.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>const files = (await $`grep -rl "maxAttempts: 3," src/services`.text()).trim().split('\n');
+for (const f of files) await edit(f, 'maxAttempts: 3,', 'maxAttempts: 5,');
+const left = await $`grep -rn "maxAttempts" src/services | grep -v "maxAttempts: 5,"`.nothrow().text();
+const t = await $`npm test 2&gt;&amp;1`.nothrow();
+({n: files.length, left, code: t.exitCode, out: t.stdout.slice(-2500)})</code></pre></div>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Results for tasks on MCP tools</h2></header><div class="prose">
+<p>All 18 runs gave the right answer. For four runs of M3, the checking script also counted product IDs that the answer mentioned in its explanatory sentences. I fixed the checking script and judged those runs again from the saved answers.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Task</th><th>API round trips</th><th>Total tokens</th><th>Total token change</th><th>Output token change</th><th>Cost (USD)</th><th>Cost change</th><th>Turn time (s)</th></tr>
+</thead>
+<tbody>
+<tr><td>M1 Revenue (13 calls)</td><td class="num">4.0 → 5.7</td><td class="num">152,134 → 150,826</td><td class="num">-1%</td><td class="num">-26%</td><td class="num">0.0825 → 0.0822</td><td class="num">0%</td><td class="num">12.1 → 14.9</td></tr>
+<tr><td>M2 Order lookup (2 calls)</td><td class="num">3.0 → 6.7</td><td class="num">117,766 → 210,486</td><td class="num">+79%</td><td class="num">+184%</td><td class="num">0.0675 → 0.1012</td><td class="num">+50%</td><td class="num">4.8 → 14.3</td></tr>
+<tr><td>M3 Low stock (31 calls)</td><td class="num">4.0 → 5.7</td><td class="num">153,171 → 144,088</td><td class="num">-6%</td><td class="num">-57%</td><td class="num">0.0939 → 0.0716</td><td class="num">-24%</td><td class="num">15.6 → 13.3</td></tr>
+<tr><td><b>Total</b></td><td class="num">11.0 → 18.0</td><td class="num">423,072 → 505,400</td><td class="num">+19%</td><td class="num">-29%</td><td class="num">0.2439 → 0.2550</td><td class="num">+5%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Results for the three tasks on MCP tools. Each cell reads Code Mode off, then on, as the mean of three runs per task. Cost is the API-price equivalent</p>
+<p>On all three tasks the session with Code Mode on made more round trips. The reason is that MCP tools are not in the prompt in Code Mode. With the MCP server connected, the first request of the session with Code Mode on grew by only 17 tokens. The session with it off grew by 150 tokens for the list of tool names. According to the <a href="https://code.claude.com/docs/en/mcp#scale-with-mcp-tool-search" target="_blank" rel="noopener">MCP documentation</a>, tool search is the default in that session as well, so only tool names load at the start.</p>
+<p>Figure 3 lays out one run of M2, the task with two calls, in round-trip order. The session with Code Mode off got the schemas with one ToolSearch, called the two tools in parallel in one reply, and finished in 3 round trips. The session with Code Mode on took 7.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-code-mode-token-measurement-assets/fig03-mcp-roundtrips-en.png" alt="For a task that looks up one order, a session with Code Mode off finishes in 3 round trips: tool search, parallel calls, answer. A session with Code Mode on takes 7: tool search, listing tools, a call refused for a wrong argument name, a second call, a schema lookup, the shipment lookup, answer" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> Round trips of task M2, which looks up one order. The record of a single run</figcaption></figure>
+<p>These are the six scripts Claude wrote in turn in the session with Code Mode on. Each line is one round trip.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">javascript</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>// 1. find the tools
+const r = await searchTools("acme order status shipment carrier", 10); r
+// 2. list the tools and look at nearby files
+const l = tools.list().filter(n=&gt;/acme|order|ship/i.test(n)); ({l, all: tools.list().length, ls: await $`ls -la; cat .mcp.json 2&gt;/dev/null; ls ~/.claude 2&gt;/dev/null`.nothrow().text()})
+// 3. call with a guessed argument name. Refused without being sent to the server ("does not declare `order_id` ... It takes: id")
+const o = await tools.mcp__acme__get_order({order_id:"ORD-1017"}); o
+// 4. call again with the right name
+const o2 = await tools.mcp__acme__get_order({id:"ORD-1017"}); o2
+// 5. read the schema of the next tool first
+const d = await describeTool('mcp__acme__get_shipment'); d.inputSchema
+// 6. shipment lookup
+await tools.mcp__acme__get_shipment({orderId:"ORD-1017"})</code></pre></div>
+<ul>
+<li><b>Round trips go to discovery.</b> The session with Code Mode on spent its first two or three round trips on <code>searchTools</code>, <code>tools.list()</code>, and <code>describeTool</code>. Not knowing the shape of a result, it also wrote scripts that allowed for several names, such as <code>o.items||o.lines||o.lineItems</code>.</li>
+<li><b>The session with Code Mode off saves round trips with parallel calls.</b> After ToolSearch returned the schemas, it put 10 or 30 calls into one reply. Counted in round trips, Code Mode had no advantage.</li>
+<li><b>The advantage is in output tokens.</b> On M3, with 31 calls, the session with Code Mode off had to write out 30 tool call blocks, so its output averaged 2,338 tokens. The session with Code Mode on finished with one loop and averaged 1,011. Output tokens are priced high, so cost fell 24% even with more round trips.</li>
+<li><b>With few calls, only the discovery cost is left.</b> M2, with just two calls, used 79% more total tokens.</li>
+</ul>
+<h3>Running the tasks one after another in one session</h3>
+<p>To see whether the discovery cost spreads out after the first turn, I asked for M2, M3, and M1 in turn in one session.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Mode</th><th>Correct</th><th>API round trips</th><th>Total tokens</th><th>Output tokens</th><th>Cost (USD)</th><th>API round trips per run</th></tr>
+</thead>
+<tbody>
+<tr><td>Off</td><td class="num">2/3</td><td class="num">9.7</td><td class="num">430,288</td><td class="num">4,198</td><td class="num">0.1813</td><td class="num">10, 9, 10</td></tr>
+<tr><td>On</td><td class="num">3/3</td><td class="num">14.7</td><td class="num">513,346</td><td class="num">2,904</td><td class="num">0.1804</td><td class="num">17, 15, 12</td></tr>
+<tr><td><b>Change</b></td><td></td><td class="num">+52%</td><td class="num">+19%</td><td class="num">-31%</td><td class="num">0%</td><td></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 7.</b> Three MCP tasks run one after another in one session. Mean of three runs per mode</p>
+<p>Even over three turns, the session with Code Mode on made more round trips and used more total tokens, and cost was about the same. Discovery is concentrated in the first turn, but in later turns the session looked up any tool it used for the first time again. The session with Code Mode on varied from 12 to 17 round trips between runs, and the session with it off stayed at 9 to 10. The one wrong answer in the session with Code Mode off had the right revenue total and the right top three customers, but gave customer IDs in place of customer names.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Permission rules and hooks</h2></header><div class="prose">
+<p>If one script calls tools dozens of times, it matters whether the permission rules still apply. According to the documentation, each tool call that Claude's code makes goes through the <code>deny</code> and <code>ask</code> permission rules and the <code>PreToolUse</code> hooks. In auto mode the classifier reviews the code before it runs, not each tool call.</p>
+<p>I set a deny rule for <code>curl</code> and a <code>PreToolUse</code> hook that logs every tool call, then had Claude run <code>git --version</code> and <code>curl --version</code>.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Permission mode</th><th>What happened in the session with Code Mode on</th></tr>
+</thead>
+<tbody>
+<tr><td>default</td><td>The hook received the <code>REPL</code> call (with the script text) and the <code>Bash</code> calls inside the script. The deny rule refused only the <code>curl</code> call inside the script, and the script kept running. The <code>git</code> call inside the script raised the usual approval prompt.</td></tr>
+<tr><td>auto</td><td>The classifier refused the whole script before it ran. <code>git</code> did not run either, and the hook received only the <code>REPL</code> call.</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 8.</b> Behavior by permission mode, with a curl deny rule and a PreToolUse hook in place</p>
+<p>The result in default mode matches the documentation. The result in auto mode is a single observation, and its prompt wording differed slightly from the default-mode test, so it is hard to generalize.</p>
+<p>According to the documentation, the auto mode classifier does not see values computed at run time, such as a path taken from search output. Keep rules or hooks for the calls you must control. To check the script itself, write a <code>PreToolUse</code> hook that matches <code>REPL</code> and read the JavaScript from <code>tool_input.code</code>.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>When to turn it on</h2></header><div class="prose">
+<p>This is my judgment from these measurements. A different model or different tasks can give different results.</p>
+<ul>
+<li><b>Work that is mostly built-in tools</b> is worth trying with Code Mode on. Across the five tasks, total tokens fell 34% to 56% and cost fell 5% to 19%, with the same share of right answers. Do not expect it to be faster.</li>
+<li><b>Repetitive work that calls MCP tools dozens of times</b> may cost less because output tokens fall. On the task with 31 calls, cost fell 24%.</li>
+<li><b>If you mostly do short lookups that call an MCP tool once or twice</b>, leaving it off is better. On the task with 2 calls, total tokens rose 79% and cost rose 50%.</li>
+<li><b>With Amazon Bedrock, <code>claude -p</code> automation, or usage collected through OpenTelemetry</b>, it cannot be used for now.</li>
+</ul>
+<h3>Carrying over numbers from another implementation</h3>
+<p>The name Code Mode is used by other tools too. The <a href="https://mcp-toolkit.nuxt.dev/advanced/code-mode" target="_blank" rel="noopener">Nuxt MCP Toolkit documentation</a> reports that a Claude Sonnet benchmark (9 tools, 7 tasks) saved 15% of total tokens overall and up to 33% on complex batch operations. That feature is implemented on the MCP server side, and the documentation does not give the model version, the definition of total tokens, or the raw data. It is hard to carry those numbers over as the saving to expect from Claude Code. In my measurement, the condition with a 9-tool MCP server ended with 19% more total tokens.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Limitations</h2></header><div class="prose">
+<ul>
+<li><b>Model</b>: Sonnet 5.5 only. Opus 5.5, Haiku 5.5, and Fable 5.2 may differ in how much they batch calls.</li>
+<li><b>Repetitions</b>: three per task. Runs of the tasks on built-in tools barely differed, but the session with Code Mode on varied widely on the MCP tasks.</li>
+<li><b>Task size</b>: short tasks that end in 2 to 7 round trips, in a small project of 54 files. I did not measure long sessions, large outputs, or long-running scripts.</li>
+<li><b>Configuration</b>: plugins and MCP servers were removed. With my usual settings, which have 40 plugins installed, I compared only the <code>/context</code> estimates, and the starting context went from 50.1k to 35.2k.</li>
+<li><b>MCP server</b>: a 9-tool test server with no output schemas. I did not check whether output schemas change the discovery cost.</li>
+<li><b>Cost</b>: an equivalent computed by Claude Code. The cache lifetime was one hour, so only the first run of each condition paid more for cache writes, and this affected both sessions about equally.</li>
+<li><b>Conditions not tested</b>: blocking through the organization's managed settings, HIPAA and zero data retention organizations, an API key helper, agent teams, and Windows.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><h2>Conclusion</h2></header><div class="prose">
+<p>How many tokens Code Mode saves depended on which tools the task used. On tasks that use only built-in tools, total tokens fell 42%, the effect of tool definitions going from 16 to 3. On tasks that use MCP tools, the round trips spent finding tools added up to 19% more total tokens. In both cases cost changed less than tokens did.</p>
+<p>The design intent of fewer round trips is clear, but a session with Code Mode off already cuts round trips with one shell line and with parallel calls. In my measurement, what made the difference was the size of the tool definitions carried by each request more than the number of round trips. Before you turn it on for your own work, I recommend comparing the tokens of the two modes yourself from the session transcripts.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://code.claude.com/docs/en/code-mode" target="_blank" rel="noopener">Run tool calls from code with Code Mode - Claude Code Docs</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Official docs</span></td><td class="nowrap num">2026-11-16</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Connect Claude Code to tools via MCP - Claude Code Docs</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Official docs</span></td><td class="nowrap num">2026-11-16</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Prompt caching - Claude Platform Docs</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Official docs</span></td><td class="nowrap num">2026-11-16</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Claude Code CHANGELOG - anthropics/claude-code</a></td><td class="nowrap"><span class="l-ko">변경 기록</span><span class="l-en">Changelog</span></td><td class="nowrap num">2026-11-16</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://www.npmjs.com/package/@anthropic-ai/claude-code?activeTab=versions" target="_blank" rel="noopener">@anthropic-ai/claude-code - npm (버전별 게시일)</a></td><td class="nowrap"><span class="l-ko">패키지 저장소</span><span class="l-en">Package registry</span></td><td class="nowrap num">2026-11-16</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://mcp-toolkit.nuxt.dev/advanced/code-mode" target="_blank" rel="noopener">Code Mode - Nuxt MCP Toolkit</a></td><td class="nowrap"><span class="l-ko">외부 문서</span><span class="l-en">Third-party docs</span></td><td class="nowrap num">2026-11-16</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 15일에 Claude Code v2.1.325, Sonnet 5.5, Claude 구독 계정으로 측정한 값입니다. 작업마다 모드별로 3회 실행한 평균이며 비용은 Claude Code가 세션 기록에 남긴 API 요금 기준 환산치입니다. 공식 문서와 변경 기록은 2026년 11월 16일에 확인했습니다. Code Mode는 실험 기능이어서 수치와 동작이 이후 버전에서 달라질 수 있습니다.</span><span class="l-en">The numbers in this post were measured on November 15, 2026 with Claude Code v2.1.325, Sonnet 5.5, and a Claude subscription account. Each is the mean of three runs per task and mode, and cost is the API-price equivalent that Claude Code wrote to the session transcript. The official documentation and changelog were checked on November 16, 2026. Code Mode is experimental, so the numbers and behavior can change in later versions.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
