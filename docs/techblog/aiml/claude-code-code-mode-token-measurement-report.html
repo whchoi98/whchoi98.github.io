@@ -197,7 +197,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 <header class="masthead">
 <div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-16</span><span class="l-en">Published 2026-11-16</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 15분</span><span class="l-en">15 min read</span></span></div>
 <h1><span class="l-ko">Claude Code의 Code Mode 기능 기반의 토큰 절감</span><span class="l-en">Token savings with the Code Mode feature in Claude Code</span></h1>
-<p class="thesis"><span class="l-ko">Claude Code의 Code Mode를 켜면 토큰과 비용의 절감 효과를 실제 테스트 해 보았습니다. 실제 사용 중인 환경에서 적용해 보면 API 요청에 실리는 도구가 16개에서 3개로 줄어 기본 도구 작업에서는 총 토큰이 42%, 비용이 13% 줄었습니다. 하지만 MCP 도구 작업에서는 도구를 찾는 왕복이 더해져 총 토큰이 19% 늘었습니다. 현재 이 기능은 Anthropic API에 직접 연결한 대화형 터미널 세션에서만 동작합니다.</span><span class="l-en">I turned on Code Mode in Claude Code and tested how much it saves in tokens and cost. Applied in an environment in actual use, the tools in each API request went from 16 to 3, so tasks on built-in tools used 42% fewer total tokens and cost 13% less. However, tasks on MCP tools needed extra round trips to find the tools and used 19% more total tokens. This feature currently runs only in an interactive terminal session connected directly to the Anthropic API.</span></p>
+<p class="thesis"><span class="l-ko">Claude Code의 Code Mode를 켜면 토큰과 비용의 절감 효과를 실제 테스트 해 보았습니다. 실제 사용 중인 환경에서 적용해 보면 API 요청에 실리는 도구가 16개에서 3개로 줄어 기본 도구 작업에서는 총 토큰이 42%, 비용이 13% 줄었습니다. 하지만 MCP 도구 작업에서는 도구를 찾는 왕복이 더해져 총 토큰이 19% 늘었습니다. 현재 이 기능은 Anthropic API에 직접 연결한 대화형 터미널 세션에서만 동작합니다. 지원 모델은 Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.2이고 이 글의 측정에는 Sonnet 5.5를 사용했습니다.</span><span class="l-en">I turned on Code Mode in Claude Code and tested how much it saves in tokens and cost. Applied in an environment in actual use, the tools in each API request went from 16 to 3, so tasks on built-in tools used 42% fewer total tokens and cost 13% less. However, tasks on MCP tools needed extra round trips to find the tools and used 19% more total tokens. This feature currently runs only in an interactive terminal session connected directly to the Anthropic API. It supports Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, and Fable 5.2, and the measurements in this post used Sonnet 5.5.</span></p>
 <div class="tags"><span>#Claude Code</span><span>#Code Mode</span><span>#MCP</span><span>#Prompt Caching</span><span>#Token Economics</span></div>
 <ul class="facts"><li><span class="l-ko"><b>도구 정의</b>: API 요청의 도구가 16개에서 3개로 줄고 첫 요청의 입력이 35.0k에서 22.8k 토큰으로 줄었습니다.</span><span class="l-en"><b>Tool definitions</b>: the tools in an API request went from 16 to 3, and the first request's input went from 35.0k to 22.8k tokens.</span></li><li><span class="l-ko"><b>기본 도구 작업 5종</b>: 총 토큰 42% 감소, 비용 13% 감소, 왕복 12% 감소.</span><span class="l-en"><b>Five tasks on built-in tools</b>: 42% fewer total tokens, 13% lower cost, 12% fewer round trips.</span></li><li><span class="l-ko"><b>MCP 도구 작업 3종</b>: 왕복 64% 증가, 총 토큰 19% 증가, 비용 5% 증가.</span><span class="l-en"><b>Three tasks on MCP tools</b>: 64% more round trips, 19% more total tokens, 5% higher cost.</span></li><li><span class="l-ko"><b>제약</b>: Amazon Bedrock, <code>claude -p</code>, OpenTelemetry 내보내기와는 함께 사용할 수 없습니다.</span><span class="l-en"><b>Limits</b>: it cannot be used with Amazon Bedrock, <code>claude -p</code>, or OpenTelemetry export.</span></li></ul>
 </header>
@@ -471,7 +471,7 @@ await tools.mcp__acme__get_shipment({orderId:"ORD-1017"})</code></pre></div>
 
 <section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>한계</h2></header><div class="prose">
 <ul>
-<li><b>모델</b>: Sonnet 5.5 하나입니다. Opus 5.5, Haiku 5.5, Fable 5.2에서는 호출을 묶는 성향이 다를 수 있습니다.</li>
+<li><b>측정한 모델</b>: Code Mode는 Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.2를 지원하지만 이 글은 Sonnet 5.5로만 측정했습니다. 다른 세 모델에서는 호출을 묶는 성향이 달라 결과가 다를 수 있습니다.</li>
 <li><b>반복 횟수</b>: 작업마다 3회입니다. 기본 도구 작업은 실행 간 차이가 거의 없었지만 MCP 작업의 켠 세션은 편차가 컸습니다.</li>
 <li><b>작업 크기</b>: 왕복 2회에서 7회로 끝나는 짧은 작업이고 프로젝트도 파일 54개로 작습니다. 긴 세션, 큰 출력, 오래 실행되는 스크립트는 측정하지 않았습니다.</li>
 <li><b>구성</b>: 플러그인과 MCP 서버를 뺀 구성입니다. 플러그인 40개를 설치한 평소 설정에서는 <code>/context</code> 추정치만 비교했고 시작 컨텍스트가 50.1k에서 35.2k로 줄었습니다.</li>
@@ -754,7 +754,7 @@ await tools.mcp__acme__get_shipment({orderId:"ORD-1017"})</code></pre></div>
 
 <section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Limitations</h2></header><div class="prose">
 <ul>
-<li><b>Model</b>: Sonnet 5.5 only. Opus 5.5, Haiku 5.5, and Fable 5.2 may differ in how much they batch calls.</li>
+<li><b>Model measured</b>: Code Mode supports Opus 5.5, Sonnet 5.5, Haiku 5.5, and Fable 5.2, but this post measured only Sonnet 5.5. The other three models may batch calls differently, so their results may differ.</li>
 <li><b>Repetitions</b>: three per task. Runs of the tasks on built-in tools barely differed, but the session with Code Mode on varied widely on the MCP tasks.</li>
 <li><b>Task size</b>: short tasks that end in 2 to 7 round trips, in a small project of 54 files. I did not measure long sessions, large outputs, or long-running scripts.</li>
 <li><b>Configuration</b>: plugins and MCP servers were removed. With my usual settings, which have 40 plugins installed, I compared only the <code>/context</code> estimates, and the starting context went from 50.1k to 35.2k.</li>
