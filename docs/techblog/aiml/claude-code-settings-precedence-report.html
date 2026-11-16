@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Claude Code 설정 우선순위: 어느 파일의 값이 적용되고 권한 규칙은 어떻게 합쳐지는가</title>
+<title>Claude Code 설정 우선순위와 권한규칙 Deep Dive</title>
 <meta name="description" content="Claude Code의 설정 파일 다섯 곳(Managed, 명령줄, 프로젝트 로컬, 공유 프로젝트, 사용자) 가운데 어느 값이 적용되는지 정리했습니다. 권한 규칙이 deny, ask, allow 순서로 평가되는 방식, 폴더 신뢰, Managed 소스 사이의 순위를 회사 규정에 빗대어 설명합니다.">
 <link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-settings-precedence/">
 <script>
@@ -197,7 +197,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 </nav>
 <header class="masthead">
 <div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-16</span><span class="l-en">Published 2026-11-16</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 20분</span><span class="l-en">20 min read</span></span></div>
-<h1><span class="l-ko">Claude Code 설정 우선순위: 어느 파일의 값이 적용되고 권한 규칙은 어떻게 합쳐지는가</span><span class="l-en">Claude Code settings precedence: which file's value applies and how permission rules combine</span></h1>
+<h1><span class="l-ko">Claude Code 설정 우선순위와 권한규칙 Deep Dive</span><span class="l-en">Claude Code settings precedence and permission rules: a deep dive</span></h1>
 <p class="thesis"><span class="l-ko">같은 설정이 여러 파일에 있을 때 Claude Code가 어느 값을 적용하는지에 대한 소개글입니다. 값이 하나인 키는 Managed, 명령줄, 프로젝트 로컬, 공유 프로젝트, 사용자 순으로 가장 높은 위치의 값 하나를 적용합니다. 권한 규칙 같은 목록 키는 모든 위치의 항목을 합친 뒤 deny, ask, allow 순서로 평가합니다. 그래서 어느 위치에서든 deny에 걸린 호출은 다른 위치의 allow로 풀 수 없습니다.</span><span class="l-en">This post introduces which value Claude Code applies when the same setting appears in several files. For a key that holds one value, the highest level wins, in the order managed, command line, project local, shared project, user. For a list key such as permission rules, Claude Code combines the entries from every level and evaluates them in deny, ask, allow order. So a call that a deny rule matches at any level cannot be released by an allow rule at another level.</span></p>
 <div class="tags"><span>#Claude Code</span><span>#Settings</span><span>#Permissions</span><span>#Managed settings</span><span>#Workspace trust</span><span>#Hooks</span></div>
 <ul class="facts"><li><span class="l-ko"><b>값이 하나인 키</b>: Managed, 명령줄(<code>--settings</code>), 프로젝트 로컬, 공유 프로젝트, 사용자 순으로 가장 높은 위치의 값 하나를 적용합니다.</span><span class="l-en"><b>Single-value keys</b>: the highest level wins, in the order managed, command line (<code>--settings</code>), project local, shared project, user.</span></li><li><span class="l-ko"><b>권한 규칙</b>: 모든 위치의 규칙을 합친 뒤 deny, ask, allow 순서로 평가하고 처음 일치한 결과를 따릅니다.</span><span class="l-en"><b>Permission rules</b>: rules from every level are combined and evaluated in deny, ask, allow order, and the first match decides.</span></li><li><span class="l-ko"><b>폴더 신뢰</b>: 공유 프로젝트 파일의 <code>allow</code>는 폴더를 신뢰한 뒤에 적용되고 <code>deny</code>와 <code>ask</code>는 바로 적용됩니다.</span><span class="l-en"><b>Workspace trust</b>: <code>allow</code> rules in the shared project file apply after you trust the folder, while <code>deny</code> and <code>ask</code> apply right away.</span></li><li><span class="l-ko"><b>Managed 소스</b>: 기본값 <code>first-wins</code>에서는 정책 키가 있는 가장 높은 소스 하나만 사용하고 나머지는 무시합니다.</span><span class="l-en"><b>Managed sources</b>: under the default <code>first-wins</code>, only the highest-ranked source that carries a policy key is used and the rest are ignored.</span></li></ul>

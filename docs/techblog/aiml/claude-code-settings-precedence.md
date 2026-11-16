@@ -1,6 +1,6 @@
 ---
-title: "Claude Code 설정 우선순위: 어느 파일의 값이 적용되고 권한 규칙은 어떻게 합쳐지는가"
-title_en: "Claude Code settings precedence: which file's value applies and how permission rules combine"
+title: "Claude Code 설정 우선순위와 권한규칙 Deep Dive"
+title_en: "Claude Code settings precedence and permission rules: a deep dive"
 layout: report
 report_src: /docs/techblog/aiml/claude-code-settings-precedence-report.html
 date: 2026-11-16
