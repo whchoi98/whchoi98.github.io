@@ -31,6 +31,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add post (KO/EN) republished from the AWS Tech Blog: "Getting started with AWS Emulator: How to test AWS applications locally without an account, and use cases" (`docs/techblog/aws-core/getting-started-with-aws-emulator-local-testing-without-an-aws-account`), with six figures in a Korean and an English version
 - Add post (KO/EN): "Claude Code settings precedence and permission rules: a deep dive" (`docs/techblog/aiml/claude-code-settings-precedence`), with seven figures in a Korean and an English version
 - Add post (KO/EN): "Token savings with the Code Mode feature in Claude Code" (`docs/techblog/aiml/claude-code-code-mode-token-measurement`), with three figures in a Korean and an English version
+- Add post (KO/EN): "GPT-6.2 Sol and Astra: the official announcement and real test results" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), with five figures in a Korean and an English version
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
 - Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
@@ -102,6 +103,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - AWS 기술 블로그 글을 옮겨 실은 게시물 추가(한영): "AWS Emulator 시작하기: 계정 없이 AWS 애플리케이션을 로컬에서 테스트하는 방법과 활용 사례" (`docs/techblog/aws-core/getting-started-with-aws-emulator-local-testing-without-an-aws-account`), 그림 6장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Claude Code 설정 우선순위와 권한규칙 Deep Dive" (`docs/techblog/aiml/claude-code-settings-precedence`), 그림 7장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Claude Code의 Code Mode 기능 기반의 토큰 절감" (`docs/techblog/aiml/claude-code-code-mode-token-measurement`), 그림 3장의 한국어판과 영어판 포함
+- 게시물 추가(한영): "GPT-6.2 Sol과 Astra, 공식 발표 내용과 실제 테스트 결과" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), 그림 5장의 한국어판과 영어판 포함
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
 - 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)
