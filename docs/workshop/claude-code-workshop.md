@@ -2,13 +2,13 @@
 title: Claude Code Deep Dive Workshop
 parent: Workshop
 nav_order: 3
-last_modified_date: "2026-09-20"
+last_modified_date: "2026-11-19"
 ---
 
 # Claude Code Deep Dive Workshop
 {: .no_toc }
 
-Claude Code 핸즈온 랩: 설치와 첫 자동화부터 서브에이전트, Enterprise 배포, 설정 계층, CLI 파이프라인, Agent SDK, 그리고 6개의 캡스톤 미션과 3개의 참조 문서까지.
+Claude Code 핸즈온 랩: 설치와 첫 자동화부터 서브에이전트, Enterprise 배포, 설정 계층, CLI 파이프라인, Agent SDK, 그리고 7개의 캡스톤 미션과 3개의 참조 문서까지.
 {: .fs-6 .fw-300 }
 
 [랩 포털 열기](/ccw-hands-on-lab/index.html){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
@@ -39,7 +39,7 @@ Claude Code 핸즈온 랩: 설치와 첫 자동화부터 서브에이전트, Ent
 
 ## 캡스톤 미션 (Capstone Missions)
 
-설치 가이드로 환경을 갖춘 뒤, 여섯 가지 미션 중 선택해 진행합니다.
+설치 가이드로 환경을 갖춘 뒤, 일곱 가지 미션 중 선택해 진행합니다.
 
 | Mission | 주제 | 구성 |
 |:--------|:-----|:-----|
@@ -50,6 +50,7 @@ Claude Code 핸즈온 랩: 설치와 첫 자동화부터 서브에이전트, Ent
 | [MISSION 4: Trend Radar: 유튜브 급상승 30 트렌드 레이더](/ccw-hands-on-lab/ClaudeCode_Capstone4_HandsOnLab.html) | 급상승 30을 주기 수집해 스냅샷으로 쌓고 순위 변동, NEW, 카테고리 점유율의 흐름을 분석. Bedrock을 SDK 없이 REST로 직접 호출 | 135분 / 미션 5 + DoD |
 | [MISSION 5: Quake Watch: 실시간 지진 워치](/ccw-hands-on-lab/ClaudeCode_Capstone5_HandsOnLab.html) | USGS 실시간 피드를 멱등 수집해 세계지도 SVG에 진앙 펄스로 표시, Bedrock이 지난 24시간을 한국어로 해설. 키 발급 없음, CloudFront 실배포 | 120분 / 미션 5 + DoD |
 | [MISSION 6: Newsroom Lens: 4개 매체 관점 비교](/ccw-hands-on-lab/ClaudeCode_Capstone6_HandsOnLab.html) | BBC, Guardian, NHK, 연합뉴스 RSS를 수집해 공통 토픽을 묶고 매체별 프레임을 나란히 비교. LLM 출력을 JSON 계약으로 화면에 | 120분 / 미션 5 + DoD |
+| [MISSION 7: Seoul Data: 서울 데이터로 만드는 세 가지 보고](/ccw-hands-on-lab/ClaudeCode_Day1_SeoulData_HandsOnLab.html) | seoul-kit 플러그인과 서울 MCP로 HTML 현황판, Excel 통계표, PowerPoint 브리핑을 만들고 내 팀 지표에 적용. 개발자가 아니어도 진행 가능 | 150분 / 준비 + 미션 4 |
 
 ## 참조 문서 (Reference)
 
