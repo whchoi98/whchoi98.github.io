@@ -1,0 +1,803 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS에서 vLLM을 실행하는 플랫폼 여섯 가지와 선택 기준</title>
+<meta name="description" content="AWS에서 vLLM 컨테이너를 실행하는 플랫폼은 EC2, ECS, EKS, Lambda, SageMaker AI, SageMaker HyperPod 여섯 가지입니다. 여섯 곳 모두 같은 엔진과 같은 OpenAI 호환 API를 사용하므로 운영 범위, 요청 경로, 확장과 시작 시간, 요금 단위 네 가지 기준으로 비교하고 상황별 선택 순서를 정리했습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/vllm-on-aws-platform-selection/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-21</span><span class="l-en">Published 2026-11-21</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 21분</span><span class="l-en">21 min read</span></span></div>
+<h1><span class="l-ko">AWS에서 vLLM을 실행하는 플랫폼 여섯 가지와 선택 기준</span><span class="l-en">Six AWS platforms for running vLLM and how to choose</span></h1>
+<p class="thesis"><span class="l-ko">AWS에서 vLLM을 실행하는 플랫폼은 EC2, ECS, EKS, SageMaker AI, SageMaker HyperPod에 2026년 11월의 Lambda GPU 함수가 더해져 여섯 가지가 됐습니다. 여섯 곳은 같은 vLLM 엔진과 같은 OpenAI 호환 API를 사용합니다. 다른 점은 누가 GPU 노드와 엔드포인트를 운영하는가, 요청이 어떻게 들어오는가, 어떻게 확장되는가, 무엇에 과금되는가 네 가지입니다. 이 글은 AWS 공식 문서를 기준으로 여섯 플랫폼을 이 네 가지 기준으로 비교합니다. 선택할 때는 필요한 통제 수준을 충족하는 선택지 가운데 AWS가 가장 많이 운영해 주는 것부터 검토합니다.</span><span class="l-en">With the Lambda GPU functions of November 2026 added to EC2, ECS, EKS, SageMaker AI and SageMaker HyperPod, there are now six AWS platforms that run vLLM. All six run the same vLLM engine behind the same OpenAI-compatible API. They differ on four points: who operates the GPU nodes and the endpoint, how requests arrive, how capacity scales, and what is billed. This post compares the six on those four criteria, based on the AWS documentation. The order of choice is to start with the option where AWS operates the most among those that give you the control you need.</span></p>
+<div class="tags"><span>#vLLM</span><span>#LLM inference</span><span>#AWS Lambda</span><span>#Amazon ECS</span><span>#Amazon EKS</span><span>#Amazon SageMaker AI</span><span>#SageMaker HyperPod</span></div>
+<ul class="facts"><li><span class="l-ko"><b>같은 엔진</b>: 여섯 플랫폼 모두 vLLM의 OpenAI 호환 서버를 실행합니다. AWS가 플랫폼별 이미지(EC2, ECS, EKS용은 포트 8000, SageMaker AI용은 포트 8080, Lambda용은 handler 내장)를 추가 요금 없이 배포합니다.</span><span class="l-en"><b>Same engine</b>: all six platforms run the OpenAI-compatible server of vLLM. AWS publishes an image for each platform at no extra charge (port 8000 for EC2, ECS and EKS, port 8080 for SageMaker AI, a built-in handler for Lambda).</span></li><li><span class="l-ko"><b>운영 범위</b>: EC2는 전부 직접 운영합니다. ECS와 EKS는 컨테이너 배치를, Lambda와 SageMaker AI는 GPU 인스턴스부터 요청 진입점까지를, HyperPod는 노드 상태 감시와 교체를 AWS가 맡습니다.</span><span class="l-en"><b>Who operates what</b>: on EC2 you operate everything. AWS takes container placement on ECS and EKS, everything from the GPU instances to the request entry point on Lambda and SageMaker AI, and node health monitoring and replacement on HyperPod.</span></li><li><span class="l-ko"><b>Lambda</b>: 2026년 11월 18일부터 Lambda Managed Instances에서 GPU 함수를 지원합니다. 실행 환경 하나에 GPU 1개(GPU 메모리 최대 48 GB)가 할당되고 EC2 요금에 관리 수수료 9.75%와 요청 요금이 더해집니다.</span><span class="l-en"><b>Lambda</b>: GPU functions on Lambda Managed Instances have been available since November 18, 2026. Each execution environment gets one GPU (up to 48 GB of GPU memory), and the price is the EC2 price plus a 9.75% management fee and the request charge.</span></li><li><span class="l-ko"><b>확장</b>: ECS, EKS, Lambda, SageMaker AI, HyperPod 모두 0까지 줄일 수 있지만 다시 올라오는 데 분 단위가 걸립니다. 그동안 Lambda는 HTTP 429를, SageMaker AI는 오류를 반환합니다.</span><span class="l-en"><b>Scaling</b>: ECS, EKS, Lambda, SageMaker AI and HyperPod can all scale to zero, but coming back takes minutes. In the meantime Lambda returns HTTP 429 and SageMaker AI returns an error.</span></li><li><span class="l-ko"><b>선택 순서</b>: AWS 선택 가이드의 순서는 Amazon Bedrock, SageMaker AI, HyperPod, 직접 운영(EC2, EKS, ECS)입니다. 구체적인 요구가 생길 때만 통제 범위가 넓은 쪽으로 옮기라고 안내합니다.</span><span class="l-en"><b>Order of choice</b>: the order in the AWS decision guide is Amazon Bedrock, SageMaker AI, HyperPod, then self-managed infrastructure (EC2, EKS, ECS). It says to move toward more control only when a specific requirement calls for it.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">같은 vLLM 컨테이너를 실행할 곳이 여섯 군데</a><a href="#ko-s2">vLLM과 AWS가 배포하는 컨테이너 이미지</a><a href="#ko-s3">플랫폼을 가르는 기준 네 가지</a><a href="#ko-s4">컨테이너를 직접 운영하는 EC2, ECS, EKS</a><a href="#ko-s5">함수로 실행하는 Lambda</a><a href="#ko-s6">ML 플랫폼에 배포하는 SageMaker AI와 HyperPod</a><a href="#ko-s7">vLLM을 직접 실행하지 않는 Amazon Bedrock</a><a href="#ko-s8">상황별 선택 순서</a><a href="#ko-s9">어느 플랫폼에서나 확인할 세 가지</a><a href="#ko-s10">나중에 옮길 때 바뀌는 것과 그대로인 것</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Six places to run the same vLLM container</a><a href="#en-s2">vLLM and the container images AWS publishes</a><a href="#en-s3">Four criteria that separate the platforms</a><a href="#en-s4">EC2, ECS and EKS: you run the containers yourself</a><a href="#en-s5">Lambda: run it as a function</a><a href="#en-s6">SageMaker AI and HyperPod: deploy on an ML platform</a><a href="#en-s7">Amazon Bedrock: no vLLM to run</a><a href="#en-s8">Which platform to look at first</a><a href="#en-s9">Three things to check on any platform</a><a href="#en-s10">What changes and what stays when you move later</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>같은 vLLM 컨테이너를 실행할 곳이 여섯 군데</h2></header><div class="prose">
+<p>오픈 웨이트 모델(가중치가 공개되어 직접 서빙하는 모델)을 vLLM으로 서빙하기로 정한 팀이 AWS 문서를 찾으면 가이드가 여섯 갈래로 나옵니다. Amazon EC2, Amazon ECS, Amazon EKS에는 컨테이너 가이드가 있습니다. Amazon SageMaker AI에는 엔드포인트가, SageMaker HyperPod에는 Inference Operator가 있습니다. 2026년 11월 18일에는 AWS Lambda가 Lambda Managed Instances에서 GPU 함수를 지원하면서 vLLM 이미지를 함께 내놓았습니다.</p>
+<p>문서마다 이미지 이름, 포트, 호출 방법이 달라서 서로 다른 제품 여섯 개를 비교해야 하는 것처럼 보입니다. 실제로는 여섯 곳 모두 같은 vLLM 서버를 실행하고 같은 OpenAI 호환 API로 응답합니다. 달라지는 것은 그 컨테이너 주변의 일을 누가 맡는가입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig01-map.png" alt="vLLM을 실행하는 여섯 플랫폼을 세 묶음으로 나눈 그림. 컨테이너를 직접 운영하는 EC2, ECS, EKS, 함수로 실행하는 Lambda, ML 플랫폼에 배포하는 SageMaker AI와 HyperPod, 그리고 vLLM을 직접 실행하지 않는 Bedrock이 각각 배포할 때 작성하는 것, AWS가 맡는 일, 맞는 경우와 함께 놓여 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> vLLM을 실행하는 여섯 플랫폼과 Amazon Bedrock. 여섯 곳은 같은 엔진을 실행하고 AWS가 맡는 범위가 다름</figcaption></figure>
+<p>표 1에 여섯 플랫폼과, vLLM을 직접 실행하지 않는 선택지인 Amazon Bedrock을 한 줄씩 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>플랫폼</th><th>배포할 때 작성하는 것</th><th>AWS가 맡는 일</th><th>직접 맡는 일</th></tr>
+</thead>
+<tbody>
+<tr><td>Amazon EC2</td><td><code>docker run</code> 명령</td><td>vLLM 이미지 제공과 패치</td><td>인스턴스, 드라이버, 로드 밸런서, 확장, 감시 전부</td></tr>
+<tr><td>Amazon ECS</td><td>태스크 정의와 서비스</td><td>컨테이너 배치. Managed Instances를 사용하면 인스턴스 준비, 패치, GPU 장애 복구까지</td><td>로드 밸런서 연결, 확장 정책, 인증</td></tr>
+<tr><td>Amazon EKS</td><td>Deployment와 Service 매니페스트</td><td>Kubernetes 제어 플레인. Auto Mode를 사용하면 노드 준비, 패치, 복구까지</td><td>Ingress, KEDA, 관측 도구의 설치와 운영, 인증</td></tr>
+<tr><td>AWS Lambda</td><td>Dockerfile의 <code>FROM</code> 한 줄과 환경 변수 <code>MODEL_ID</code></td><td>GPU 인스턴스 수명 주기, 드라이버 패치, 요청 라우팅과 로드 밸런싱, 확장</td><td>모델 위치와 vLLM 인자, 실행 환경 수의 최솟값과 최댓값</td></tr>
+<tr><td>Amazon SageMaker AI</td><td>모델, 엔드포인트 구성, 엔드포인트</td><td>인스턴스 준비와 패치, 엔드포인트, 상태 확인과 교체, 확장 실행</td><td>컨테이너와 vLLM 설정, 인스턴스 유형, 확장 정책</td></tr>
+<tr><td>SageMaker HyperPod</td><td><code>InferenceEndpointConfig</code> 리소스</td><td>노드 상태 감시와 자동 교체. Operator가 Deployment, 로드 밸런서, 인증서를 생성</td><td>오케스트레이션 운영, 노드 패치 실행, add-on 업그레이드</td></tr>
+<tr><td>Amazon Bedrock</td><td>모델 가중치 가져오기 또는 카탈로그 모델 호출</td><td>서빙 엔진과 인프라 전부</td><td>요청 파라미터</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> vLLM을 실행하는 여섯 플랫폼과 Amazon Bedrock. 2026년 11월 21일 AWS 공식 문서 기준</p>
+<blockquote><p>식당 주방에 비유하면 차이가 쉽게 보입니다. vLLM은 요리사, GPU는 화구, 요청은 주문입니다. EC2는 빈 점포를 빌려 화구 설치부터 주문 창구까지 직접 차리는 방식입니다. ECS는 요리사를 어느 자리에 몇 명 둘지만 적어 내면 운영 대행이 배치해 주는 주방이고 EKS는 표준 설계도로 주방 단지를 직접 설계해 원하는 설비를 들이는 방식입니다.</p><p>Lambda는 주문이 들어오면 일하는 출장 주방입니다. 주문 전달과 화구 관리를 업체가 맡는 대신 화구 하나에 올릴 수 있는 요리만 받습니다. SageMaker AI는 주문 창구와 화구 관리를 호텔에 맡긴 위탁 주방입니다. HyperPod는 메뉴 개발실과 조리 라인이 화구를 나눠 사용하는 중앙 주방이며 고장 난 화구는 운영사가 교체합니다. Bedrock은 요리사를 고용하지 않고 조리법만 식당에 맡기는 선택입니다.</p></blockquote>
+<p>비유와 다른 점도 있습니다. 출장 주방에 해당하는 Lambda도 고객 계정의 EC2 인스턴스에서 실행됩니다. 실행 환경의 최솟값을 1 이상으로 두면 주문이 없는 시간에도 인스턴스 요금이 과금됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>vLLM과 AWS가 배포하는 컨테이너 이미지</h2></header><div class="prose">
+<p>vLLM은 LLM 추론과 서빙을 위한 오픈소스 라이브러리입니다. UC Berkeley의 Sky Computing Lab에서 시작했고 지금은 여러 대학과 기업이 참여하는 커뮤니티가 유지합니다. <a href="https://docs.vllm.ai/en/latest/" target="_blank" rel="noopener">vLLM 문서</a>가 드는 주요 기능 가운데 서빙 성능과 관련된 것은 네 가지입니다. 어텐션 메모리를 관리하는 PagedAttention, 요청을 계속 묶어 처리하는 연속 배칭(continuous batching), Prefix 캐싱, 여러 LoRA 어댑터의 동시 서빙입니다.</p>
+<p>플랫폼 선택에서 중요한 특징은 서버가 OpenAI 호환 API를 제공한다는 점입니다. <code>/v1/chat/completions</code>, <code>/v1/completions</code>, <code>/v1/embeddings</code> 같은 경로를 그대로 제공하므로 OpenAI SDK로 작성한 클라이언트는 주소만 바꿔 호출합니다. 상태 확인용 <code>/health</code>와 Prometheus 형식의 <code>/metrics</code>도 같은 서버가 제공합니다.</p>
+<p>AWS는 vLLM을 넣은 Deep Learning Containers(DLC) 이미지를 추가 요금 없이 배포합니다. <a href="https://aws.github.io/deep-learning-containers/vllm/" target="_blank" rel="noopener">DLC 문서</a>에 따르면 이미지는 Amazon Linux 2023 기반이고 vLLM의 main 브랜치를 따라가며 회귀 테스트를 통과한 뒤 게시됩니다. 가장 단순한 실행 형태는 GPU 인스턴스에서 컨테이너 하나를 실행하는 명령입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>docker run --gpus all -p 8000:8000 \
+  public.ecr.aws/deep-learning-containers/vllm:server-cuda \
+  --model openai/gpt-oss-20b \
+  --host 0.0.0.0 --port 8000</code></pre></div>
+<p>나머지 다섯 플랫폼은 이 명령을 각자의 배포 단위로 감싸 실행합니다. 엔진은 같고 플랫폼의 호출 규약에 맞춘 이미지가 따로 있습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>플랫폼</th><th>이미지</th><th>요청을 받는 방식</th><th>모델과 vLLM 인자를 지정하는 곳</th></tr>
+</thead>
+<tbody>
+<tr><td>EC2, ECS, EKS</td><td><code>vllm:server-cuda</code></td><td>포트 8000, OpenAI 호환 경로 그대로</td><td>컨테이너 인자(<code>--model</code>과 <code>vllm serve</code>의 플래그)</td></tr>
+<tr><td>SageMaker AI</td><td><code>vllm:server-sagemaker-cuda</code></td><td>포트 8080, <code>/ping</code>과 <code>/invocations</code></td><td>환경 변수 <code>SM_VLLM_*</code></td></tr>
+<tr><td>Lambda</td><td><code>lambda/deep-learning-containers/vllm:cuda</code></td><td>포트를 외부에 열지 않음. 기본 handler가 이벤트를 로컬 vLLM 서버로 전달</td><td>환경 변수 <code>MODEL_ID</code>, <code>VLLM_SERVER_ARGS</code></td></tr>
+<tr><td>HyperPod</td><td>문서 예제는 vLLM 공식 이미지 <code>vllm/vllm-openai</code>, DPD 구성은 <code>vllm:server-hyperpod-cuda</code></td><td><code>invocationEndpoint</code>에 적은 경로(예: <code>v1/chat/completions</code>)</td><td><code>InferenceEndpointConfig</code>의 모델 소스와 컨테이너 설정</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 플랫폼별 vLLM 이미지와 요청을 받는 방식. DLC 이미지는 <code>public.ecr.aws/deep-learning-containers/</code> 아래에, Lambda용 이미지는 <code>public.ecr.aws/lambda/</code> 아래에 있음. 2026년 11월 21일 기준</p>
+<p>문서마다 예제의 버전이 다르다는 점은 주의가 필요합니다. 2026년 11월 21일 기준 DLC Changelog의 최신 릴리스는 11월 8일의 <code>server-cuda-v2.8</code>(vLLM 0.33.0)입니다. EKS 사용자 가이드의 예제는 Ubuntu 기반의 0.21.0 태그를, HyperPod 문서의 예제는 0.19 계열을 사용합니다.</p>
+<p>DLC 지원 정책은 vLLM 이미지의 최신 릴리스만 지원하고 Ubuntu 기반 이미지는 보안 패치를 보장하지 않는다고 밝힙니다. 예제의 태그를 그대로 복사하지 말고 Amazon Linux 2023 기반의 최신 태그를 확인하는 것을 권고합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>플랫폼을 가르는 기준 네 가지</h2></header><div class="prose">
+<p>여섯 플랫폼의 차이는 네 가지 질문으로 정리됩니다. 뒤의 챕터는 모든 플랫폼을 이 순서로 설명합니다.</p>
+<h3>운영 범위</h3>
+<p>GPU 추론 서버의 운영은 여섯 가지 일로 나뉩니다. GPU 인스턴스 준비와 교체, OS와 GPU 드라이버 패치, 컨테이너 배치와 재시작, 요청 진입점과 로드 밸런싱, 확장 실행, vLLM 설정입니다. 플랫폼마다 이 가운데 AWS가 맡는 범위가 다르고 vLLM 설정과 모델 선택은 어느 플랫폼에서나 직접 맡습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig02-ownership.png" alt="여섯 가지 운영 업무를 행으로, EC2, ECS, EKS, Lambda, SageMaker AI, HyperPod를 열로 놓은 표 형태의 그림. 칸마다 AWS가 맡음, 조건부 또는 일부, 직접 맡음이 색으로 구분되어 있고 EC2는 모두 직접, Lambda와 SageMaker AI는 대부분 AWS, vLLM 설정과 모델은 모든 플랫폼에서 직접으로 표시되어 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 플랫폼별 운영 범위. ECS는 Managed Instances, EKS는 Auto Mode를 사용할 때 AWS가 맡는 범위가 넓어짐</figcaption></figure>
+<p><a href="https://docs.aws.amazon.com/decision-guides/latest/decision-guides/genai-guide.html" target="_blank" rel="noopener">AWS 선택 가이드</a>는 이 차이를 한 문장씩으로 요약합니다. SageMaker AI는 AWS가 인스턴스와 배포를 관리하고 고객이 모델 스택을 관리합니다. HyperPod는 AWS가 클러스터 복원력을 맡고 고객이 오케스트레이션을 관리합니다. EC2, EKS, ECS에서 직접 운영하면 인스턴스 위의 모든 것을 고객이 관리합니다.</p>
+<h3>요청 경로</h3>
+<p>vLLM 자체는 포트 하나에서 HTTP 요청을 받고 기본 인증이 없습니다. 그래서 진입점을 누가 만들고 어떤 방식으로 인증하는가가 플랫폼마다 달라집니다. EC2, ECS, EKS에서는 로드 밸런서와 인증을 직접 구성합니다. Lambda와 SageMaker AI는 AWS API가 진입점이고 IAM으로 인증합니다. HyperPod는 Operator가 로드 밸런서를 만듭니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig03-request-path.png" alt="여섯 플랫폼마다 호출하는 쪽, 진입점, vLLM 컨테이너, 인증을 한 줄씩 보여 주는 그림. EC2, ECS, EKS는 직접 구성한 로드 밸런서를 거쳐 포트 8000으로, Lambda는 Invoke API와 기본 handler를 거쳐 로컬 포트 8000으로, SageMaker AI는 SageMaker Runtime을 거쳐 포트 8080의 invocations 경로로, HyperPod는 Operator가 만든 ALB나 SageMaker 엔드포인트, Inference Gateway를 거쳐 전달된다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 요청이 vLLM에 닿는 경로. 진입점을 AWS가 제공하는 플랫폼과 직접 구성하는 플랫폼으로 나뉨</figcaption></figure>
+<h3>확장과 시작 시간</h3>
+<p>GPU 인스턴스는 요청이 없는 시간에도 과금되므로 트래픽이 없을 때 0까지 줄일 수 있는지가 비용을 좌우합니다. 반대로 0에서 다시 올라올 때는 인스턴스 시작, 이미지 내려받기, 모델 가중치 적재가 차례로 일어납니다. AWS Prescriptive Guidance는 이 과정이 수 분 걸릴 수 있으므로 용량이 소진되기 전에 반응하도록 확장 정책을 설정하라고 안내합니다.</p>
+<p>플랫폼마다 확장 신호, 최소 용량의 기본값, 0인 동안 들어온 요청의 처리 방식이 다릅니다.</p>
+<h3>요금 단위</h3>
+<p>여섯 플랫폼 모두 토큰이 아니라 GPU 인스턴스가 실행된 시간에 과금됩니다. 차이는 인스턴스 요금 위에 더해지는 항목입니다. EC2는 인스턴스 요금만 냅니다. EKS는 클러스터 요금이 더해지고 ECS Managed Instances와 EKS Auto Mode, Lambda는 관리 요금이 더해집니다. SageMaker AI와 HyperPod는 이름이 <code>ml.</code>로 시작하는 인스턴스의 요금표를 따릅니다.</p>
+<p>AWS 선택 가이드는 인스턴스 기반 선택지가 사용 여부와 관계없이 과금되므로 높은 사용률이 유지되거나 기존 약정을 적용할 때 비용 효율이 높아진다고 설명합니다.</p>
+</div></section>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>컨테이너를 직접 운영하는 EC2, ECS, EKS</h2></header><div class="prose">
+<p>AWS 문서는 세 플랫폼을 직접 운영(self-managed)으로 묶습니다. 같은 <code>vllm:server-cuda</code> 이미지를 사용하고 인스턴스 위의 구성을 고객이 책임집니다. 세 곳의 차이는 컨테이너 배치를 누가 하는가입니다. EC2에서는 팀이 인스턴스를 직접 다루고 ECS에서는 AWS가 오케스트레이션 계층을 관리하며 EKS에서는 Kubernetes가 오케스트레이션을 맡습니다.</p>
+<h3>인스턴스에서 직접 실행하는 Amazon EC2</h3>
+<p>EC2는 앞에서 본 <code>docker run</code> 명령을 GPU 인스턴스에서 그대로 실행하는 방식입니다. AWS Deep Learning AMI를 사용하면 NVIDIA 드라이버와 컨테이너 툴킷이 설치된 상태에서 시작합니다.</p>
+<ul>
+<li><b>운영 범위</b>: 인스턴스 교체, OS와 드라이버 갱신, 컨테이너 재시작, 지표 수집을 모두 직접 구성합니다. AWS가 맡는 것은 DLC 이미지의 패치입니다.</li>
+<li><b>요청 경로</b>: 컨테이너가 포트 8000에서 OpenAI 호환 API를 제공합니다. 로드 밸런서, TLS, 인증은 직접 구성합니다.</li>
+<li><b>확장과 시작 시간</b>: 확장이 필요하면 Auto Scaling 그룹으로 직접 구성합니다. GPU 하나에 들어가지 않는 모델은 <code>--tensor-parallel-size</code>로 한 인스턴스의 여러 GPU에 나눠 올립니다.</li>
+<li><b>요금 단위</b>: EC2 인스턴스 요금만 냅니다. DLC 이미지에는 추가 요금이 없습니다.</li>
+</ul>
+<p>모델 하나를 인스턴스 한두 대에서 검증하는 단계나 드라이버와 커널 수준까지 직접 통제해야 하는 경우에 맞습니다. 인스턴스 수가 늘면 배치, 교체, 확장을 직접 구성해야 하는 부담이 커집니다.</p>
+<h3>태스크 정의로 배치를 맡기는 Amazon ECS</h3>
+<p>ECS는 태스크 정의에 이미지와 GPU 수를 적으면 ECS가 컨테이너를 인스턴스에 배치합니다. GPU는 컨테이너 정의의 <code>resourceRequirements</code>로 요청합니다. GPU를 사용하는 방법은 두 가지입니다. 직접 관리하는 EC2 인스턴스를 사용하는 ECS on EC2와 AWS가 인스턴스를 관리하는 ECS Managed Instances입니다. AWS Fargate는 GPU를 지원하지 않습니다.</p>
+<p>필자가 2026년 11월 21일에 확인한 범위에서는 ECS 전용 vLLM 이미지나 단계별 공식 가이드를 찾지 못했습니다. EC2용 DLC 이미지를 태스크 정의에 그대로 사용합니다. 가장 가까운 공식 참고 구현은 <a href="https://aws.amazon.com/blogs/containers/run-gpu-batch-inference-on-amazon-ecs-managed-instances-with-scale-to-zero/" target="_blank" rel="noopener">AWS Containers 블로그의 GPU 배치 추론 예제</a>입니다.</p>
+<ul>
+<li><b>운영 범위</b>: 컨테이너 배치는 ECS가 맡습니다. ECS Managed Instances를 사용하면 인스턴스 준비, OS 패치, NVIDIA 드라이버 설치까지 AWS가 맡고 인스턴스를 최대 14일마다 교체합니다. GPU 장애를 감지해 인스턴스를 교체하는 기능도 기본으로 활성화되어 있습니다. ECS on EC2에서는 AWS가 GPU 최적화 AMI를 제공하고 교체와 갱신은 직접 진행합니다.</li>
+<li><b>요청 경로</b>: ECS에는 추론 호출 API가 없으므로 서비스에 Application Load Balancer나 Network Load Balancer를 연결합니다. 인증은 직접 구성합니다.</li>
+<li><b>확장과 시작 시간</b>: Service Auto Scaling이 대상 추적, 단계, 예약, 예측, Amazon SQS 대기열 길이 기준 확장을 지원하고 최소 태스크 수를 0으로 둘 수 있습니다. Managed Instances는 태스크가 없으면 인스턴스도 0으로 줄입니다. 블로그의 배치 추론 예제는 0에서 첫 결과까지 약 13분, 태스크가 실행 중일 때의 다음 작업은 약 2초가 걸린다고 밝힙니다.</li>
+<li><b>요금 단위</b>: ECS 오케스트레이션에는 추가 요금이 없고 EC2 요금을 냅니다. Managed Instances는 EC2 요금에 인스턴스별 관리 요금이 더해지며 2026년 7월 1일부터 G 시리즈의 관리 요금이 35% 인하됐습니다.</li>
+</ul>
+<p>이미 ECS로 서비스를 운영하는 팀이 Kubernetes 없이 GPU 추론을 더하려는 경우나 SQS로 작업을 받아 처리하는 배치 추론에 맞습니다. ECS가 제공하는 것은 범용 컨테이너 기능입니다. KV 캐시 상태를 보는 라우팅 같은 추론 전용 기능은 필자가 확인한 ECS 문서에 없었습니다.</p>
+<h3>Kubernetes 위에서 직접 조립하는 Amazon EKS</h3>
+<p>EKS에서는 vLLM을 일반 Deployment와 Service로 배포합니다. vLLM 전용 Operator나 add-on은 없고 <a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference.html" target="_blank" rel="noopener">EKS 사용자 가이드의 추론 챕터</a>가 기준 구성을 제시합니다. vLLM DLC, Amazon S3의 가중치를 GPU 메모리로 바로 올리는 Run:ai Model Streamer, ALB Ingress, KEDA를 조합한 구성입니다. 같은 절차가 EKS Auto Mode와 직접 운영하는 Karpenter 양쪽에서 동작합니다.</p>
+<ul>
+<li><b>운영 범위</b>: EKS Auto Mode를 사용하면 노드 준비, 패치, GPU 드라이버, 장애 노드 복구를 AWS가 맡고 노드는 최대 21일 뒤 교체됩니다. Auto Mode가 아니면 Karpenter, NVIDIA device plugin, 노드 모니터링 에이전트를 직접 설치하고 운영합니다. 두 경우 모두 KEDA와 관측 도구(Prometheus, Grafana)는 직접 설치합니다.</li>
+<li><b>요청 경로</b>: Service가 포트 8000을 클러스터 안에 노출하고 운영 트래픽은 ALB Ingress로 받습니다. 가이드의 예제에는 인증이 없어 접근을 허용할 IP 대역 제한을 필수로 요구합니다. ALB에서 Amazon Cognito나 OIDC 인증을 추가할 수 있습니다.</li>
+<li><b>확장과 시작 시간</b>: 가이드는 KEDA로 vLLM의 대기 요청 수(<code>vllm:num_requests_waiting</code>)와 p95 지연 시간을 기준으로 Pod를 늘리고 Karpenter가 노드를 추가합니다. 가이드의 예시(g6e.4xlarge)는 노드 준비 30초, 8.8 GB 이미지 받기 약 48초, 10.4 GB 가중치 적재 약 5초였고 문서는 2분 안에 서빙을 시작할 수 있다고 설명합니다.</li>
+<li><b>요금 단위</b>: 클러스터 요금(표준 지원 버전 기준 시간당 0.10 USD)과 노드의 EC2 요금을 냅니다. Auto Mode는 EC2 요금에 관리 요금이 더해집니다.</li>
+</ul>
+<p>Kubernetes를 표준 플랫폼으로 운영하는 조직이나 여러 모델과 오픈소스 도구(llm-d, LeaderWorkerSet, GPU 분할)를 직접 조합하려는 경우에 맞습니다. AWS 선택 가이드도 Kubernetes 같은 특정 플랫폼으로 표준화한 경우를 직접 운영을 고르는 이유로 듭니다. 대신 Ingress, 자동 확장, 관측, 인증을 조립하고 버전을 맞추는 일이 고객의 몫입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>함수로 실행하는 Lambda</h2></header><div class="prose">
+<p>Lambda는 2026년 11월 18일부터 Lambda Managed Instances에서 GPU 함수를 정식으로 지원합니다. Lambda Managed Instances는 Lambda가 고객 계정의 EC2 인스턴스를 관리하면서 그 위에서 함수를 실행하는 방식입니다. 인스턴스 유형과 확장 범위는 용량 공급자(capacity provider)에 정의합니다.</p>
+<p>vLLM을 실행하는 데 필요한 것은 Dockerfile 한 줄과 환경 변수 하나입니다. Lambda가 제공하는 이미지를 <code>FROM public.ecr.aws/lambda/deep-learning-containers/vllm:cuda</code>로 지정하면 vLLM 서버와 기본 handler가 함께 들어옵니다. 실행 환경(execution environment)이 시작될 때 서버를 한 번 실행하고 함수 호출로 들어온 이벤트를 handler가 로컬 서버로 전달합니다. 모델은 환경 변수로 바꿉니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws lambda update-function-configuration \
+  --function-name my-gpu-function \
+  --environment 'Variables={MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct,HF_TOKEN=&lt;your-hugging-face-token&gt;}'</code></pre></div>
+<p>이벤트 본문이 곧 OpenAI 형식의 요청입니다. 기본 handler는 요청에 <code>messages</code>가 있으면 <code>/v1/chat/completions</code>로, <code>prompt</code>가 있으면 <code>/v1/completions</code>로 전달합니다. <code>MODEL_ID</code>에는 Hugging Face 모델 ID 외에 S3 경로를 지정할 수 있고 문서는 운영 환경에서 S3를 사용하라고 권고합니다.</p>
+<ul>
+<li><b>운영 범위</b>: GPU 인스턴스 수명 주기, OS와 GPU 드라이버 패치, 상태 확인, 확장, 요청 라우팅과 로드 밸런싱을 Lambda가 맡습니다. vLLM 서버가 상태 확인에 세 번 연속 실패하면 실행 환경을 교체합니다. GPU 사용률과 GPU 메모리 지표는 Amazon CloudWatch에 기본으로 게시됩니다.</li>
+<li><b>요청 경로</b>: 다른 Lambda 함수와 같이 동기 호출, 비동기 호출, 이벤트 소스 매핑(Amazon SQS, Amazon Kinesis 등)으로 호출하고 IAM으로 인증합니다. 컨테이너는 포트를 외부에 열지 않습니다. 동기 호출의 요청과 응답은 각각 6 MB까지이고 제한 시간은 동기 호출 30분, 비동기 호출과 이벤트 소스 매핑 90분입니다.</li>
+<li><b>확장과 시작 시간</b>: GPU 사용률(기본 목표 40%), CPU 사용률, 동시 실행 수를 기준으로 Lambda가 실행 환경과 인스턴스를 늘립니다. GPU 함수는 실행 환경 수의 최솟값이 기본 1이고 0으로 설정할 수 있습니다. 0에서 올라오는 수 분 동안 들어온 호출은 HTTP 429로 거절됩니다. AWS News Blog의 예시는 Hugging Face 모델 ID에서 호출 가능한 엔드포인트까지 약 10분이 걸렸다고 밝힙니다.</li>
+<li><b>요금 단위</b>: EC2 On-Demand 요금에 관리 수수료 9.75%(GPU G 시리즈)와 요청 100만 건당 0.20 USD가 더해집니다. 호출별 실행 시간 요금은 없습니다. Savings Plans와 예약 인스턴스 할인은 EC2 요금 부분에만 적용됩니다.</li>
+</ul>
+<p>제약은 모델 크기에서 먼저 나옵니다. 지원 인스턴스는 EC2 G 시리즈(G4dn, G5, G6, Gr6, G6e, G6f, Gr6f)이고 실행 환경 하나에 GPU가 정확히 1개 할당됩니다. GPU 메모리는 최대 48 GB, 함수 메모리는 최대 32,768 MB, 컨테이너 이미지는 최대 32 GB입니다. 여러 GPU에 나눠 올려야 하는 모델은 대상이 아닙니다.</p>
+<p>토큰 스트리밍 응답과 함수 URL을 GPU 함수에서 지원하는지는 필자가 확인한 문서에 나와 있지 않았습니다. 문서의 예제 handler는 응답 전체를 한 번에 반환합니다. 대화형 화면에 토큰을 바로 보여 줘야 한다면 적용 전에 확인이 필요합니다.</p>
+<p><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu.html" target="_blank" rel="noopener">Lambda 문서</a>는 대상 워크로드를 두 가지로 설명합니다. GPU 연산이 애플리케이션의 한 단계로 이벤트에 따라 실행되는 경우와 AMI, 드라이버, CUDA 버전을 관리하고 싶지 않은 경우입니다. 언어 모델은 애플리케이션의 일부로 배포하는 중소형 모델을 대상으로 적고 파운데이션 모델은 Amazon Bedrock을 검토하라고 안내합니다. SQS 대기열의 문서를 묶음으로 처리하거나 워크플로의 한 단계로 추론을 호출하는 구성이 여기에 해당합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>ML 플랫폼에 배포하는 SageMaker AI와 HyperPod</h2></header><div class="prose">
+<p>두 플랫폼은 같은 SageMaker 계열이지만 운영 방식이 다릅니다. SageMaker AI 엔드포인트는 Kubernetes 없이 사용하는 관리형 엔드포인트이고 HyperPod는 Amazon EKS 클러스터 위에서 동작합니다.</p>
+<h3>관리형 엔드포인트를 제공하는 Amazon SageMaker AI</h3>
+<p>SageMaker AI에서는 모델, 엔드포인트 구성, 엔드포인트를 만들면 SageMaker AI가 GPU 인스턴스를 준비하고 컨테이너를 실행합니다. SageMaker용 vLLM 이미지는 포트 8080에서 <code>/ping</code>과 <code>/invocations</code>를 제공하고 vLLM 인자는 이름이 <code>SM_VLLM_</code>으로 시작하는 환경 변수로 전달합니다. 예를 들어 <code>SM_VLLM_MAX_MODEL_LEN=4096</code>은 <code>--max-model-len 4096</code>이 됩니다.</p>
+<p>2026년 5월 21일부터는 엔드포인트가 OpenAI 호환 경로를 제공합니다. OpenAI SDK의 기본 주소를 엔드포인트 주소로 바꾸고 AWS 자격 증명으로 만든 단기 토큰(최대 12시간)을 API 키 자리에 넣습니다. 문서가 설명하는 경로는 Chat Completions입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>from openai import OpenAI
+from sagemaker.core.token_generator import generate_token
+
+REGION = "us-west-2"
+sme_base_url = (
+    f"https://runtime.sagemaker.{REGION}.amazonaws.com"
+    f"/endpoints/{SME_ENDPOINT_NAME}/openai/v1"
+)
+
+client = OpenAI(
+    base_url=sme_base_url,
+    api_key=generate_token(region=REGION),
+)</code></pre></div>
+<ul>
+<li><b>운영 범위</b>: 인스턴스 준비, 보안 패치, 상태 확인과 비정상 인스턴스 교체를 SageMaker AI가 맡습니다. 고객은 컨테이너와 vLLM 설정, 인스턴스 유형, 확장 정책을 정합니다. vLLM의 첫 토큰까지의 시간(TTFT)과 대기 요청 수 같은 지표가 별도 계측 없이 CloudWatch에 게시됩니다.</li>
+<li><b>요청 경로</b>: <code>InvokeEndpoint</code>와 응답 스트리밍용 <code>InvokeEndpointWithResponseStream</code>을 SigV4 서명으로 호출하거나 OpenAI 호환 경로를 단기 토큰으로 호출합니다. 엔드포인트는 계정 범위이고 외부에 공개되지 않습니다. 일반 응답은 60초, 스트리밍 응답은 8분 안에 끝나야 합니다.</li>
+<li><b>확장과 시작 시간</b>: 모델 컨테이너가 받는 동시 요청 수(<code>ConcurrentRequestsPerModel</code>) 같은 지표로 인스턴스 수를 조정합니다. 0까지 줄이는 기능은 추론 구성 요소(inference component)를 사용하는 엔드포인트에서만 지원하고 0에서 올라오는 수 분 동안 호출은 오류를 반환합니다. 라우팅 전략은 네 가지이며 2026년 11월에 추가된 <code>KV_AWARE</code>는 vLLM의 KV 캐시 상태를 보고 요청을 보낼 인스턴스를 고릅니다.</li>
+<li><b>요금 단위</b>: <code>ml.</code> 인스턴스의 사용 시간, 스토리지, 처리한 데이터 양에 과금됩니다. 엔드포인트는 서비스 중이면 트래픽이 없어도 과금됩니다. SageMaker Savings Plans가 실시간 추론에 적용됩니다.</li>
+</ul>
+<p>AWS 선택 가이드는 SageMaker AI 엔드포인트가 맞는 경우를 이렇게 설명합니다. 표준 형식의 오픈 웨이트 모델이나 커스텀 모델을 서빙 스택을 통제하면서 호스팅하되 인스턴스, 배포, 자동 확장, 모니터링은 AWS에 맡기는 경우입니다. Kubernetes 운영 인력 없이 vLLM 설정을 직접 조정하려는 팀에 맞습니다.</p>
+<p>확인할 점은 두 가지입니다. DLC 문서에 따르면 엔드포인트를 만들 때는 공개 갤러리의 이미지가 아니라 리전별 비공개 ECR 경로의 이미지를 사용합니다. AWS 블로그는 인스턴스 하나에 들어가지 않는 크기의 모델을 HyperPod로 옮기는 사례를 소개합니다.</p>
+<h3>EKS 위에서 Operator로 배포하는 SageMaker HyperPod</h3>
+<p>HyperPod는 Amazon EKS가 오케스트레이션하는 GPU 클러스터이고 추론 기능은 EKS add-on으로 설치하는 HyperPod Inference Operator가 제공합니다. <code>InferenceEndpointConfig</code> 리소스 하나에 모델 위치, 인스턴스 유형, 호출 경로를 적습니다. 그러면 Operator가 Deployment, Service, Application Load Balancer, KEDA 자동 확장, 인증서, SageMaker 엔드포인트 등록까지 만듭니다. EKS에서 직접 조립하던 부분을 Operator가 대신하는 구조입니다.</p>
+<ul>
+<li><b>운영 범위</b>: 노드 상태 감시와 자동 교체는 HyperPod가 맡습니다. 오케스트레이션 운영, Operator 상태 감시, add-on 업그레이드, 노드 패치 실행(<code>update-cluster-software</code>)은 고객이 맡습니다. 관측 구성(Amazon Managed Service for Prometheus와 Amazon Managed Grafana 대시보드)은 한 번의 설정으로 제공됩니다.</li>
+<li><b>요청 경로</b>: Operator가 만든 ALB를 HTTPS로 직접 호출하거나 SageMaker 엔드포인트로 호출합니다. SageMaker 엔드포인트 등록은 선택입니다. Inference Gateway를 활성화하면 클러스터당 OpenAI 호환 엔드포인트 하나가 요청 본문의 <code>model</code> 값을 보고 모델별 Pod로 요청을 보냅니다. Gateway는 기본 상태에서 요청을 인증하지 않으므로 문서는 JWT 인증 설정을 강하게 권고합니다.</li>
+<li><b>확장과 시작 시간</b>: Pod는 Operator에 포함된 KEDA가, 노드는 HyperPod가 관리하는 Karpenter가 늘립니다. 복제본의 최솟값을 0으로 둘 수 있고 Pod가 0이 되면 노드도 제거됩니다. AWS는 모델과 이미지를 노드의 NVMe에 캐시하는 기능으로 57 GB에서 145 GB 크기 모델의 확장 시간이 약 60% 줄었다고 밝힙니다.</li>
+<li><b>요금 단위</b>: <code>ml.</code> 인스턴스 요금을 내고 연결된 EKS 제어 플레인, Amazon FSx for Lustre, Amazon S3 요금은 별도입니다. 요금 페이지가 나열하는 SageMaker Savings Plans의 적용 대상에는 HyperPod가 없으므로 약정이 적용되는 범위를 먼저 확인하는 것을 권고합니다.</li>
+</ul>
+<p>HyperPod가 다른 다섯 곳과 구별되는 부분은 추론 최적화 기능입니다. 세 가지 기능을 <code>InferenceEndpointConfig</code>의 필드로 활성화합니다. 첫째는 Prefix와 KV 캐시 상태를 보는 지능형 라우팅이고 둘째는 CPU 메모리와 외부 저장소를 사용하는 2단계 KV 캐시입니다. 셋째는 Prefill과 Decode를 서로 다른 GPU 풀에 나누는 DPD(Disaggregated Prefill and Decode)입니다. KV 캐시와 지능형 라우팅은 vLLM 컨테이너에서만 동작합니다. DPD는 EFA를 지원하는 P 계열 48xlarge 인스턴스가 필요하고 문서는 70B 이상 모델과 4,000 토큰 이상의 긴 입력에서 효과가 있다고 설명합니다.</p>
+<p>AWS 선택 가이드는 HyperPod가 맞는 경우로 세 가지를 듭니다. 대규모 학습, 학습과 추론이 가속기 풀 하나를 공유하는 경우, 고급 추론 최적화가 필요한 경우입니다. Kubernetes 도구를 그대로 사용하면서 노드 복원력은 AWS에 맡기려는 조직에 맞습니다. Kubernetes 운영 역량이 필요하다는 점은 EKS와 같습니다.</p>
+</div></section>
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>vLLM을 직접 실행하지 않는 Amazon Bedrock</h2></header><div class="prose">
+<p>AWS 선택 가이드는 추론 워크로드를 Amazon Bedrock에서 시작하라고 안내합니다. 필요한 오픈 웨이트 모델이 Bedrock 카탈로그에 서버리스로 제공되면 vLLM을 운영할 이유가 없습니다. Qwen3와 gpt-oss 같은 모델이 이 방식으로 제공됩니다.</p>
+<p>직접 미세 조정한 모델은 Custom Model Import로 가져옵니다. Hugging Face 형식의 safetensors 가중치를 S3에 두고 가져오기 작업을 실행하면 AWS가 GPU 준비, 추론 서버 구성, 확장을 맡습니다. 호출은 <code>InvokeModel</code>에 OpenAI 형식의 요청 본문을 실어 보냅니다. 5분 동안 호출이 없으면 0으로 줄어들고 모델 사본이 활성인 시간을 5분 단위로 과금합니다.</p>
+<p>제약도 분명합니다. 가져올 수 있는 아키텍처가 Llama, Mistral, Mixtral, Qwen, GPT-OSS 등으로 정해져 있고 텍스트 모델의 가중치는 200 GB 미만이어야 합니다. 서빙 엔진의 설정을 고객이 바꾸는 방법은 문서에 없습니다. 지원 리전은 us-east-1, us-east-2, us-west-2, eu-central-1이고 서울 리전은 포함되지 않습니다.</p>
+<p>이 제약에 해당하거나 엔진을 직접 조정해야 할 때 앞의 여섯 플랫폼이 선택지가 됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>상황별 선택 순서</h2></header><div class="prose">
+<p>AWS 선택 가이드의 원칙은 두 문장입니다. 워크로드에 필요한 기능을 지원하는 선택지 가운데 가장 많이 관리되는 것을 사용합니다. 구체적인 요구가 생길 때만 통제 범위가 넓은 쪽으로 옮깁니다. 가이드가 제시하는 순서는 Amazon Bedrock, SageMaker AI 엔드포인트, SageMaker HyperPod, 직접 운영(EC2, EKS, ECS)입니다.</p>
+<p>이 가이드의 마지막 갱신일은 2026년 11월 14일이고 나흘 뒤에 출시된 Lambda GPU 함수는 호스팅 선택지로 들어 있지 않습니다. 그림 4는 가이드의 순서에 Lambda 문서가 밝힌 대상 워크로드를 더해 필자가 정리한 흐름입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig04-decision.png" alt="다섯 가지 질문을 위에서 아래로 따라가는 선택 흐름 그림. 모델이 Bedrock에 있거나 가져올 수 있으면 Amazon Bedrock, 이벤트 기반이고 GPU 1개에 들어가면 AWS Lambda, Kubernetes 없이 관리형 엔드포인트가 필요하면 SageMaker AI, 학습과 GPU를 공유하거나 대형 모델 최적화가 필요하면 SageMaker HyperPod, 인스턴스 위를 직접 통제하려면 운영 중인 표준에 따라 EKS, ECS, EC2로 이어진다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 상황별로 먼저 검토할 플랫폼. AWS 선택 가이드의 순서에 Lambda를 더한 필자의 정리</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>상황</th><th>먼저 검토할 플랫폼</th><th>근거</th><th>선택 전에 확인할 것</th></tr>
+</thead>
+<tbody>
+<tr><td>필요한 모델이 Bedrock 카탈로그에 있거나 Custom Model Import의 지원 아키텍처에 해당</td><td>Amazon Bedrock</td><td>운영할 서버가 없고 호출이 없으면 0으로 줄어듦</td><td>지원 리전(Custom Model Import는 서울 미지원), 엔진 조정이 필요한지</td></tr>
+<tr><td>SQS 대기열이나 파일 업로드 같은 이벤트에 따라 중소형 모델을 호출</td><td>AWS Lambda</td><td>호출, 확장, 패치를 Lambda가 처리하고 이벤트 소스와 바로 연결</td><td>모델이 GPU 1개(최대 48 GB)에 들어가는지, 0에서 올라올 때의 429 처리, 스트리밍 필요 여부</td></tr>
+<tr><td>Kubernetes 없이 vLLM 설정을 조정하면서 실시간 API를 제공</td><td>Amazon SageMaker AI</td><td>인스턴스, 배포, 확장을 AWS가 관리하고 OpenAI 호환 경로를 제공</td><td>응답 제한(일반 60초, 스트리밍 8분), 최소 인스턴스 수와 유휴 비용</td></tr>
+<tr><td>학습과 추론이 GPU를 나눠 사용하거나 대형 모델에 DPD와 KV 캐시가 필요</td><td>SageMaker HyperPod</td><td>Operator가 엔드포인트를 구성하고 추론 최적화 기능을 제공</td><td>Kubernetes 운영 인력, 약정이 적용되는 범위</td></tr>
+<tr><td>Kubernetes를 표준으로 운영하고 구성 요소를 직접 고름</td><td>Amazon EKS</td><td>사용자 가이드의 기준 구성과 오픈소스 조합, 2분 이내 시작 예시</td><td>KEDA, Ingress, 관측 도구를 운영할 주체</td></tr>
+<tr><td>이미 ECS로 서비스를 운영하거나 SQS 기반 배치 추론을 구성</td><td>Amazon ECS</td><td>Managed Instances의 패치와 GPU 장애 복구, 0까지 축소</td><td>단계별 공식 vLLM 가이드가 없으므로 구성 검증</td></tr>
+<tr><td>단일 인스턴스에서 검증하거나 드라이버 수준까지 통제</td><td>Amazon EC2</td><td>관리 요금이 없고 구성 제약이 없음</td><td>교체, 확장, 감시를 직접 구성하는 부담</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 상황별로 먼저 검토할 플랫폼. AWS 선택 가이드의 순서에 Lambda를 더한 필자의 정리이며 2026년 11월 21일 문서 기준</p>
+<p>가이드는 용량이 이 모든 판단보다 우선할 수 있다고 덧붙입니다. 특정 가속기 인스턴스 유형이 리전에서 부족하면 SageMaker AI 엔드포인트, HyperPod, 직접 운영하는 인스턴스가 모두 영향을 받습니다. 검토하는 선택지 전부에서 용량을 확인하라는 내용입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>어느 플랫폼에서나 확인할 세 가지</h2></header><div class="prose">
+<h3>0에서 올라오는 시간</h3>
+<p>문서에 나온 시작 시간 수치를 한곳에 모으면 표 4와 같습니다. 모델 크기, 이미지 크기, 적재 방식이 서로 다른 예시이므로 플랫폼의 순위로 읽으면 안 됩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>플랫폼</th><th>문서의 수치</th><th>조건</th><th>0인 동안 들어온 요청</th></tr>
+</thead>
+<tbody>
+<tr><td>ECS Managed Instances</td><td>첫 결과까지 약 13분</td><td>가중치를 넣은 약 14 GB 이미지, SQS 기반 배치 예제</td><td>SQS 대기열에서 대기</td></tr>
+<tr><td>EKS</td><td>2분 이내</td><td>g6e.4xlarge, SOCI 이미지 8.8 GB, S3에서 가중치 10.4 GB 스트리밍</td><td>가이드 예제는 Pod 1개를 항상 유지</td></tr>
+<tr><td>Lambda</td><td>약 10분</td><td>Hugging Face 모델 ID에서 호출 가능한 엔드포인트까지, 첫 배포 예시</td><td>HTTP 429로 거절</td></tr>
+<tr><td>SageMaker AI</td><td>525초에서 258초로 단축</td><td>Qwen3-8B, ml.g6.2xlarge, LMI 컨테이너, 컨테이너 캐싱 적용 전과 후</td><td>오류 반환</td></tr>
+<tr><td>HyperPod</td><td>확장 시간 약 60% 단축</td><td>57 GB에서 145 GB 크기 모델, 노드 NVMe 캐시 적용</td><td>확인한 문서에 설명 없음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> AWS 문서와 블로그에 나온 시작 시간 수치. 조건이 서로 달라 플랫폼 사이의 비교 수치가 아님</p>
+<p>공통점은 0에서 올라오는 데 분 단위가 걸린다는 것입니다. 지연에 민감한 서비스는 최소 용량을 1 이상으로 두는 것을 권고합니다. 0까지 줄이는 설정은 개발 환경이나 배치 작업처럼 지연을 허용하는 워크로드에 적용합니다. Lambda 문서와 ECS 블로그도 같은 기준을 제시합니다.</p>
+<p>시작 시간을 줄이는 방법은 플랫폼이 달라도 비슷합니다. EKS 가이드와 Lambda 문서는 가중치를 이미지에 넣지 않고 S3에 두고 Run:ai Model Streamer로 GPU 메모리에 바로 올리는 방법을 권고합니다. 이미지는 SOCI 지연 로딩으로 받는 시간을 줄입니다.</p>
+<h3>GPU 할당량과 용량</h3>
+<p>EC2의 G 계열 On-Demand 인스턴스 할당량은 기본값이 0 vCPU입니다. Lambda 문서는 GPU 함수를 배포하기 전에 이 할당량의 증가를 요청해야 한다고 밝힙니다. ECS Managed Instances도 계정의 EC2 On-Demand 할당량을 따릅니다. 할당량이 있어도 원하는 인스턴스 유형의 용량이 리전에 부족할 수 있습니다. 여러 인스턴스 유형을 후보로 지정하는 기능(SageMaker AI의 인스턴스 풀, HyperPod의 인스턴스 유형 우선순위)을 함께 검토합니다.</p>
+<h3>서울 리전 제공 여부</h3>
+<div class="scroll"><table>
+<thead>
+<tr><th>대상</th><th>서울 리전(ap-northeast-2)</th><th>근거</th></tr>
+</thead>
+<tbody>
+<tr><td>EC2 GPU 인스턴스</td><td>G4dn, G5, G6, G6e, G6f, Gr6, Gr6f, G7e, P4d, P5, P5en, P6-B300 계열 제공</td><td>EC2 리전별 인스턴스 유형 문서</td></tr>
+<tr><td>ECS Managed Instances</td><td>제공</td><td>모든 상용 리전 제공(2025년 10월 27일 공지)</td></tr>
+<tr><td>EKS Auto Mode</td><td>제공</td><td>AWS 리전별 제공 정보 조회</td></tr>
+<tr><td>Lambda GPU 함수</td><td>제공 조건 충족. 용량 공급자 API와 G 시리즈가 서울에 있음. GPU 함수 문서에 서울이 직접 적혀 있지는 않음</td><td>Lambda Managed Instances와 G 시리즈가 있는 모든 상용 리전에서 제공한다는 공지, AWS 리전별 제공 정보 조회</td></tr>
+<tr><td>SageMaker AI의 OpenAI 호환 경로</td><td>제공</td><td>2026년 5월 21일 공지의 리전 목록</td></tr>
+<tr><td>HyperPod와 Inference Operator</td><td>제공. NVIDIA Dynamo 런타임과 Global Inference Gateway의 지원 리전 목록에는 서울이 없음</td><td>HyperPod 문서의 리전 목록과 릴리스 노트</td></tr>
+<tr><td>Bedrock Custom Model Import</td><td>미지원</td><td>Bedrock 사용자 가이드의 지원 리전 목록</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 서울 리전 제공 여부. 2026년 11월 21일 기준이며 인스턴스 유형별 용량과 요금은 따로 확인이 필요</p>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>나중에 옮길 때 바뀌는 것과 그대로인 것</h2></header><div class="prose">
+<p>플랫폼을 처음부터 정확히 고르지 못해도 옮길 때 다시 만들어야 하는 것은 많지 않습니다. 여섯 곳이 같은 엔진을 사용하기 때문입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>그대로인 것</th><th>플랫폼마다 바뀌는 것</th></tr>
+</thead>
+<tbody>
+<tr><td>모델</td><td>S3에 둔 Hugging Face 형식의 safetensors 가중치</td><td>가중치를 지정하는 이름(<code>--model</code>, <code>MODEL_ID</code>, <code>SM_VLLM_MODEL</code>, <code>modelSourceConfig</code>)</td></tr>
+<tr><td>서버 설정</td><td>vLLM 플래그의 의미(<code>--max-model-len</code>, <code>--tensor-parallel-size</code>)</td><td>전달 방법(컨테이너 인자, <code>VLLM_SERVER_ARGS</code>, <code>SM_VLLM_*</code>)</td></tr>
+<tr><td>클라이언트</td><td>OpenAI 형식의 요청과 응답</td><td>주소와 인증(로드 밸런서 주소, Lambda Invoke API, SageMaker 토큰), 응답 제한 시간</td></tr>
+<tr><td>확장</td><td>vLLM 지표 이름(<code>vllm:num_requests_waiting</code> 등)</td><td>확장 정책을 적는 곳, 0인 동안 들어온 요청의 처리</td></tr>
+<tr><td>이미지</td><td>vLLM 엔진</td><td>이미지 종류(<code>server-cuda</code>, <code>server-sagemaker-cuda</code>, Lambda용 <code>vllm:cuda</code>)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 플랫폼을 옮길 때 그대로인 것과 바뀌는 것</p>
+<p>처음 구성할 때 세 가지를 지키면 옮기는 비용이 낮아집니다. 가중치는 이미지에 넣지 않고 S3에 둡니다. 클라이언트는 OpenAI 형식으로 작성하고 주소와 인증만 설정으로 분리합니다. vLLM 플래그는 한곳에 모아 관리합니다.</p>
+<p>선택은 그림 4의 순서로 진행하는 것을 권고합니다. Bedrock으로 충분한지 먼저 확인하고 직접 서빙해야 하면 AWS가 가장 많이 운영해 주는 플랫폼부터 검토합니다. 통제가 더 필요해지는 시점에 옮겨도 모델, 서버 설정, 클라이언트 코드는 대부분 그대로 사용합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Six places to run the same vLLM container</h2></header><div class="prose">
+<p>A team that has decided to serve an open-weight model (a model whose weights are public, so you serve it yourself) with vLLM finds six lines of guidance in the AWS documentation. Amazon EC2, Amazon ECS and Amazon EKS each have container guidance. Amazon SageMaker AI has endpoints, and SageMaker HyperPod has the Inference Operator. On November 18, 2026, AWS Lambda added GPU functions on Lambda Managed Instances and shipped a vLLM image with them.</p>
+<p>Each document uses a different image name, port and way of calling, so it looks like six different products to compare. In fact all six run the same vLLM server and answer through the same OpenAI-compatible API. What changes is who takes care of the work around that container.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig01-map-en.png" alt="A figure that sorts the six platforms that run vLLM into three groups. EC2, ECS and EKS, where you run the containers yourself, Lambda, where it runs as a function, SageMaker AI and HyperPod, where you deploy on an ML platform, and Bedrock, where there is no vLLM to run, each shown with what you write to deploy, what AWS runs and when it fits" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The six platforms that run vLLM, and Amazon Bedrock. The six run the same engine and differ in how much AWS runs for you</figcaption></figure>
+<p>Table 1 gives one line for each of the six platforms and for Amazon Bedrock, the option where you do not run vLLM yourself.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Platform</th><th>What you write to deploy</th><th>What AWS runs</th><th>What you run</th></tr>
+</thead>
+<tbody>
+<tr><td>Amazon EC2</td><td>A <code>docker run</code> command</td><td>The vLLM image and its patches</td><td>Instances, drivers, the load balancer, scaling and monitoring: everything</td></tr>
+<tr><td>Amazon ECS</td><td>A task definition and a service</td><td>Container placement. With Managed Instances, also instance provisioning, patching and recovery from GPU failures</td><td>Attaching a load balancer, scaling policies, authentication</td></tr>
+<tr><td>Amazon EKS</td><td>Deployment and Service manifests</td><td>The Kubernetes control plane. With Auto Mode, also node provisioning, patching and repair</td><td>Installing and operating Ingress, KEDA and observability tools, authentication</td></tr>
+<tr><td>AWS Lambda</td><td>One <code>FROM</code> line in a Dockerfile and the <code>MODEL_ID</code> environment variable</td><td>The GPU instance lifecycle, driver patching, request routing and load balancing, scaling</td><td>The model location and vLLM arguments, the minimum and maximum number of execution environments</td></tr>
+<tr><td>Amazon SageMaker AI</td><td>A model, an endpoint configuration and an endpoint</td><td>Instance provisioning and patching, the endpoint, health checks and replacement, the scaling actions</td><td>The container and vLLM settings, the instance type, the scaling policy</td></tr>
+<tr><td>SageMaker HyperPod</td><td>An <code>InferenceEndpointConfig</code> resource</td><td>Node health monitoring and automatic replacement. The operator creates the Deployment, the load balancer and the certificate</td><td>Operating the orchestration, running node patches, upgrading the add-on</td></tr>
+<tr><td>Amazon Bedrock</td><td>An import of model weights, or a call to a catalog model</td><td>The serving engine and all infrastructure</td><td>Request parameters</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> The six platforms that run vLLM, and Amazon Bedrock. Based on the AWS documentation as of November 21, 2026</p>
+<blockquote><p>A restaurant kitchen makes the differences easy to see. vLLM is the chef, a GPU is a burner, and a request is an order. EC2 is renting an empty shop and setting up everything yourself, from installing the burners to the order counter. ECS is a kitchen where you only write down how many chefs go at which station and an operations contractor places them, and EKS is designing a kitchen complex yourself from a standard blueprint and bringing in whatever equipment you want.</p><p>Lambda is a catering kitchen that works when an order comes in. The caterer passes the orders and looks after the burners, and in return it only takes dishes that fit on one burner. SageMaker AI is a kitchen run under contract by a hotel that handles the order counter and the burners. HyperPod is a central kitchen where the menu development room and the cooking line share burners, and the operator replaces a broken burner. Bedrock is the choice of not hiring a chef and handing only the recipe to a restaurant.</p></blockquote>
+<p>The analogy does not hold everywhere. Lambda, the catering kitchen, also runs on EC2 instances in your account. If you keep the minimum number of execution environments at 1 or more, the instance is billed even when no order comes in.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>vLLM and the container images AWS publishes</h2></header><div class="prose">
+<p>vLLM is an open-source library for LLM inference and serving. It started at the Sky Computing Lab at UC Berkeley and is now maintained by a community of universities and companies. Four of the key features in the <a href="https://docs.vllm.ai/en/latest/" target="_blank" rel="noopener">vLLM documentation</a> concern serving performance. They are PagedAttention, which manages the key and value memory of attention, continuous batching of incoming requests, prefix caching, and serving several LoRA adapters at once.</p>
+<p>The feature that matters when choosing a platform is that the server provides an OpenAI-compatible API. It serves paths such as <code>/v1/chat/completions</code>, <code>/v1/completions</code> and <code>/v1/embeddings</code> as they are, so a client written with the OpenAI SDK only changes the address it calls. The same server provides <code>/health</code> for health checks and <code>/metrics</code> in Prometheus format.</p>
+<p>AWS publishes Deep Learning Containers (DLC) images with vLLM at no extra charge. According to the <a href="https://aws.github.io/deep-learning-containers/vllm/" target="_blank" rel="noopener">DLC documentation</a>, the images are built on Amazon Linux 2023, track the main branch of vLLM and are published after passing a regression test suite. The simplest way to run one is a command that starts one container on a GPU instance.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>docker run --gpus all -p 8000:8000 \
+  public.ecr.aws/deep-learning-containers/vllm:server-cuda \
+  --model openai/gpt-oss-20b \
+  --host 0.0.0.0 --port 8000</code></pre></div>
+<p>The other five platforms wrap this command in their own unit of deployment. The engine is the same and there is a separate image for the calling convention of each platform.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Platform</th><th>Image</th><th>How it receives requests</th><th>Where you set the model and vLLM arguments</th></tr>
+</thead>
+<tbody>
+<tr><td>EC2, ECS, EKS</td><td><code>vllm:server-cuda</code></td><td>Port 8000, the OpenAI-compatible paths as they are</td><td>Container arguments (<code>--model</code> and the flags of <code>vllm serve</code>)</td></tr>
+<tr><td>SageMaker AI</td><td><code>vllm:server-sagemaker-cuda</code></td><td>Port 8080, <code>/ping</code> and <code>/invocations</code></td><td>Environment variables <code>SM_VLLM_*</code></td></tr>
+<tr><td>Lambda</td><td><code>lambda/deep-learning-containers/vllm:cuda</code></td><td>No port open to the outside. The default handler forwards the event to the local vLLM server</td><td>Environment variables <code>MODEL_ID</code>, <code>VLLM_SERVER_ARGS</code></td></tr>
+<tr><td>HyperPod</td><td>The docs example uses the upstream image <code>vllm/vllm-openai</code>, and the DPD setup uses <code>vllm:server-hyperpod-cuda</code></td><td>The path set in <code>invocationEndpoint</code> (for example <code>v1/chat/completions</code>)</td><td>The model source and container settings of <code>InferenceEndpointConfig</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> The vLLM image of each platform and how it receives requests. DLC images are under <code>public.ecr.aws/deep-learning-containers/</code> and the Lambda image is under <code>public.ecr.aws/lambda/</code>. As of November 21, 2026</p>
+<p>One thing to watch is that the examples in different documents use different versions. As of November 21, 2026, the latest release in the DLC changelog is <code>server-cuda-v2.8</code> of November 8 (vLLM 0.33.0). The example in the EKS User Guide uses an Ubuntu-based 0.21.0 tag, and the examples in the HyperPod documentation use the 0.19 line.</p>
+<p>The DLC support policy says that only the latest release of the vLLM images is supported and that security patching is not guaranteed for the Ubuntu-based images. I recommend not copying the tag from an example and checking the latest Amazon Linux 2023 based tag instead.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Four criteria that separate the platforms</h2></header><div class="prose">
+<p>The differences among the six platforms come down to four questions. The chapters that follow describe every platform in this order.</p>
+<h3>Who operates what</h3>
+<p>Operating a GPU inference server breaks down into six kinds of work: provisioning and replacing GPU instances, patching the OS and the GPU driver, placing and restarting containers, the request entry point and load balancing, running the scaling, and the vLLM settings. The share of this work that AWS takes differs by platform, and the vLLM settings and the choice of model are yours on every platform.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig02-ownership-en.png" alt="A table-style figure with six kinds of operational work as rows and EC2, ECS, EKS, Lambda, SageMaker AI and HyperPod as columns. Each cell is colored as AWS runs it, conditional or shared, or you run it. EC2 is all you, Lambda and SageMaker AI are mostly AWS, and the vLLM settings and the model are yours on every platform" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Who runs what on each platform. AWS takes more with Managed Instances on ECS and with Auto Mode on EKS</figcaption></figure>
+<p>The <a href="https://docs.aws.amazon.com/decision-guides/latest/decision-guides/genai-guide.html" target="_blank" rel="noopener">AWS decision guide</a> sums this up in one sentence each. With SageMaker AI, AWS manages the instances and deployment and you manage the model stack. With HyperPod, AWS handles cluster resiliency and you manage orchestration. When you self-manage on EC2, EKS or ECS, you manage everything above the instance.</p>
+<h3>How a request reaches vLLM</h3>
+<p>vLLM itself takes HTTP requests on one port and has no authentication by default. So who builds the entry point and how callers authenticate differ by platform. On EC2, ECS and EKS you set up the load balancer and the authentication. On Lambda and SageMaker AI the entry point is an AWS API and authentication is IAM. On HyperPod the operator creates the load balancer.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig03-request-path-en.png" alt="A figure with one row per platform showing the caller, the entry point, the vLLM container and the authentication. EC2, ECS and EKS go through a load balancer you set up to port 8000, Lambda goes through the Invoke API and the default handler to local port 8000, SageMaker AI goes through SageMaker Runtime to the invocations path on port 8080, and HyperPod goes through the ALB the operator created, a SageMaker endpoint or the Inference Gateway" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> How a request reaches vLLM. On some platforms AWS provides the entry point and on others you set it up</figcaption></figure>
+<h3>Scaling and start-up time</h3>
+<p>A GPU instance is billed while no request arrives, so whether capacity can go down to zero when there is no traffic decides the cost. Coming back from zero, on the other hand, means starting an instance, pulling the image and loading the model weights, one after another. The AWS Prescriptive Guidance says these steps may take several minutes, so scaling policies should react before capacity is exhausted.</p>
+<p>The platforms differ in the scaling signal, the default minimum capacity, and what happens to requests that arrive while capacity is zero.</p>
+<h3>What is billed</h3>
+<p>On all six platforms you pay for the time GPU instances run, not for tokens. The difference is what is added on top of the instance price. EC2 charges only the instance price. EKS adds a cluster fee, and ECS Managed Instances, EKS Auto Mode and Lambda add a management fee. SageMaker AI and HyperPod follow the price list of the instances whose names start with <code>ml.</code>.</p>
+<p>The AWS decision guide explains that instance-based options charge whether or not they are in use, so they become more cost-efficient at sustained, high utilization or when existing commitments apply.</p>
+</div></section>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>EC2, ECS and EKS: you run the containers yourself</h2></header><div class="prose">
+<p>The AWS documentation groups these three as self-managed. They use the same <code>vllm:server-cuda</code> image, and you are responsible for everything above the instance. The difference among the three is who places the containers. On EC2 the team handles instances directly, on ECS AWS manages the orchestration layer, and on EKS Kubernetes does the orchestration.</p>
+<h3>Amazon EC2: run the container directly on an instance</h3>
+<p>EC2 means running the <code>docker run</code> command shown above on a GPU instance as it is. With the AWS Deep Learning AMI you start with the NVIDIA driver and the container toolkit already installed.</p>
+<ul>
+<li><b>Who operates what</b>: you set up instance replacement, OS and driver updates, container restarts and metric collection yourself. What AWS takes is patching the DLC image.</li>
+<li><b>Request path</b>: the container serves the OpenAI-compatible API on port 8000. The load balancer, TLS and authentication are yours to set up.</li>
+<li><b>Scaling and start-up time</b>: if you need scaling, you build it with an Auto Scaling group. A model that does not fit on one GPU is spread over several GPUs of one instance with <code>--tensor-parallel-size</code>.</li>
+<li><b>What is billed</b>: only the EC2 instance price. The DLC image has no extra charge.</li>
+</ul>
+<p>It fits the stage of trying one model on one or two instances, and cases that need control down to the driver and the kernel. As the number of instances grows, so does the work of building placement, replacement and scaling yourself.</p>
+<h3>Amazon ECS: hand placement over with a task definition</h3>
+<p>On ECS you write the image and the number of GPUs in a task definition and ECS places the container on an instance. GPUs are requested with <code>resourceRequirements</code> in the container definition. There are two ways to use GPUs: ECS on EC2, with EC2 instances you manage, and ECS Managed Instances, where AWS manages the instances. AWS Fargate does not support GPUs.</p>
+<p>As far as I could check on November 21, 2026, there is no ECS-specific vLLM image and no official step-by-step guide. You use the EC2 DLC image in the task definition as it is. The closest official reference implementation is the <a href="https://aws.amazon.com/blogs/containers/run-gpu-batch-inference-on-amazon-ecs-managed-instances-with-scale-to-zero/" target="_blank" rel="noopener">GPU batch inference example on the AWS Containers Blog</a>.</p>
+<ul>
+<li><b>Who operates what</b>: ECS places the containers. With ECS Managed Instances, AWS also takes instance provisioning, OS patching and NVIDIA driver installation, and replaces each instance after 14 days at most. The capability that detects a GPU failure and replaces the instance is on by default. With ECS on EC2, AWS provides a GPU-optimized AMI and you carry out replacement and updates.</li>
+<li><b>Request path</b>: ECS has no inference invoke API, so you attach an Application Load Balancer or a Network Load Balancer to the service. Authentication is yours to set up.</li>
+<li><b>Scaling and start-up time</b>: Service Auto Scaling supports target tracking, step, scheduled and predictive scaling and scaling on Amazon SQS queue backlog, and the minimum task count can be 0. Managed Instances also brings the instances down to zero when there are no tasks. The batch inference example on the blog reports about 13 minutes from zero to the first result and about 2 seconds for the next job while the task is running.</li>
+<li><b>What is billed</b>: there is no extra charge for ECS orchestration and you pay the EC2 price. Managed Instances adds a management fee per instance to the EC2 price, and the management fee for the G series was reduced by 35% from July 1, 2026.</li>
+</ul>
+<p>It fits a team that already runs services on ECS and wants to add GPU inference without Kubernetes, and batch inference that takes jobs from SQS. What ECS provides is general-purpose container capability. I did not find inference-specific features, such as routing by KV cache state, in the ECS documentation I checked.</p>
+<h3>Amazon EKS: assemble it yourself on Kubernetes</h3>
+<p>On EKS you deploy vLLM as an ordinary Deployment and Service. There is no vLLM-specific operator or add-on, and the <a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference.html" target="_blank" rel="noopener">inference chapter of the EKS User Guide</a> gives the reference setup. It combines the vLLM DLC, Run:ai Model Streamer, which loads weights from Amazon S3 straight into GPU memory, an ALB Ingress and KEDA. The same steps work with both EKS Auto Mode and self-managed Karpenter.</p>
+<ul>
+<li><b>Who operates what</b>: with EKS Auto Mode, AWS takes node provisioning, patching, the GPU driver and repair of failed nodes, and a node is replaced after 21 days at most. Without Auto Mode you install and operate Karpenter, the NVIDIA device plugin and the node monitoring agent yourself. In both cases you install KEDA and the observability tools (Prometheus, Grafana) yourself.</li>
+<li><b>Request path</b>: the Service exposes port 8000 inside the cluster and production traffic comes in through an ALB Ingress. The example in the guide has no authentication, so it requires restricting the IP ranges that may connect. You can add Amazon Cognito or OIDC authentication on the ALB.</li>
+<li><b>Scaling and start-up time</b>: the guide uses KEDA to add Pods on the number of waiting requests in vLLM (<code>vllm:num_requests_waiting</code>) and on p95 latency, and Karpenter adds nodes. In the example in the guide (g6e.4xlarge) the node was ready in 30 seconds, the 8.8 GB image was pulled in about 48 seconds and the 10.4 GB of weights loaded in about 5 seconds, and the documentation says Pods can start serving in under two minutes.</li>
+<li><b>What is billed</b>: the cluster fee (0.10 USD per hour on a standard support version) and the EC2 price of the nodes. Auto Mode adds a management fee to the EC2 price.</li>
+</ul>
+<p>It fits an organization that runs Kubernetes as its standard platform, or one that wants to combine several models and open-source tools (llm-d, LeaderWorkerSet, GPU partitioning) itself. The AWS decision guide also gives standardizing on a specific platform such as Kubernetes as a reason to self-manage. In return, assembling Ingress, autoscaling, observability and authentication and keeping their versions aligned is your work.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Lambda: run it as a function</h2></header><div class="prose">
+<p>Lambda has supported GPU functions on Lambda Managed Instances as a generally available feature since November 18, 2026. With Lambda Managed Instances, Lambda manages EC2 instances in your account and runs functions on them. You define the instance types and the scaling range in a capacity provider.</p>
+<p>Running vLLM takes one line in a Dockerfile and one environment variable. Set the image Lambda provides with <code>FROM public.ecr.aws/lambda/deep-learning-containers/vllm:cuda</code> and you get the vLLM server and a default handler together. The server starts once when an execution environment starts, and the handler forwards each event that arrives as a function invocation to the local server. You change the model with an environment variable.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws lambda update-function-configuration \
+  --function-name my-gpu-function \
+  --environment 'Variables={MODEL_ID=Qwen/Qwen2.5-1.5B-Instruct,HF_TOKEN=&lt;your-hugging-face-token&gt;}'</code></pre></div>
+<p>The event body is the OpenAI-format request. The default handler forwards a request that contains <code>messages</code> to <code>/v1/chat/completions</code> and one that contains <code>prompt</code> to <code>/v1/completions</code>. <code>MODEL_ID</code> also accepts an S3 path besides a Hugging Face model ID, and the documentation recommends S3 for production.</p>
+<ul>
+<li><b>Who operates what</b>: Lambda takes the GPU instance lifecycle, OS and GPU driver patching, health checks, scaling, and request routing and load balancing. If the vLLM server fails three consecutive health checks, Lambda replaces the execution environment. GPU utilization and GPU memory metrics are published to Amazon CloudWatch by default.</li>
+<li><b>Request path</b>: as with any Lambda function, you invoke it synchronously, asynchronously or through an event source mapping (Amazon SQS, Amazon Kinesis and others), and authentication is IAM. The container opens no port to the outside. A synchronous request and its response can each be up to 6 MB, and the timeout is 30 minutes for synchronous invocations and 90 minutes for asynchronous invocations and event source mappings.</li>
+<li><b>Scaling and start-up time</b>: Lambda adds execution environments and instances on GPU utilization (default target 40%), CPU utilization and concurrency. For a GPU function the minimum number of execution environments is 1 by default and can be set to 0. Invocations that arrive during the several minutes of coming up from zero are rejected with HTTP 429. The example on the AWS News Blog reports about 10 minutes from a Hugging Face model ID to an endpoint that can be invoked.</li>
+<li><b>What is billed</b>: the EC2 On-Demand price plus a 9.75% management fee (GPU G series) and 0.20 USD per million requests. There is no per-invocation duration charge. Savings Plans and Reserved Instance discounts apply only to the EC2 part.</li>
+</ul>
+<p>The first constraint is model size. The supported instances are the EC2 G series (G4dn, G5, G6, Gr6, G6e, G6f, Gr6f) and each execution environment gets exactly one GPU. GPU memory is up to 48 GB, function memory up to 32,768 MB and the container image up to 32 GB. A model that has to be spread over several GPUs is out of scope.</p>
+<p>Whether GPU functions support token streaming responses and function URLs is not stated in the documentation I checked. The example handler in the documentation returns the whole response at once. If an interactive screen has to show tokens as they arrive, check this before you adopt it.</p>
+<p>The <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu.html" target="_blank" rel="noopener">Lambda documentation</a> describes the target workload in two ways: GPU compute that runs as one event-driven step of an application, and cases where you do not want to manage AMIs, drivers or CUDA versions. For language models it names small to mid-size models deployed as part of an application, and it points to Amazon Bedrock for foundation models. Processing documents from an SQS queue in batches, or calling inference as one step of a workflow, are setups of this kind.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>SageMaker AI and HyperPod: deploy on an ML platform</h2></header><div class="prose">
+<p>The two are in the same SageMaker family but operate differently. A SageMaker AI endpoint is a managed endpoint you use without Kubernetes, and HyperPod runs on an Amazon EKS cluster.</p>
+<h3>Amazon SageMaker AI: a managed endpoint</h3>
+<p>On SageMaker AI you create a model, an endpoint configuration and an endpoint, and SageMaker AI provisions the GPU instances and runs the container. The vLLM image for SageMaker serves <code>/ping</code> and <code>/invocations</code> on port 8080, and vLLM arguments are passed as environment variables whose names start with <code>SM_VLLM_</code>. For example, <code>SM_VLLM_MAX_MODEL_LEN=4096</code> becomes <code>--max-model-len 4096</code>.</p>
+<p>Since May 21, 2026, endpoints also expose an OpenAI-compatible path. You change the base URL of the OpenAI SDK to the endpoint address and put a short-lived token made from your AWS credentials (valid up to 12 hours) in place of the API key. The path the documentation describes is Chat Completions.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>from openai import OpenAI
+from sagemaker.core.token_generator import generate_token
+
+REGION = "us-west-2"
+sme_base_url = (
+    f"https://runtime.sagemaker.{REGION}.amazonaws.com"
+    f"/endpoints/{SME_ENDPOINT_NAME}/openai/v1"
+)
+
+client = OpenAI(
+    base_url=sme_base_url,
+    api_key=generate_token(region=REGION),
+)</code></pre></div>
+<ul>
+<li><b>Who operates what</b>: SageMaker AI takes instance provisioning, security patching, health checks and replacement of unhealthy instances. You decide the container and vLLM settings, the instance type and the scaling policy. vLLM metrics such as time to first token (TTFT) and the number of waiting requests are published to CloudWatch without custom instrumentation.</li>
+<li><b>Request path</b>: you call <code>InvokeEndpoint</code>, or <code>InvokeEndpointWithResponseStream</code> for response streaming, with a SigV4 signature, or you call the OpenAI-compatible path with the short-lived token. An endpoint is scoped to the account and is not public. A regular response has to finish within 60 seconds and a streaming response within 8 minutes.</li>
+<li><b>Scaling and start-up time</b>: the number of instances is adjusted on metrics such as the concurrent requests a model container receives (<code>ConcurrentRequestsPerModel</code>). Scaling to zero is supported only on endpoints that use inference components, and invocations return an error during the several minutes of coming up from zero. There are four routing strategies, and <code>KV_AWARE</code>, added in November 2026, picks the instance for a request by looking at the KV cache state of vLLM.</li>
+<li><b>What is billed</b>: the usage time of <code>ml.</code> instances, storage and the amount of data processed. An endpoint is billed while in service even with no traffic. SageMaker Savings Plans apply to real-time inference.</li>
+</ul>
+<p>The AWS decision guide describes when SageMaker AI endpoints fit as follows: hosting open-weight or custom models in standard formats with control over the serving stack, while AWS manages instances, deployment, autoscaling and monitoring. It fits a team that wants to tune vLLM settings itself without people to operate Kubernetes.</p>
+<p>There are two things to check. According to the DLC documentation, you create an endpoint with the image at the private ECR path of your Region, not with the image in the public gallery. And an AWS blog describes a case where a model too large for one instance is moved to HyperPod.</p>
+<h3>SageMaker HyperPod: the Inference Operator on EKS</h3>
+<p>HyperPod is a GPU cluster orchestrated by Amazon EKS, and its inference capability comes from the HyperPod Inference Operator, installed as an EKS add-on. You write the model location, the instance type and the invocation path in one <code>InferenceEndpointConfig</code> resource. The operator then creates the Deployment, the Service, the Application Load Balancer, KEDA autoscaling, the certificate and the SageMaker endpoint registration. The operator does the part you would assemble yourself on EKS.</p>
+<ul>
+<li><b>Who operates what</b>: HyperPod takes node health monitoring and automatic replacement. You take operating the orchestration, monitoring the health of the operator, upgrading the add-on and running node patches (<code>update-cluster-software</code>). Observability (Amazon Managed Service for Prometheus and Amazon Managed Grafana dashboards) is provided with a one-time setup.</li>
+<li><b>Request path</b>: you call the ALB the operator created over HTTPS, or you call through a SageMaker endpoint. Registering a SageMaker endpoint is optional. With the Inference Gateway turned on, one OpenAI-compatible endpoint per cluster reads the <code>model</code> value in the request body and sends the request to the Pods of that model. The Gateway does not authenticate requests by default, so the documentation strongly recommends configuring JWT authentication.</li>
+<li><b>Scaling and start-up time</b>: Pods are added by the KEDA included in the operator, and nodes by the Karpenter that HyperPod manages. The minimum number of replicas can be 0, and when the Pods go to zero the nodes are removed as well. AWS reports that caching the model and the image on the NVMe of the node made scale-out about 60% faster for models from 57 GB to 145 GB.</li>
+<li><b>What is billed</b>: the <code>ml.</code> instance price, with the connected EKS control plane, Amazon FSx for Lustre and Amazon S3 charged separately. HyperPod is not in the list of usage that SageMaker Savings Plans apply to on the pricing page, so I recommend checking first what your commitments cover.</li>
+</ul>
+<p>What sets HyperPod apart from the other five is its inference optimization features. You turn on three of them through fields of <code>InferenceEndpointConfig</code>. They are intelligent routing that looks at prefix and KV cache state, a two-tier KV cache that uses CPU memory and external storage, and DPD (Disaggregated Prefill and Decode), which puts prefill and decode on separate GPU pools. The KV cache and intelligent routing work only with vLLM containers. DPD needs P-family 48xlarge instances that support EFA, and the documentation says it pays off with models of 70B or more and long inputs of 4,000 tokens or more.</p>
+<p>The AWS decision guide names three cases where HyperPod fits: large-scale training, one accelerator pool shared across training and inference, and a need for advanced inference optimizations. It fits an organization that wants to keep using Kubernetes tooling while leaving node resiliency to AWS. Like EKS, it needs the ability to operate Kubernetes.</p>
+</div></section>
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Amazon Bedrock: no vLLM to run</h2></header><div class="prose">
+<p>The AWS decision guide says to start inference workloads with Amazon Bedrock. If the open-weight model you need is offered serverlessly in the Bedrock catalog, there is no reason to operate vLLM. Models such as Qwen3 and gpt-oss are offered this way.</p>
+<p>A model you fine-tuned yourself comes in through Custom Model Import. You put safetensors weights in Hugging Face format in S3 and run an import job, and AWS takes GPU provisioning, inference server configuration and scaling. You invoke it by sending an OpenAI-format request body with <code>InvokeModel</code>. After 5 minutes without an invocation it scales to zero, and the time a model copy is active is billed in 5-minute windows.</p>
+<p>The constraints are clear too. The architectures you can import are fixed, including Llama, Mistral, Mixtral, Qwen and GPT-OSS, and the weights of a text model must be under 200 GB. The documentation gives no way for a customer to change the settings of the serving engine. The supported Regions are us-east-1, us-east-2, us-west-2 and eu-central-1, and the Seoul Region is not among them.</p>
+<p>When one of these constraints applies, or you need to tune the engine yourself, the six platforms above become the options.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Which platform to look at first</h2></header><div class="prose">
+<p>The principle of the AWS decision guide is two sentences. Use the most managed option that supports the capabilities your workload needs. Move toward more control only when a specific requirement calls for it. The order the guide gives is Amazon Bedrock, SageMaker AI endpoints, SageMaker HyperPod, then self-managed infrastructure (EC2, EKS, ECS).</p>
+<p>The guide was last updated on November 14, 2026, and Lambda GPU functions, released four days later, are not among its hosting options. Figure 4 is my own arrangement: the order of the guide with the target workload from the Lambda documentation added.</p>
+<figure class="fig"><div class="canvas wide"><img src="vllm-on-aws-platform-selection-assets/fig04-decision-en.png" alt="A decision flow that goes through five questions from top to bottom. If the model is in Bedrock or can be imported, Amazon Bedrock. If the work is event-driven and the model fits on one GPU, AWS Lambda. If a managed endpoint without Kubernetes is needed, SageMaker AI. If training shares the GPUs or a large model needs optimizations, SageMaker HyperPod. If you want direct control above the instance, EKS, ECS or EC2 by the standard you already run" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> The platform to look at first by situation. My own arrangement: the order of the AWS decision guide with Lambda added</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Situation</th><th>Platform to look at first</th><th>Why</th><th>What to check before choosing</th></tr>
+</thead>
+<tbody>
+<tr><td>The model you need is in the Bedrock catalog or is one of the architectures Custom Model Import supports</td><td>Amazon Bedrock</td><td>No server to operate, and it scales to zero when there are no invocations</td><td>Supported Regions (Custom Model Import is not in Seoul), whether you need to tune the engine</td></tr>
+<tr><td>A small or mid-size model is invoked by events such as an SQS queue or a file upload</td><td>AWS Lambda</td><td>Lambda handles invocation, scaling and patching and connects directly to event sources</td><td>Whether the model fits on one GPU (up to 48 GB), handling of 429 while coming up from zero, whether you need streaming</td></tr>
+<tr><td>A real-time API, tuning vLLM settings, without Kubernetes</td><td>Amazon SageMaker AI</td><td>AWS manages instances, deployment and scaling and provides an OpenAI-compatible path</td><td>Response limits (60 seconds regular, 8 minutes streaming), the minimum instance count and idle cost</td></tr>
+<tr><td>Training and inference share GPUs, or a large model needs DPD and KV caching</td><td>SageMaker HyperPod</td><td>The operator builds the endpoint and provides inference optimization features</td><td>People to operate Kubernetes, what your commitments cover</td></tr>
+<tr><td>Kubernetes is your standard and you pick the components yourself</td><td>Amazon EKS</td><td>The reference setup in the User Guide and open-source building blocks, the example of starting in under two minutes</td><td>Who will operate KEDA, Ingress and the observability tools</td></tr>
+<tr><td>You already run services on ECS, or you are building SQS-driven batch inference</td><td>Amazon ECS</td><td>Patching and GPU failure recovery with Managed Instances, scale to zero</td><td>There is no official step-by-step vLLM guide, so validate the setup</td></tr>
+<tr><td>A trial on a single instance, or control down to the driver</td><td>Amazon EC2</td><td>No management fee and no constraint on the setup</td><td>The work of building replacement, scaling and monitoring yourself</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> The platform to look at first by situation. My own arrangement: the order of the AWS decision guide with Lambda added, based on the documentation as of November 21, 2026</p>
+<p>The guide adds that capacity can override all of these checks. If a specific accelerator instance type is in short supply in a Region, SageMaker AI endpoints, HyperPod and self-managed instances are all affected. Its advice is to confirm capacity across all the options you are considering.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Three things to check on any platform</h2></header><div class="prose">
+<h3>The time to come up from zero</h3>
+<p>Table 4 collects the start-up figures that appear in the documents. They are examples with different model sizes, image sizes and loading methods, so they should not be read as a ranking of the platforms.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Platform</th><th>Figure in the document</th><th>Conditions</th><th>Requests that arrive at zero</th></tr>
+</thead>
+<tbody>
+<tr><td>ECS Managed Instances</td><td>About 13 minutes to the first result</td><td>An image of about 14 GB with the weights baked in, SQS-driven batch example</td><td>Wait in the SQS queue</td></tr>
+<tr><td>EKS</td><td>Under two minutes</td><td>g6e.4xlarge, 8.8 GB SOCI image, 10.4 GB of weights streamed from S3</td><td>The example in the guide always keeps one Pod</td></tr>
+<tr><td>Lambda</td><td>About 10 minutes</td><td>From a Hugging Face model ID to an endpoint that can be invoked, first deployment example</td><td>Rejected with HTTP 429</td></tr>
+<tr><td>SageMaker AI</td><td>Down from 525 seconds to 258 seconds</td><td>Qwen3-8B, ml.g6.2xlarge, LMI container, before and after container caching</td><td>An error is returned</td></tr>
+<tr><td>HyperPod</td><td>Scale-out about 60% faster</td><td>Models from 57 GB to 145 GB, with the node NVMe cache</td><td>Not described in the documents I checked</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Start-up figures from AWS documentation and blogs. The conditions differ, so these are not comparable across platforms</p>
+<p>What they have in common is that coming up from zero takes minutes. For a latency-sensitive service I recommend keeping the minimum capacity at 1 or more. Apply scale to zero to workloads that tolerate delay, such as development environments and batch jobs. The Lambda documentation and the ECS blog give the same guideline.</p>
+<p>The ways to shorten start-up are similar across platforms. The EKS guide and the Lambda documentation recommend keeping the weights in S3 rather than in the image and loading them straight into GPU memory with Run:ai Model Streamer. For the image, SOCI lazy loading cuts the pull time.</p>
+<h3>GPU quotas and capacity</h3>
+<p>The EC2 quota for On-Demand G instances is 0 vCPUs by default. The Lambda documentation says you must request an increase of this quota before you deploy a GPU function. ECS Managed Instances is also subject to the EC2 On-Demand quotas of the account. Even with quota, the capacity of the instance type you want may be short in a Region. Consider the features that let you list several instance types as candidates (instance pools on SageMaker AI, prioritized instance types on HyperPod).</p>
+<h3>Availability in the Seoul Region</h3>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Seoul Region (ap-northeast-2)</th><th>Basis</th></tr>
+</thead>
+<tbody>
+<tr><td>EC2 GPU instances</td><td>G4dn, G5, G6, G6e, G6f, Gr6, Gr6f, G7e, P4d, P5, P5en and P6-B300 families offered</td><td>EC2 documentation on instance types by Region</td></tr>
+<tr><td>ECS Managed Instances</td><td>Available</td><td>Available in all commercial Regions (announced October 27, 2025)</td></tr>
+<tr><td>EKS Auto Mode</td><td>Available</td><td>Lookup of AWS availability by Region</td></tr>
+<tr><td>Lambda GPU functions</td><td>Meets the stated conditions. The capacity provider API and the G series are in Seoul. The GPU function documentation does not name Seoul</td><td>The announcement that it is available in all commercial Regions with Lambda Managed Instances and the G series, lookup of AWS availability by Region</td></tr>
+<tr><td>OpenAI-compatible path of SageMaker AI</td><td>Available</td><td>The Region list in the May 21, 2026 announcement</td></tr>
+<tr><td>HyperPod and the Inference Operator</td><td>Available. Seoul is not in the Region lists of the NVIDIA Dynamo runtime and the Global Inference Gateway</td><td>The Region list in the HyperPod documentation and the release notes</td></tr>
+<tr><td>Bedrock Custom Model Import</td><td>Not supported</td><td>The supported Regions in the Bedrock User Guide</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Availability in the Seoul Region. As of November 21, 2026. Capacity and prices per instance type need a separate check</p>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>What changes and what stays when you move later</h2></header><div class="prose">
+<p>If the first choice of platform turns out not to be right, there is not much to rebuild when you move. That is because the six run the same engine.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>What stays</th><th>What changes by platform</th></tr>
+</thead>
+<tbody>
+<tr><td>Model</td><td>Safetensors weights in Hugging Face format kept in S3</td><td>The name that points to the weights (<code>--model</code>, <code>MODEL_ID</code>, <code>SM_VLLM_MODEL</code>, <code>modelSourceConfig</code>)</td></tr>
+<tr><td>Server settings</td><td>The meaning of the vLLM flags (<code>--max-model-len</code>, <code>--tensor-parallel-size</code>)</td><td>How they are passed (container arguments, <code>VLLM_SERVER_ARGS</code>, <code>SM_VLLM_*</code>)</td></tr>
+<tr><td>Client</td><td>OpenAI-format requests and responses</td><td>The address and authentication (load balancer address, Lambda Invoke API, SageMaker token), response time limits</td></tr>
+<tr><td>Scaling</td><td>The vLLM metric names (such as <code>vllm:num_requests_waiting</code>)</td><td>Where the scaling policy is written, what happens to requests that arrive at zero</td></tr>
+<tr><td>Image</td><td>The vLLM engine</td><td>The image variant (<code>server-cuda</code>, <code>server-sagemaker-cuda</code>, <code>vllm:cuda</code> for Lambda)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> What stays and what changes when you move between platforms</p>
+<p>Three habits at the start keep the cost of moving low. Keep the weights in S3, not in the image. Write the client in OpenAI format and separate only the address and the authentication into settings. Keep the vLLM flags in one place.</p>
+<p>I recommend choosing in the order of Figure 4. Check first whether Bedrock is enough, and if you have to serve the model yourself, start with the platform where AWS operates the most. If you move when you come to need more control, most of the model, the server settings and the client code carry over as they are.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/" target="_blank" rel="noopener">vLLM documentation</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/serving/online_serving/" target="_blank" rel="noopener">vLLM: Online Serving</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/vllm/" target="_blank" rel="noopener">AWS Deep Learning Containers: vLLM</a></td><td class="nowrap"><span class="l-ko">DLC 문서</span><span class="l-en">DLC docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/vllm/deployment/ec2/" target="_blank" rel="noopener">AWS Deep Learning Containers: vLLM EC2 Deployment</a></td><td class="nowrap"><span class="l-ko">DLC 문서</span><span class="l-en">DLC docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/vllm/deployment/sagemaker/" target="_blank" rel="noopener">AWS Deep Learning Containers: vLLM Amazon SageMaker AI Deployment</a></td><td class="nowrap"><span class="l-ko">DLC 문서</span><span class="l-en">DLC docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/vllm/changelog/" target="_blank" rel="noopener">AWS Deep Learning Containers: vLLM Changelog</a></td><td class="nowrap"><span class="l-ko">Changelog</span><span class="l-en">Changelog</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/reference/support_policy/" target="_blank" rel="noopener">AWS Deep Learning Containers: Support Policy</a></td><td class="nowrap"><span class="l-ko">DLC 문서</span><span class="l-en">DLC docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://aws.github.io/deep-learning-containers/lambda/" target="_blank" rel="noopener">AWS Deep Learning Containers: AWS Lambda</a></td><td class="nowrap"><span class="l-ko">DLC 문서</span><span class="l-en">DLC docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/decision-guides/latest/decision-guides/genai-guide.html" target="_blank" rel="noopener">Choosing a generative AI service</a></td><td class="nowrap"><span class="l-ko">AWS 선택 가이드</span><span class="l-en">AWS decision guide</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/gen-ai-inference-architecture-and-best-practices-on-aws/self-managed-inference.html" target="_blank" rel="noopener">Prescriptive Guidance: Self-managed inference</a></td><td class="nowrap"><span class="l-ko">AWS Prescriptive Guidance</span><span class="l-en">AWS Prescriptive Guidance</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/gen-ai-inference-architecture-and-best-practices-on-aws/right-sizing-and-auto-scaling.html" target="_blank" rel="noopener">Prescriptive Guidance: Right-sizing and auto-scaling an inference system</a></td><td class="nowrap"><span class="l-ko">AWS Prescriptive Guidance</span><span class="l-en">AWS Prescriptive Guidance</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://aws.amazon.com/what-is/vllm/" target="_blank" rel="noopener">What is vLLM?</a></td><td class="nowrap"><span class="l-ko">AWS 개념 설명</span><span class="l-en">AWS concept page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2026/11/aws-lambda-gpu-managed-instances/" target="_blank" rel="noopener">AWS Lambda adds support for GPU instances on Lambda Managed Instances</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://aws.amazon.com/blogs/aws/aws-lambda-now-supports-gpu-instances-for-event-functions-on-lambda-managed-instances/" target="_blank" rel="noopener">AWS Lambda now supports GPU instances for Event Functions on Lambda Managed Instances</a></td><td class="nowrap"><span class="l-ko">AWS News Blog</span><span class="l-en">AWS News Blog</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu.html" target="_blank" rel="noopener">AWS Lambda: Run GPU-accelerated Event Functions on Lambda Managed Instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu-inference.html" target="_blank" rel="noopener">AWS Lambda: Run inference workloads on GPU-accelerated functions</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu-base-images.html" target="_blank" rel="noopener">AWS Lambda: GPU base images for Lambda Managed Instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-gpu-scaling.html" target="_blank" rel="noopener">AWS Lambda: Understanding scaling and concurrency for GPU-accelerated Event Functions</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-19"><td class="num"><b>19</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances-scaling.html" target="_blank" rel="noopener">AWS Lambda: Scaling Lambda Managed Instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-20"><td class="num"><b>20</b></td><td class="t"><a href="https://docs.aws.amazon.com/lambda/latest/dg/configuration-timeout.html" target="_blank" rel="noopener">AWS Lambda: Configure Lambda Event Function timeout</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-21"><td class="num"><b>21</b></td><td class="t"><a href="https://aws.amazon.com/lambda/pricing/" target="_blank" rel="noopener">AWS Lambda pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-22"><td class="num"><b>22</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-gpu.html" target="_blank" rel="noopener">Amazon ECS: Amazon ECS task definitions for GPU workloads</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-23"><td class="num"><b>23</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ManagedInstances.html" target="_blank" rel="noopener">Amazon ECS: Architect for Amazon ECS Managed Instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-24"><td class="num"><b>24</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/managed-instances-gpu.html" target="_blank" rel="noopener">Amazon ECS: Use GPUs with Amazon ECS Managed Instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-25"><td class="num"><b>25</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-auto-scaling.html" target="_blank" rel="noopener">Amazon ECS: Automatically scale your Amazon ECS service</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-26"><td class="num"><b>26</b></td><td class="t"><a href="https://aws.amazon.com/blogs/containers/run-gpu-batch-inference-on-amazon-ecs-managed-instances-with-scale-to-zero/" target="_blank" rel="noopener">Run GPU batch inference on Amazon ECS Managed Instances with scale to zero</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-27"><td class="num"><b>27</b></td><td class="t"><a href="https://aws.amazon.com/ecs/pricing/" target="_blank" rel="noopener">Amazon ECS pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-28"><td class="num"><b>28</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2026/07/amazon-ecs-managed-instances-gpu-price/" target="_blank" rel="noopener">Amazon ECS Managed Instances reduces GPU management fees by up to 60%</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-29"><td class="num"><b>29</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference.html" target="_blank" rel="noopener">Amazon EKS: Run AI/ML inference workloads on Amazon EKS</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-30"><td class="num"><b>30</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference-load-serve-model.html" target="_blank" rel="noopener">Amazon EKS: Load &amp; Serve Models on Amazon EKS</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-31"><td class="num"><b>31</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference-autoscaling-hpa-keda.html" target="_blank" rel="noopener">Amazon EKS: Autoscale AI inference with HPA and KEDA</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-32"><td class="num"><b>32</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-cluster-setup-cli.html" target="_blank" rel="noopener">Amazon EKS: Set up Amazon EKS cluster for AI/ML workloads using CLIs</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-33"><td class="num"><b>33</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/auto-security.html" target="_blank" rel="noopener">Amazon EKS: Security considerations for Amazon EKS Auto Mode</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-34"><td class="num"><b>34</b></td><td class="t"><a href="https://aws.amazon.com/eks/pricing/" target="_blank" rel="noopener">Amazon EKS pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-35"><td class="num"><b>35</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html" target="_blank" rel="noopener">Amazon SageMaker AI: Invoke endpoints with OpenAI-compatible APIs</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-36"><td class="num"><b>36</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2026/05/amazon-sagemaker-ai-openai-apis/" target="_blank" rel="noopener">Amazon SageMaker AI now supports OpenAI-compatible APIs for inference endpoints</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-37"><td class="num"><b>37</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/your-algorithms-inference-code.html" target="_blank" rel="noopener">Amazon SageMaker AI: Custom Inference Code with Hosting Services</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-38"><td class="num"><b>38</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/deploy-model-options.html" target="_blank" rel="noopener">Amazon SageMaker AI: Inference options in Amazon SageMaker AI</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-39"><td class="num"><b>39</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/endpoint-auto-scaling-zero-instances.html" target="_blank" rel="noopener">Amazon SageMaker AI: Scale an endpoint to zero instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-40"><td class="num"><b>40</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2026/11/sagemaker-kv-cache-routing/" target="_blank" rel="noopener">Amazon SageMaker AI now supports KV cache-aware routing for real-time inference endpoints</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-41"><td class="num"><b>41</b></td><td class="t"><a href="https://aws.amazon.com/blogs/machine-learning/amazon-sagemaker-inference-2026-year-to-date-launches-in-review/" target="_blank" rel="noopener">Amazon SageMaker Inference: 2026 year-to-date launches in review</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-42"><td class="num"><b>42</b></td><td class="t"><a href="https://aws.amazon.com/sagemaker/ai/pricing/" target="_blank" rel="noopener">Amazon SageMaker AI pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-43"><td class="num"><b>43</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod.html" target="_blank" rel="noopener">Amazon SageMaker HyperPod</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-44"><td class="num"><b>44</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment.html" target="_blank" rel="noopener">SageMaker HyperPod: Deploying models on Amazon SageMaker HyperPod</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-45"><td class="num"><b>45</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-deploy-ftm.html" target="_blank" rel="noopener">SageMaker HyperPod: Deploy models from Amazon S3, Amazon FSx, or Hugging Face Hub using kubectl</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-46"><td class="num"><b>46</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-autoscaling.html" target="_blank" rel="noopener">SageMaker HyperPod: Autoscaling policies for your HyperPod inference model deployment</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-47"><td class="num"><b>47</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-caching-routing.html" target="_blank" rel="noopener">SageMaker HyperPod: KV caching and intelligent routing</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-48"><td class="num"><b>48</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-inference-gateway.html" target="_blank" rel="noopener">SageMaker HyperPod: Inference Gateway for Amazon SageMaker HyperPod Inference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-49"><td class="num"><b>49</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-model-deployment-dpd.html" target="_blank" rel="noopener">SageMaker HyperPod: Disaggregated Prefill and Decode for HyperPod inference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-50"><td class="num"><b>50</b></td><td class="t"><a href="https://docs.aws.amazon.com/sagemaker/latest/dg/sagemaker-hyperpod-inference-release-notes.html" target="_blank" rel="noopener">SageMaker HyperPod Inference release notes</a></td><td class="nowrap"><span class="l-ko">릴리스 노트</span><span class="l-en">Release notes</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-51"><td class="num"><b>51</b></td><td class="t"><a href="https://docs.aws.amazon.com/prescriptive-guidance/latest/gen-ai-inference-architecture-and-best-practices-on-aws/amazon-sage-maker-hyper-pod.html" target="_blank" rel="noopener">Prescriptive Guidance: Amazon SageMaker HyperPod</a></td><td class="nowrap"><span class="l-ko">AWS Prescriptive Guidance</span><span class="l-en">AWS Prescriptive Guidance</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-52"><td class="num"><b>52</b></td><td class="t"><a href="https://aws.amazon.com/about-aws/whats-new/2026/09/sgm-hyperpod-model-caching-inf/" target="_blank" rel="noopener">Amazon SageMaker HyperPod now supports model caching for faster inference autoscaling and reduced cold starts</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-53"><td class="num"><b>53</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/model-customization-import-model.html" target="_blank" rel="noopener">Amazon Bedrock: Use Custom model import to import a customized open-source model</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-54"><td class="num"><b>54</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/invoke-imported-model.html" target="_blank" rel="noopener">Amazon Bedrock: Invoke your imported model</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-55"><td class="num"><b>55</b></td><td class="t"><a href="https://aws.amazon.com/bedrock/pricing/" target="_blank" rel="noopener">Amazon Bedrock pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-56"><td class="num"><b>56</b></td><td class="t"><a href="https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-regions.html" target="_blank" rel="noopener">Amazon EC2 instance types by Region</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글은 2026년 11월 21일에 확인한 AWS 공식 문서, 요금 페이지, What's New 게시물, AWS 블로그를 기준으로 작성했습니다. 여섯 플랫폼에 직접 배포해 성능을 측정한 글이 아니며 본문의 시작 시간 수치는 각 문서가 밝힌 예시 조건의 값입니다. 이미지 태그와 버전, 요금, 리전별 제공 여부는 바뀔 수 있으므로 적용 전에 원문을 다시 확인하는 것을 권고합니다.</span><span class="l-en">This post is based on the AWS documentation, pricing pages, What's New posts and AWS blogs, checked on November 21, 2026. It does not report measurements from deployments on the six platforms, and the start-up figures in the body are the values the documents give for their own example conditions. Image tags and versions, prices and Regional availability change, so check the original pages again before you apply them.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
