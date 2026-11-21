@@ -43,6 +43,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Post "AWS Transit Gateway 1:1 NAT, tested in the Seoul Region": the first chapter now opens with an infographic of the whole test setup (figure 1 in a Korean and an English version, replacing the setup diagram of chapter 02); chapter 03 shows the AWS CLI commands used before and after enabling NAT with their output, and chapter 06 the two flow log query commands with their output; the Korean page writes control plane as "컨트롤 플레인"
 - Top menu: "About" moves to the end, after "Code Pulse" and "LLM Monitor" (Home, Tags, Workshop, Code Pulse, LLM Monitor, About)
 - Post "Start-up time and concurrency of AWS Lambda GPU functions, tested in Seoul": add chapter 08 "Examples where a Lambda GPU function fits well" (four examples backed by the test results, five use cases AWS lists, four cases that do not fit) with a fifth figure in a Korean and an English version; the limits chapter moves to 09 and the settings chapter to 10
 - Post titles: every report page shrinks the title of the visible language until it fits on one line (not below 30px; a title that is still too long wraps at 30px). At a 1440px-wide window 21 of 22 Korean titles and 11 of 22 English titles are on one line (7 and 3 before). All 22 reports were rebuilt with the new `my-plugins:techblogs` template; only their style and script blocks changed
@@ -122,6 +123,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 게시물 "서울 리전에서 테스트한 AWS Transit Gateway 1:1 NAT": 첫 챕터를 전체 테스트 구성 인포그래픽으로 시작(그림 1의 한국어판과 영어판, 챕터 02의 구성도를 대체). 챕터 03에 NAT 활성화 전과 후에 사용한 AWS CLI 명령과 출력, 챕터 06에 Flow Logs 조회 명령 두 개와 출력 추가. 한국어 페이지에서 control plane을 "컨트롤 플레인"으로 표기
 - 상단 메뉴: "About"을 "Code Pulse"와 "LLM Monitor" 다음인 마지막 자리로 이동 (Home, Tags, Workshop, Code Pulse, LLM Monitor, About 순서)
 - 게시물 "서울 리전에서 테스트한 AWS Lambda GPU 함수의 시작 시간과 동시성": 챕터 08 "Lambda GPU 함수를 활용하기 좋은 예시" 추가(테스트 결과를 근거로 든 예시 네 가지, AWS가 제시한 사례 다섯 가지, 맞지 않는 경우 네 가지), 그림 5의 한국어판과 영어판 포함. 테스트의 한계 챕터는 09, 설정 권고 챕터는 10으로 이동
 - 게시물 제목: 모든 리포트 페이지가 보이는 언어의 제목을 한 줄에 들어갈 때까지 줄임(30px 아래로는 줄이지 않고, 그래도 긴 제목은 30px에서 줄을 바꿈). 창 폭 1440px에서 한국어 제목 22편 중 21편, 영어 제목 22편 중 11편이 한 줄(이전 7편, 3편). 22편을 새 `my-plugins:techblogs` 템플릿으로 다시 빌드했고 스타일과 스크립트 블록만 바뀜

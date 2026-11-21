@@ -206,13 +206,15 @@ html[data-lang="en"] .l-ko{display:none!important}
 <nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">A request I expected to fail reached a server in another VPC</a><a href="#en-s2">How 1:1 NAT rewrites addresses</a><a href="#en-s3">The test setup: a dedicated route table on an existing transit gateway</a><a href="#en-s4">NAT on both sides connects the VPCs, NAT on one side moves the address</a><a href="#en-s5">About a minute to enable, and 8.8 seconds of silence when the address changes</a><a href="#en-s6">Settings the API accepts that still break connectivity</a><a href="#en-s7">Flow Logs keep the addresses from before translation</a><a href="#en-s8">On a BGP VPN attachment the system route is a blackhole until a route is advertised</a><a href="#en-s9">Pricing follows the Regional NAT Gateway rates</a><a href="#en-s10">What I could not test and what to check again</a><a href="#en-s11">Steps to apply it, and when not to</a><a href="#sources">References</a></nav>
 <div class="col l-ko" lang="ko">
 <section class="sec" id="ko-s1"><header class="sec-head"><h2>끊길 줄 알았던 요청이 다른 VPC의 서버에 도착했습니다</h2></header><div class="prose">
+<p>AWS는 2026년 10월 23일 AWS Transit Gateway와 AWS Cloud WAN의 1:1 NAT를 발표했고 11월 16일 AWS 네트워킹 블로그에서 사용 시나리오 세 가지를 소개했습니다. 이 글은 그중 VPC끼리 CIDR이 겹치는 시나리오를 서울 리전의 기존 Transit Gateway에서 재현하고 문서에 적힌 동작을 패킷 캡처와 API 호출로 하나씩 확인해 본 기록입니다. 전체 테스트 구성은 그림 1과 같습니다. 운영 중인 Transit Gateway에 CIDR이 겹치는 새 VPC 3개와 BGP VPN 연결 1개를 추가하고 테스트 전용 라우팅 테이블에만 연결했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig01-test-overview.png" alt="전체 테스트 구성을 정리한 인포그래픽. 위쪽에는 10.0.0.0/24를 함께 사용하는 VPC A와 VPC C, 10.0.1.0/24를 사용하는 VPC B가 기존 Transit Gateway의 테스트 전용 라우팅 테이블에 연결되어 있고 VPC A는 100.64.0.0/24로, VPC C는 100.64.1.0/24로 변환된다. BGP VPN 연결은 터널이 내려가 있어 컨트롤 플레인만 확인했다. 아래쪽에는 측정 방법 다섯 가지와 테스트 순서 일곱 단계가 표로 정리되어 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 전체 테스트 구성, 측정 방법, 테스트 순서. 기존 Transit Gateway의 기존 연결과 라우팅 테이블은 변경하지 않았습니다</figcaption></figure>
 <p>VPC 연결에 1:1 NAT를 활성화하면 그 VPC를 원래 주소로 부르던 클라이언트는 연결을 잃는다고 예상했습니다. AWS 블로그와 User Guide가 그렇게 설명하기 때문입니다. 테스트 결과는 달랐습니다. CIDR이 같은 VPC 2개 가운데 한쪽에만 NAT를 활성화하자 원래 주소 10.0.0.5로 보낸 요청은 끊기지 않고 다른 VPC에 있는 같은 주소의 서버에 도착했습니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 활성화 전, b1에서 curl 10.0.0.5:8080
 {"server": "a1", "server_addr": "10.0.0.5:8080", "client_addr": "10.0.1.10:59334"}
 
 # VPC A 연결에만 활성화한 뒤, b1에서 같은 명령
 {"server": "c2", "server_addr": "10.0.0.5:8080", "client_addr": "10.0.1.10:43078"}</code></pre></div>
-<p>AWS는 2026년 10월 23일 AWS Transit Gateway와 AWS Cloud WAN의 1:1 NAT를 발표했고 11월 16일 AWS 네트워킹 블로그에서 사용 시나리오 세 가지를 소개했습니다. 이 글은 그중 VPC끼리 CIDR이 겹치는 시나리오를 서울 리전의 기존 Transit Gateway에서 재현하고 문서에 적힌 동작을 패킷 캡처와 API 호출로 하나씩 확인해 본 기록입니다. 확인하려던 것은 세 가지입니다. CIDR이 같은 두 VPC가 실제로 통신하는지, 활성화하는 동안 트래픽이 얼마나 끊기는지, 변환한 뒤 로그와 지표에 어느 주소가 남는지입니다.</p>
+<p>확인하려던 것은 세 가지입니다. CIDR이 같은 두 VPC가 실제로 통신하는지, 활성화하는 동안 트래픽이 얼마나 끊기는지, 변환한 뒤 로그와 지표에 어느 주소가 남는지입니다.</p>
 </div></section>
 
 <section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>1:1 NAT가 주소를 바꾸는 방식</h2></header><div class="prose">
@@ -243,8 +245,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 </div></section>
 
 <section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>기존 Transit Gateway에 전용 라우팅 테이블로 연결한 테스트 구성</h2></header><div class="prose">
-<p>테스트는 2026년 11월 21일 서울 리전(ap-northeast-2)의 가용 영역 하나에서 진행했습니다. 대상은 VPC 연결 3개와 Direct Connect Gateway 연결 1개가 이미 있는 운영 중인 Transit Gateway입니다. VPC 연결에 NAT를 활성화하면 전파 경로가 교체되므로 기존 연결은 변경하지 않았습니다. 대신 새 VPC 3개를 같은 Transit Gateway에 연결하고 전용 라우팅 테이블 하나에만 라우팅 테이블 연결(Association)과 전파(Propagation)를 구성했습니다. 기존 라우팅 테이블의 경로는 테스트 전후로 같았습니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig01-test-setup.png" alt="VPC A와 VPC C가 같은 10.0.0.0/24를 사용하고 VPC B가 10.0.1.0/24를 사용하며 세 VPC가 기존 Transit Gateway의 전용 라우팅 테이블에 연결된 구성도. 양쪽 활성화 후 라우팅 테이블에는 100.64.0.0/24와 100.64.1.0/24가 system 경로로, 10.0.1.0/24가 전파 경로로 들어 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 테스트 구성. 기존 Transit Gateway의 다른 연결과 라우팅 테이블은 생략했습니다</figcaption></figure>
+<p>테스트는 2026년 11월 21일 서울 리전(ap-northeast-2)의 가용 영역 하나에서 진행했습니다. 대상은 VPC 연결 3개와 Direct Connect Gateway 연결 1개가 이미 있는 운영 중인 Transit Gateway입니다. VPC 연결에 NAT를 활성화하면 전파 경로가 교체되므로 기존 연결은 변경하지 않았습니다. 대신 그림 1처럼 새 VPC 3개를 같은 Transit Gateway에 연결하고 전용 라우팅 테이블 하나에만 라우팅 테이블 연결(Association)과 전파(Propagation)를 구성했습니다. 기존 라우팅 테이블의 경로는 테스트 전후로 같았습니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>VPC</th><th>CIDR</th><th>인스턴스와 주소</th><th>변환 대역</th></tr>
@@ -262,15 +263,73 @@ html[data-lang="en"] .l-ko{display:none!important}
 
 <section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>양쪽에 활성화하면 통신하고 한쪽만 활성화하면 주소가 넘어갑니다</h2></header><div class="prose">
 <h3>활성화 전</h3>
-<p>세 연결 모두 전파가 enabled 상태였지만 라우팅 테이블에는 10.0.0.0/24 경로가 하나만 설치됐습니다. 먼저 전파를 시작한 VPC A가 경로를 차지했고 VPC C의 전파는 오류 없이 무시됐습니다. VPC C에만 있는 10.0.0.18로는 어느 쪽에서도 응답이 없었습니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># aws ec2 search-transit-gateway-routes 결과를 정리한 것
-10.0.0.0/24     propagated   active   VPC A 연결
-10.0.1.0/24     propagated   active   VPC B 연결</code></pre></div>
+<p>세 연결 모두 전파가 enabled 상태였지만 라우팅 테이블에는 10.0.0.0/24 경로가 하나만 설치됐습니다. 먼저 전파를 시작한 VPC A가 경로를 차지했고 VPC C의 전파는 오류 없이 무시됐습니다. VPC C에만 있는 10.0.0.18로는 어느 쪽에서도 응답이 없었습니다. 이 상태는 전파 상태, 라우팅 테이블의 경로, 연결의 NAT 설정을 조회하는 명령 세 개로 확인했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 전파 상태
+aws ec2 get-transit-gateway-route-table-propagations \
+    --transit-gateway-route-table-id tgw-rtb-0aaaaaaaaaaaaaaaa
+
+# 라우팅 테이블의 경로
+aws ec2 search-transit-gateway-routes \
+    --transit-gateway-route-table-id tgw-rtb-0aaaaaaaaaaaaaaaa \
+    --filters Name=state,Values=active,blackhole \
+    --query 'sort_by(Routes,&amp;DestinationCidrBlock)[].[DestinationCidrBlock,Type,State,TransitGatewayAttachments[0].ResourceId]' \
+    --output text
+
+# 연결의 NAT 설정
+aws ec2 get-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 전파 상태: 세 연결 모두 enabled (출력을 정리한 것)
+VPC A 연결   enabled
+VPC B 연결   enabled
+VPC C 연결   enabled
+
+# 경로: 10.0.0.0/24는 하나만 설치 (리소스 ID를 VPC 이름으로 바꾼 것)
+10.0.0.0/24     propagated   active   VPC A
+10.0.1.0/24     propagated   active   VPC B
+
+# NAT 설정: 기본값
+{
+    "TransitGatewayAttachmentId": "tgw-attach-0aaaaaaaaaaaaaaaa",
+    "NatGatewaySupport": "disabled",
+    "NatSystemRouteSupport": "enable",
+    "NatGatewayRules": []
+}</code></pre></div>
 <h3>한쪽 연결에만 활성화한 경우</h3>
-<p>VPC A 연결에만 10.0.0.0/24를 100.64.0.0/24로 변환하는 규칙을 넣고 활성화했습니다. VPC A의 전파 경로가 system 경로로 교체되자 그동안 설치되지 못했던 VPC C의 10.0.0.0/24 전파 경로가 그 자리에 들어왔습니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>10.0.0.0/24     propagated   active   VPC C 연결
-10.0.1.0/24     propagated   active   VPC B 연결
-100.64.0.0/24   system       active   VPC A 연결</code></pre></div>
+<p>VPC A 연결에만 10.0.0.0/24를 100.64.0.0/24로 변환하는 규칙을 넣고 활성화했습니다. 변경은 비동기로 적용되므로 NAT 설정을 다시 조회해 enabled와 activated가 된 것을 확인한 뒤, 활성화 전과 같은 명령으로 경로를 조회했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># VPC A 연결에 규칙을 넣고 활성화
+aws ec2 modify-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa \
+    --nat-gateway-support enable \
+    --nat-gateway-rules '[{"RuleNumber":100,"MatchSourceCidr":"10.0.0.0/24","NatCidr":"100.64.0.0/24"}]'
+
+# 적용이 끝났는지 확인 (enabled와 activated가 될 때까지 반복)
+aws ec2 get-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa \
+    --query '[NatGatewaySupport, join(`,`, NatGatewayRules[].State)]' --output text</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 활성화 명령의 응답
+{
+    "TransitGatewayAttachmentId": "tgw-attach-0aaaaaaaaaaaaaaaa",
+    "NatGatewaySupport": "enabling",
+    "NatSystemRouteSupport": "enable",
+    "NatGatewayRules": [
+        {
+            "RuleNumber": 100,
+            "MatchSourceCidr": "10.0.0.0/24",
+            "NatCidr": "100.64.0.0/24",
+            "State": "pending"
+        }
+    ]
+}
+
+# 조회 명령의 출력 (요청 후 2초, 20초)
+enabling   activated
+enabled    activated
+
+# 요청 후 약 34초의 경로 (리소스 ID를 VPC 이름으로 바꾼 것)
+10.0.0.0/24     propagated   active   VPC C
+10.0.1.0/24     propagated   active   VPC B
+100.64.0.0/24   system       active   VPC A</code></pre></div>
+<p>VPC A의 전파 경로가 system 경로로 교체되자 그동안 설치되지 못했던 VPC C의 10.0.0.0/24 전파 경로가 그 자리에 들어왔습니다.</p>
 <figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig02-one-sided-nat.png" alt="활성화 전에는 b1이 10.0.0.5로 보낸 요청이 VPC A의 a1에 도착하고 VPC A에만 NAT를 활성화한 뒤에는 10.0.0.0/24 전파 경로가 VPC C를 가리켜 같은 요청이 VPC C의 c2에 도착하는 모습을 나란히 보여 주는 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> VPC A에만 활성화했을 때 원래 주소 10.0.0.5로 보낸 요청의 도착지</figcaption></figure>
 <p>CIDR이 같은 다른 연결이 같은 라우팅 테이블에 전파하고 있으면 원래 주소로 가던 연결은 끊기지 않고 응답하는 서버만 바뀝니다. 클라이언트에서는 오류가 발생하지 않으므로 장애로 드러나지 않습니다. DNS 레코드를 NAT 주소로 먼저 변경하라는 AWS 블로그의 권고가 이 경우에 특히 필요합니다.</p>
 <p>이 상태에서 VPC C의 c1이 a1의 NAT 주소 100.64.0.5로 접속하면 실패합니다. VPC C 연결에는 규칙이 없어서 출발지가 10.0.0.18 그대로 도착하고 a1은 이 주소를 자기 서브넷 안에서 찾다가 ARP가 실패해 응답을 보내지 못합니다. 같은 비유로 보면 C 단지에는 대외용 동 번호가 없어서 A 단지 주민이 받은 상자의 보낸 주소가 자기 단지에도 있는 101동으로 적혀 있는 상황입니다. CIDR이 같은 두 네트워크는 양쪽을 각각 다른 변환 대역으로 변환해야 한다는 User Guide의 설명과 일치합니다.</p>
@@ -280,7 +339,7 @@ IP 10.0.0.18 &gt; 10.0.0.5: ICMP echo request, id 11654, seq 1, length 64
 # a1의 ip neigh show
 10.0.0.18 dev ens5 FAILED</code></pre></div>
 <h3>양쪽 연결에 활성화한 경우</h3>
-<p>VPC C 연결에는 10.0.0.0/24를 100.64.1.0/24로 변환하는 규칙을 넣었습니다. 라우팅 테이블에는 system 경로 2개와 VPC B의 전파 경로 1개가 남아 AWS 블로그의 그림과 같은 구성이 됐습니다. a1에서 출발지 포트를 40001로 고정해 c1의 NAT 주소로 접속하고 양쪽에서 패킷을 캡처했습니다.</p>
+<p>VPC C 연결에는 같은 명령에서 연결 ID와 변환 대역만 바꿔 10.0.0.0/24를 100.64.1.0/24로 변환하는 규칙을 넣었습니다. 라우팅 테이블에는 system 경로 2개와 VPC B의 전파 경로 1개가 남아 AWS 블로그의 그림과 같은 구성이 됐습니다. a1에서 출발지 포트를 40001로 고정해 c1의 NAT 주소로 접속하고 양쪽에서 패킷을 캡처했습니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># a1에서 curl --local-port 40001 100.64.1.18:8080
 {"server": "c1", "server_addr": "10.0.0.18:8080", "client_addr": "100.64.0.5:40001"}
 
@@ -315,7 +374,7 @@ IP 10.0.0.18.8080 &gt; 100.64.0.5.40001: Flags [S.], seq 3107603732, ack 3728719
 
 <section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>활성화는 1분 안팎, 주소가 바뀌는 순간 8.8초 무응답</h2></header><div class="prose">
 <p>변경은 비동기로 적용됩니다. b1에서 0.2초 간격으로 ping을 보내면서 VPC C 연결에 NAT를 활성화하고 상태 조회 결과와 ping 타임스탬프를 비교했습니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig04-enable-timeline.png" alt="VPC C 연결의 활성화 과정을 시간순으로 그린 그림. 요청 후 약 32초에 enabled가 되고 약 45초에 라우팅 테이블이 바뀐다. 기존 주소 10.0.0.18은 43.9초까지, 새 주소 100.64.1.18은 52.7초부터 응답해 8.8초 동안 응답이 없다. 다른 연결의 NAT 주소 100.64.0.5는 손실이 없다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> VPC C 연결에 활성화했을 때의 시간 경과. 제어 평면 시각은 3~5초 간격으로 조회한 값이라 그만큼 오차가 있습니다</figcaption></figure>
+<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig04-enable-timeline.png" alt="VPC C 연결의 활성화 과정을 시간순으로 그린 그림. 요청 후 약 32초에 enabled가 되고 약 45초에 라우팅 테이블이 바뀐다. 기존 주소 10.0.0.18은 43.9초까지, 새 주소 100.64.1.18은 52.7초부터 응답해 8.8초 동안 응답이 없다. 다른 연결의 NAT 주소 100.64.0.5는 손실이 없다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> VPC C 연결에 활성화했을 때의 시간 경과. 컨트롤 플레인 시각은 3~5초 간격으로 조회한 값이라 그만큼 오차가 있습니다</figcaption></figure>
 <p>요청 후 약 32초에 <code>NatGatewaySupport</code>가 enabled가 됐고 약 45초에 라우팅 테이블이 바뀌었습니다. 기존 주소 10.0.0.18은 43.9초까지 응답했고 새 주소 100.64.1.18은 52.7초부터 응답했습니다. 두 주소 모두 응답하지 않은 시간은 8.8초입니다. 같은 시간에 이미 NAT를 적용 중이던 VPC A의 주소 100.64.0.5로 보낸 ping 839개는 모두 응답을 받았습니다. 한 연결의 변경이 다른 연결의 변환 트래픽에 영향을 주지 않았습니다.</p>
 <div class="scroll"><table>
 <thead>
@@ -397,17 +456,34 @@ IP 100.64.9.10 &gt; 10.0.0.5: ICMP echo reply, id 6520, seq 1, length 64</code><
 </div></section>
 
 <section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Flow Logs에는 변환 전 주소가 남습니다</h2></header><div class="prose">
-<p>Transit Gateway Flow Logs에는 변환 전 실제 주소가 기록됐습니다. a1에서 c1의 NAT 주소로 간 연결은 양쪽 연결의 로그 모두 10.0.0.5에서 10.0.0.18로 남았고 100.64 주소는 없었습니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 연결     tgw-src-vpc-id  tgw-dst-vpc-id  srcaddr    dstaddr     srcport  dstport  flow-direction
-VPC A 연결  VPC A           VPC C           10.0.0.5   10.0.0.18   40001    8080     ingress
-VPC C 연결  VPC A           VPC C           10.0.0.5   10.0.0.18   40001    8080     egress</code></pre></div>
+<p>Transit Gateway Flow Logs에는 변환 전 실제 주소가 기록됐습니다. Flow Logs는 테스트 연결 3개에 연결 단위로 활성화해 Amazon CloudWatch Logs로 보냈고 집계 간격은 60초, 형식은 기본값입니다. 조회에는 <code>aws logs filter-log-events</code>를 사용했습니다. 출발지 포트 40001을 필터로 지정해 그림 3의 연결을 찾고 awk로 연결 ID, 출발지와 목적지 VPC ID, 주소, 포트, 방향 필드만 골랐습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws logs filter-log-events \
+    --log-group-name /tgw-nat-lab/tgw-flowlogs \
+    --filter-pattern '" 40001 "' \
+    --query 'events[].message' --output text | tr '\t' '\n' \
+  | awk '{print $5, $8, $9, $17, $18, $19, $20, $34}'</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># tgw-attachment-id  tgw-src-vpc-id  tgw-dst-vpc-id  srcaddr  dstaddr  srcport  dstport  flow-direction
+VPC A 연결  VPC A  VPC C  10.0.0.5   10.0.0.18  40001  8080   ingress
+VPC A 연결  VPC C  VPC A  10.0.0.18  10.0.0.5   8080   40001  egress
+VPC C 연결  VPC A  VPC C  10.0.0.5   10.0.0.18  40001  8080   egress
+VPC C 연결  VPC C  VPC A  10.0.0.18  10.0.0.5   8080   40001  ingress</code></pre></div>
+<p>a1에서 c1의 NAT 주소로 간 연결은 양쪽 연결의 로그 모두 10.0.0.5에서 10.0.0.18로 남았고 100.64 주소는 없었습니다. 출력의 연결 ID와 VPC ID는 이름으로 바꿔 적었습니다.</p>
 <p>주소가 겹치는 환경에서는 <code>srcaddr</code>와 <code>dstaddr</code>만으로 호스트를 구분할 수 없으므로 <code>tgw-src-vpc-id</code>와 <code>tgw-dst-vpc-id</code> 필드를 함께 확인해야 합니다. NAT 주소는 경로가 없어 폐기된 패킷처럼 목적지 변환이 일어나지 않은 레코드에서만 나타났습니다. 이 동작은 문서에서 확인하지 못했고 이번 테스트에서 관찰한 결과입니다.</p>
+<p>NAT 주소가 들어 있는 레코드는 필터를 <code>"100.64."</code>로 바꿔 찾았습니다. 출력의 여섯 번째 값은 경로가 없어 폐기된 패킷 수(<code>packets-lost-no-route</code>)이고 아래 두 줄은 받은 패킷이 모두 폐기된 레코드입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws logs filter-log-events \
+    --log-group-name /tgw-nat-lab/tgw-flowlogs \
+    --filter-pattern '"100.64."' \
+    --query 'events[].message' --output text | tr '\t' '\n' \
+  | awk '{print $5, $17, $18, $21, $22, $28, $34}'</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># tgw-attachment-id  srcaddr  dstaddr  protocol  packets  packets-lost-no-route  flow-direction
+VPC B 연결  10.0.1.10  100.64.1.18  1  190  190  ingress
+VPC A 연결  10.0.0.5   100.64.9.10  6  7    7    ingress</code></pre></div>
 <p>CloudWatch의 <code>AWS/TransitGateway</code> 네임스페이스에는 지표 4개가 추가됐습니다. <code>PacketsInNAT</code>와 <code>BytesInNAT</code>는 그 연결의 규칙으로 출발지가 변환된 트래픽을 세고 <code>PacketsOutNAT</code>와 <code>BytesOutNAT</code>는 목적지가 변환된 트래픽을 셉니다. 주소 전환 직후에는 기존 지표인 <code>PacketDropCountNoRoute</code>가 유용했습니다. VPC B 연결에서 5분 합계로 670개와 411개가 집계됐습니다. b1이 아직 경로가 없는 새 주소와 경로가 사라진 이전 주소로 보낸 ping입니다. 출발지 쪽 연결에서 이 지표를 확인하면 이전 주소를 아직 사용하는 클라이언트가 어느 네트워크에 남아 있는지 찾을 수 있습니다.</p>
 <p>AWS CloudTrail에는 <code>ModifyTransitGatewayAttachmentNatConfiguration</code> 이벤트가 요청 파라미터, 응답과 함께 기록되고 거부된 요청도 오류 코드와 함께 남습니다. Reachability Analyzer로 a1에서 c1의 NAT 주소 100.64.1.18까지의 경로를 분석한 결과는 <code>NO_PATH</code>였습니다. 실제로는 통신이 되는 경로이므로 테스트 시점에는 이 도구가 변환을 반영하지 않는 것으로 보입니다.</p>
 </div></section>
 
 <section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>BGP VPN 연결의 system 경로는 광고가 없으면 blackhole입니다</h2></header><div class="prose">
-<p>Direct Connect Gateway 연결과 BGP를 사용하는 Site-to-Site VPN 연결에서는 NAT 시스템 경로 지원을 선택할 수 있습니다. 같은 Transit Gateway에 BGP VPN 연결을 하나 만들어 제어 평면 동작을 확인했습니다. 고객 게이트웨이 장비는 구성하지 않아 터널이 내려가 있고 BGP로 받은 경로가 없는 상태입니다. 이 연결에 10.0.0.0/24를 100.64.3.0/24로 변환하는 규칙을 넣고 활성화하자 system 경로가 설치됐지만 상태는 blackhole이었습니다.</p>
+<p>Direct Connect Gateway 연결과 BGP를 사용하는 Site-to-Site VPN 연결에서는 NAT 시스템 경로 지원을 선택할 수 있습니다. 같은 Transit Gateway에 BGP VPN 연결을 하나 만들어 컨트롤 플레인 동작을 확인했습니다. 고객 게이트웨이 장비는 구성하지 않아 터널이 내려가 있고 BGP로 받은 경로가 없는 상태입니다. 이 연결에 10.0.0.0/24를 100.64.3.0/24로 변환하는 규칙을 넣고 활성화하자 system 경로가 설치됐지만 상태는 blackhole이었습니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>100.64.3.0/24   system   blackhole   VPN 연결</code></pre></div>
 <p>User Guide에 따르면 이 system 경로는 온프레미스가 원본 대역과 겹치는 경로를 광고하는 동안에만 active 상태입니다. <code>NatSystemRouteSupport</code>를 disable로 변경하자 경로가 사라졌고 enable로 다시 변경하자 blackhole 상태로 나타났습니다. VPC 연결에서 거부되던 disable 요청이 이 연결에서는 수락됐습니다.</p>
 <p>운영에서 고려할 점은 두 가지입니다. NAT 시스템 경로 지원을 활성화한 연결에서는 온프레미스가 원본 대역 광고를 중단하면 변환 대역 경로도 함께 blackhole이 됩니다. 다음으로 AWS 블로그는 두 터널을 ECMP나 주 회선과 예비 회선 구성으로 사용하는 경우 NAT 시스템 경로 지원을 비활성화할 것을 권고합니다. system 경로에는 원래 경로의 AS 경로와 MED가 이어지지 않기 때문입니다. 이때는 온프레미스 라우터가 변환 대역을 직접 광고합니다.</p>
@@ -441,13 +517,15 @@ VPC C 연결  VPC A           VPC C           10.0.0.5   10.0.0.18   40001    80
 </div>
 <div class="col l-en" lang="en">
 <section class="sec" id="en-s1"><header class="sec-head"><h2>A request I expected to fail reached a server in another VPC</h2></header><div class="prose">
+<p>AWS announced 1:1 NAT for AWS Transit Gateway and AWS Cloud WAN on 23 October 2026, and the AWS networking blog walked through three scenarios on 16 November. This post reproduces the first of them, VPCs with overlapping CIDRs, on an existing transit gateway in the Seoul Region, and checks the documented behavior one item at a time with packet captures and API calls. Figure 1 shows the whole test setup. I added three new VPCs with overlapping CIDRs and one BGP VPN attachment to a transit gateway that is in use, and associated them only with a route table dedicated to the test.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig01-test-overview-en.png" alt="Infographic of the whole test setup. At the top, VPC A and VPC C, which both use 10.0.0.0/24, and VPC B, which uses 10.0.1.0/24, attach to a dedicated route table on an existing transit gateway. VPC A is translated to 100.64.0.0/24 and VPC C to 100.64.1.0/24. The BGP VPN attachment has both tunnels down, so only the control plane was checked. At the bottom, two tables list five ways of measuring and the seven steps of the test" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The whole test setup, how it was measured, and the order of the tests. The existing attachments and route table of the transit gateway were not changed</figcaption></figure>
 <p>I expected that once 1:1 NAT is enabled on a VPC attachment, any client still calling that VPC by its original address would lose its connection. That is how the AWS blog and the User Guide describe it. The test showed something else. With two VPCs that use the same CIDR and NAT enabled on only one of them, a request to the original address 10.0.0.5 was not dropped. It reached the server with the same address in the other VPC.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># before NAT, from b1: curl 10.0.0.5:8080
 {"server": "a1", "server_addr": "10.0.0.5:8080", "client_addr": "10.0.1.10:59334"}
 
 # after enabling NAT on the VPC A attachment only, same command from b1
 {"server": "c2", "server_addr": "10.0.0.5:8080", "client_addr": "10.0.1.10:43078"}</code></pre></div>
-<p>AWS announced 1:1 NAT for AWS Transit Gateway and AWS Cloud WAN on 23 October 2026, and the AWS networking blog walked through three scenarios on 16 November. This post reproduces the first of them, VPCs with overlapping CIDRs, on an existing transit gateway in the Seoul Region, and checks the documented behavior one item at a time with packet captures and API calls. I wanted to know three things: whether two VPCs with the same CIDR can really talk, how long traffic is interrupted while NAT is being enabled, and which address ends up in the logs and metrics after translation.</p>
+<p>I wanted to know three things: whether two VPCs with the same CIDR can really talk, how long traffic is interrupted while NAT is being enabled, and which address ends up in the logs and metrics after translation.</p>
 </div></section>
 
 <section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>How 1:1 NAT rewrites addresses</h2></header><div class="prose">
@@ -478,8 +556,7 @@ VPC C 연결  VPC A           VPC C           10.0.0.5   10.0.0.18   40001    80
 </div></section>
 
 <section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>The test setup: a dedicated route table on an existing transit gateway</h2></header><div class="prose">
-<p>I ran the test on 21 November 2026 in one Availability Zone of the Seoul Region (ap-northeast-2). The target was a transit gateway in use, which already had three VPC attachments and one Direct Connect gateway attachment. Because enabling NAT on a VPC attachment replaces its propagated route, I left the existing attachments alone. I attached three new VPCs to the same transit gateway and set up association and propagation on one dedicated route table only. The routes in the existing route table were the same before and after the test.</p>
-<figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig01-test-setup-en.png" alt="Diagram of the setup: VPC A and VPC C both use 10.0.0.0/24, VPC B uses 10.0.1.0/24, and all three attach to a dedicated route table on an existing transit gateway. After NAT on both sides the route table holds 100.64.0.0/24 and 100.64.1.0/24 as system routes and 10.0.1.0/24 as a propagated route" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> Test setup. The other attachments and route tables of the existing transit gateway are left out</figcaption></figure>
+<p>I ran the test on 21 November 2026 in one Availability Zone of the Seoul Region (ap-northeast-2). The target was a transit gateway in use, which already had three VPC attachments and one Direct Connect gateway attachment. Because enabling NAT on a VPC attachment replaces its propagated route, I left the existing attachments alone. As Figure 1 shows, I attached three new VPCs to the same transit gateway and set up association and propagation on one dedicated route table only. The routes in the existing route table were the same before and after the test.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>VPC</th><th>CIDR</th><th>Instances and addresses</th><th>Translated range</th></tr>
@@ -497,15 +574,73 @@ VPC C 연결  VPC A           VPC C           10.0.0.5   10.0.0.18   40001    80
 
 <section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>NAT on both sides connects the VPCs, NAT on one side moves the address</h2></header><div class="prose">
 <h3>Before NAT</h3>
-<p>Propagation was enabled for all three attachments, yet the route table held only one route for 10.0.0.0/24. VPC A, which started propagating first, took the route, and the propagation from VPC C was ignored without any error. Nothing could reach 10.0.0.18, an address that exists only in VPC C.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># condensed from aws ec2 search-transit-gateway-routes
-10.0.0.0/24     propagated   active   VPC A attachment
-10.0.1.0/24     propagated   active   VPC B attachment</code></pre></div>
+<p>Propagation was enabled for all three attachments, yet the route table held only one route for 10.0.0.0/24. VPC A, which started propagating first, took the route, and the propagation from VPC C was ignored without any error. Nothing could reach 10.0.0.18, an address that exists only in VPC C. I checked this state with three commands that show the propagation state, the routes in the route table, and the NAT configuration of an attachment.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># propagation state
+aws ec2 get-transit-gateway-route-table-propagations \
+    --transit-gateway-route-table-id tgw-rtb-0aaaaaaaaaaaaaaaa
+
+# routes in the route table
+aws ec2 search-transit-gateway-routes \
+    --transit-gateway-route-table-id tgw-rtb-0aaaaaaaaaaaaaaaa \
+    --filters Name=state,Values=active,blackhole \
+    --query 'sort_by(Routes,&amp;DestinationCidrBlock)[].[DestinationCidrBlock,Type,State,TransitGatewayAttachments[0].ResourceId]' \
+    --output text
+
+# NAT configuration of the attachment
+aws ec2 get-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># propagation: enabled for all three (condensed output)
+VPC A attachment   enabled
+VPC B attachment   enabled
+VPC C attachment   enabled
+
+# routes: only one 10.0.0.0/24 (resource IDs replaced by VPC names)
+10.0.0.0/24     propagated   active   VPC A
+10.0.1.0/24     propagated   active   VPC B
+
+# NAT configuration: the defaults
+{
+    "TransitGatewayAttachmentId": "tgw-attach-0aaaaaaaaaaaaaaaa",
+    "NatGatewaySupport": "disabled",
+    "NatSystemRouteSupport": "enable",
+    "NatGatewayRules": []
+}</code></pre></div>
 <h3>NAT on one attachment only</h3>
-<p>I added a rule that translates 10.0.0.0/24 to 100.64.0.0/24 on the VPC A attachment only and enabled NAT. As soon as the propagated route of VPC A was replaced by a system route, the propagated 10.0.0.0/24 route of VPC C, which had not been installed until then, took its place.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>10.0.0.0/24     propagated   active   VPC C attachment
-10.0.1.0/24     propagated   active   VPC B attachment
-100.64.0.0/24   system       active   VPC A attachment</code></pre></div>
+<p>I added a rule that translates 10.0.0.0/24 to 100.64.0.0/24 on the VPC A attachment only and enabled NAT. Changes are applied asynchronously, so I read the NAT configuration again until it showed enabled and activated, and then listed the routes with the same command as before.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># add the rule to the VPC A attachment and enable NAT
+aws ec2 modify-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa \
+    --nat-gateway-support enable \
+    --nat-gateway-rules '[{"RuleNumber":100,"MatchSourceCidr":"10.0.0.0/24","NatCidr":"100.64.0.0/24"}]'
+
+# check whether the change has finished (repeat until enabled and activated)
+aws ec2 get-transit-gateway-attachment-nat-configuration \
+    --transit-gateway-attachment-id tgw-attach-0aaaaaaaaaaaaaaaa \
+    --query '[NatGatewaySupport, join(`,`, NatGatewayRules[].State)]' --output text</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># response of the enable command
+{
+    "TransitGatewayAttachmentId": "tgw-attach-0aaaaaaaaaaaaaaaa",
+    "NatGatewaySupport": "enabling",
+    "NatSystemRouteSupport": "enable",
+    "NatGatewayRules": [
+        {
+            "RuleNumber": 100,
+            "MatchSourceCidr": "10.0.0.0/24",
+            "NatCidr": "100.64.0.0/24",
+            "State": "pending"
+        }
+    ]
+}
+
+# output of the check command (2 s and 20 s after the request)
+enabling   activated
+enabled    activated
+
+# routes about 34 s after the request (resource IDs replaced by VPC names)
+10.0.0.0/24     propagated   active   VPC C
+10.0.1.0/24     propagated   active   VPC B
+100.64.0.0/24   system       active   VPC A</code></pre></div>
+<p>As soon as the propagated route of VPC A was replaced by a system route, the propagated 10.0.0.0/24 route of VPC C, which had not been installed until then, took its place.</p>
 <figure class="fig"><div class="canvas wide"><img src="aws-transit-gateway-1-1-nat-seoul-test-assets/fig02-one-sided-nat-en.png" alt="Two panels side by side. Before NAT, a request from b1 to 10.0.0.5 reaches a1 in VPC A. After NAT is enabled on VPC A only, the propagated 10.0.0.0/24 route points to VPC C and the same request reaches c2 in VPC C" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Where a request to the original address 10.0.0.5 lands when NAT is enabled on VPC A only</figcaption></figure>
 <p>When another attachment with the same CIDR propagates to the same route table, a connection to the original address is not cut. Only the server that answers changes. The client sees no error, so nothing looks like an outage. This is where the AWS blog's advice to update DNS records to the NAT address first matters most.</p>
 <p>In this state, c1 in VPC C fails to connect to 100.64.0.5, the NAT address of a1. The VPC C attachment has no rule, so the packet arrives with its source still 10.0.0.18. a1 looks for that address inside its own subnet, ARP fails, and no reply is sent. In terms of the apartment comparison, complex C has no outside building numbers, so the parcel a resident of complex A receives shows a sender in Building 101, a building that also exists in complex A. This matches the User Guide, which says two networks with the same CIDR must each be translated to a different range.</p>
@@ -515,7 +650,7 @@ IP 10.0.0.18 &gt; 10.0.0.5: ICMP echo request, id 11654, seq 1, length 64
 # ip neigh show on a1
 10.0.0.18 dev ens5 FAILED</code></pre></div>
 <h3>NAT on both attachments</h3>
-<p>On the VPC C attachment I added a rule that translates 10.0.0.0/24 to 100.64.1.0/24. The route table then held two system routes and the propagated route of VPC B, the same picture as in the AWS blog post. From a1 I connected to the NAT address of c1 with the source port fixed at 40001 and captured packets on both ends.</p>
+<p>On the VPC C attachment I used the same command with only the attachment ID and the translated range changed, adding a rule that translates 10.0.0.0/24 to 100.64.1.0/24. The route table then held two system routes and the propagated route of VPC B, the same picture as in the AWS blog post. From a1 I connected to the NAT address of c1 with the source port fixed at 40001 and captured packets on both ends.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># from a1: curl --local-port 40001 100.64.1.18:8080
 {"server": "c1", "server_addr": "10.0.0.18:8080", "client_addr": "100.64.0.5:40001"}
 
@@ -632,11 +767,28 @@ IP 100.64.9.10 &gt; 10.0.0.5: ICMP echo reply, id 6520, seq 1, length 64</code><
 </div></section>
 
 <section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Flow Logs keep the addresses from before translation</h2></header><div class="prose">
-<p>Transit Gateway Flow Logs recorded the real addresses from before translation. The connection from a1 to the NAT address of c1 appeared as 10.0.0.5 to 10.0.0.18 in the logs of both attachments, with no 100.64 address.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># attachment        tgw-src-vpc-id  tgw-dst-vpc-id  srcaddr    dstaddr     srcport  dstport  flow-direction
-VPC A attachment    VPC A           VPC C           10.0.0.5   10.0.0.18   40001    8080     ingress
-VPC C attachment    VPC A           VPC C           10.0.0.5   10.0.0.18   40001    8080     egress</code></pre></div>
+<p>Transit Gateway Flow Logs recorded the real addresses from before translation. I enabled Flow Logs per attachment on the three test attachments and sent them to Amazon CloudWatch Logs, with a 60 second aggregation interval and the default format. To read them I used <code>aws logs filter-log-events</code>. I filtered on the source port 40001 to find the connection in Figure 3, and used awk to keep only the attachment ID, the source and destination VPC IDs, the addresses, the ports and the direction.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws logs filter-log-events \
+    --log-group-name /tgw-nat-lab/tgw-flowlogs \
+    --filter-pattern '" 40001 "' \
+    --query 'events[].message' --output text | tr '\t' '\n' \
+  | awk '{print $5, $8, $9, $17, $18, $19, $20, $34}'</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># tgw-attachment-id  tgw-src-vpc-id  tgw-dst-vpc-id  srcaddr  dstaddr  srcport  dstport  flow-direction
+VPC A attachment  VPC A  VPC C  10.0.0.5   10.0.0.18  40001  8080   ingress
+VPC A attachment  VPC C  VPC A  10.0.0.18  10.0.0.5   8080   40001  egress
+VPC C attachment  VPC A  VPC C  10.0.0.5   10.0.0.18  40001  8080   egress
+VPC C attachment  VPC C  VPC A  10.0.0.18  10.0.0.5   8080   40001  ingress</code></pre></div>
+<p>The connection from a1 to the NAT address of c1 appeared as 10.0.0.5 to 10.0.0.18 in the logs of both attachments, with no 100.64 address. In the output above, attachment IDs and VPC IDs are replaced by names.</p>
 <p>Where addresses overlap, <code>srcaddr</code> and <code>dstaddr</code> alone cannot tell hosts apart, so you also need the <code>tgw-src-vpc-id</code> and <code>tgw-dst-vpc-id</code> fields. NAT addresses showed up only in records where the destination was not translated, such as packets dropped for lack of a route. I could not confirm this behavior in the documentation. It is what I observed in this test.</p>
+<p>To find the records that do contain a NAT address, I changed the filter to <code>"100.64."</code>. The sixth value in the output is the number of packets dropped for lack of a route (<code>packets-lost-no-route</code>), and the two lines below are records in which every packet received was dropped.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws logs filter-log-events \
+    --log-group-name /tgw-nat-lab/tgw-flowlogs \
+    --filter-pattern '"100.64."' \
+    --query 'events[].message' --output text | tr '\t' '\n' \
+  | awk '{print $5, $17, $18, $21, $22, $28, $34}'</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># tgw-attachment-id  srcaddr  dstaddr  protocol  packets  packets-lost-no-route  flow-direction
+VPC B attachment  10.0.1.10  100.64.1.18  1  190  190  ingress
+VPC A attachment  10.0.0.5   100.64.9.10  6  7    7    ingress</code></pre></div>
 <p>Four metrics were added to the <code>AWS/TransitGateway</code> namespace in CloudWatch. <code>PacketsInNAT</code> and <code>BytesInNAT</code> count traffic whose source was translated by the rules of that attachment, and <code>PacketsOutNAT</code> and <code>BytesOutNAT</code> count traffic whose destination was translated. Right after the address change, an existing metric, <code>PacketDropCountNoRoute</code>, was the useful one. The VPC B attachment showed five-minute sums of 670 and 411. These were pings from b1 to the new address before it had a route and to the old address after its route was gone. Looking at this metric on the source attachment shows which networks still have clients using the old address.</p>
 <p>AWS CloudTrail records the <code>ModifyTransitGatewayAttachmentNatConfiguration</code> event with the request parameters and the response, and rejected requests are recorded with their error code. Reachability Analyzer returned <code>NO_PATH</code> for the path from a1 to 100.64.1.18, the NAT address of c1. The path works in practice, so at the time of the test the tool did not seem to take the translation into account.</p>
 </div></section>
@@ -697,7 +849,7 @@ Transit gateway data processing for the same traffic = 1,024 GB × 0.02 USD = 20
 <ul>
 <li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
 </ul>
-<p><span class="l-ko">이 글의 수치는 2026년 11월 21일 서울 리전(ap-northeast-2)의 한 계정, 가용 영역 하나에서 직접 테스트한 결과입니다. VPC 연결 3개, t4g.micro 인스턴스, 경로당 ping 100회 조건의 값이며 인스턴스 유형, 가용 영역 구성, 시간대에 따라 달라집니다. 요금은 같은 날 AWS Price List API로 조회한 서울 리전 공개 단가로 계산한 추정치이고 청구서로 확인한 값이 아닙니다. AWS의 설명은 같은 날 확인한 공식 문서, 요금 페이지, What's New 게시물, AWS 블로그를 기준으로 합니다. BGP VPN 연결은 제어 평면 동작만 확인했고 Direct Connect Gateway 연결과 AWS Cloud WAN은 테스트하지 않았습니다.</span><span class="l-en">The numbers in this post come from my own test on 21 November 2026, in one account and one Availability Zone of the Seoul Region (ap-northeast-2). They reflect three VPC attachments, t4g.micro instances and 100 pings per path, and will differ with the instance type, the Availability Zone layout and the time of day. Prices are estimates from the public Seoul Region rates returned by the AWS Price List API on the same day, not figures from a bill. Statements about AWS follow the official documentation, pricing pages, the What's New post and the AWS blog as checked on that day. The BGP VPN attachment was tested on the control plane only, and Direct Connect gateway attachments and AWS Cloud WAN were not tested.</span></p>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 21일 서울 리전(ap-northeast-2)의 한 계정, 가용 영역 하나에서 직접 테스트한 결과입니다. VPC 연결 3개, t4g.micro 인스턴스, 경로당 ping 100회 조건의 값이며 인스턴스 유형, 가용 영역 구성, 시간대에 따라 달라집니다. 요금은 같은 날 AWS Price List API로 조회한 서울 리전 공개 단가로 계산한 추정치이고 청구서로 확인한 값이 아닙니다. AWS의 설명은 같은 날 확인한 공식 문서, 요금 페이지, What's New 게시물, AWS 블로그를 기준으로 합니다. BGP VPN 연결은 컨트롤 플레인 동작만 확인했고 Direct Connect Gateway 연결과 AWS Cloud WAN은 테스트하지 않았습니다.</span><span class="l-en">The numbers in this post come from my own test on 21 November 2026, in one account and one Availability Zone of the Seoul Region (ap-northeast-2). They reflect three VPC attachments, t4g.micro instances and 100 pings per path, and will differ with the instance type, the Availability Zone layout and the time of day. Prices are estimates from the public Seoul Region rates returned by the AWS Price List API on the same day, not figures from a bill. Statements about AWS follow the official documentation, pricing pages, the What's New post and the AWS blog as checked on that day. The BGP VPN attachment was tested on the control plane only, and Direct Connect gateway attachments and AWS Cloud WAN were not tested.</span></p>
 </footer>
 
 </div>
