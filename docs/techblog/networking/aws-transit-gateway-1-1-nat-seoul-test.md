@@ -1,6 +1,6 @@
 ---
-title: "서울 리전에서 테스트한 AWS Transit Gateway 1:1 NAT"
-title_en: "AWS Transit Gateway 1:1 NAT, tested in the Seoul Region"
+title: "AWS Transit Gateway 1:1 NAT"
+title_en: "AWS Transit Gateway 1:1 NAT"
 layout: report
 report_src: /docs/techblog/networking/aws-transit-gateway-1-1-nat-seoul-test-report.html
 date: 2026-11-21
