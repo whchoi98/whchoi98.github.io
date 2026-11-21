@@ -218,7 +218,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 <tr><td>Amazon EC2</td><td><code>docker run</code> 명령</td><td>vLLM 이미지 제공과 패치</td><td>인스턴스, 드라이버, 로드 밸런서, 확장, 감시 전부</td></tr>
 <tr><td>Amazon ECS</td><td>태스크 정의와 서비스</td><td>컨테이너 배치. Managed Instances를 사용하면 인스턴스 준비, 패치, GPU 장애 복구까지</td><td>로드 밸런서 연결, 확장 정책, 인증</td></tr>
 <tr><td>Amazon EKS</td><td>Deployment와 Service 매니페스트</td><td>Kubernetes 제어 플레인. Auto Mode를 사용하면 노드 준비, 패치, 복구까지</td><td>Ingress, KEDA, 관측 도구의 설치와 운영, 인증</td></tr>
-<tr><td>AWS Lambda</td><td>Dockerfile의 <code>FROM</code> 한 줄과 환경 변수 <code>MODEL_ID</code></td><td>GPU 인스턴스 수명 주기, 드라이버 패치, 요청 라우팅과 로드 밸런싱, 확장</td><td>모델 위치와 vLLM 인자, 실행 환경 수의 최솟값과 최댓값</td></tr>
+<tr><td>AWS Lambda</td><td>Dockerfile의 <code>FROM</code> 한 줄과 환경 변수 <code>MODEL_ID</code></td><td>GPU 인스턴스 수명 주기, 드라이버 패치, 요청 라우팅과 로드 밸런싱, 확장</td><td>모델 위치와 vLLM 인자, 실행 환경 수의 최소값과 최대값</td></tr>
 <tr><td>Amazon SageMaker AI</td><td>모델, 엔드포인트 구성, 엔드포인트</td><td>인스턴스 준비와 패치, 엔드포인트, 상태 확인과 교체, 확장 실행</td><td>컨테이너와 vLLM 설정, 인스턴스 유형, 확장 정책</td></tr>
 <tr><td>SageMaker HyperPod</td><td><code>InferenceEndpointConfig</code> 리소스</td><td>노드 상태 감시와 자동 교체. Operator가 Deployment, 로드 밸런서, 인증서를 생성</td><td>오케스트레이션 운영, 노드 패치 실행, add-on 업그레이드</td></tr>
 <tr><td>Amazon Bedrock</td><td>모델 가중치 가져오기 또는 카탈로그 모델 호출</td><td>서빙 엔진과 인프라 전부</td><td>요청 파라미터</td></tr>
@@ -226,7 +226,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 </table></div>
 <p class="cap"><b>표 1.</b> vLLM을 실행하는 여섯 플랫폼과 Amazon Bedrock. 2026년 11월 21일 AWS 공식 문서 기준</p>
 <blockquote><p>식당 주방에 비유하면 차이가 쉽게 보입니다. vLLM은 요리사, GPU는 화구, 요청은 주문입니다. EC2는 빈 점포를 빌려 화구 설치부터 주문 창구까지 직접 차리는 방식입니다. ECS는 요리사를 어느 자리에 몇 명 둘지만 적어 내면 운영 대행이 배치해 주는 주방이고 EKS는 표준 설계도로 주방 단지를 직접 설계해 원하는 설비를 들이는 방식입니다.</p><p>Lambda는 주문이 들어오면 일하는 출장 주방입니다. 주문 전달과 화구 관리를 업체가 맡는 대신 화구 하나에 올릴 수 있는 요리만 받습니다. SageMaker AI는 주문 창구와 화구 관리를 호텔에 맡긴 위탁 주방입니다. HyperPod는 메뉴 개발실과 조리 라인이 화구를 나눠 사용하는 중앙 주방이며 고장 난 화구는 운영사가 교체합니다. Bedrock은 요리사를 고용하지 않고 조리법만 식당에 맡기는 선택입니다.</p></blockquote>
-<p>비유와 다른 점도 있습니다. 출장 주방에 해당하는 Lambda도 고객 계정의 EC2 인스턴스에서 실행됩니다. 실행 환경의 최솟값을 1 이상으로 두면 주문이 없는 시간에도 인스턴스 요금이 과금됩니다.</p>
+<p>비유와 다른 점도 있습니다. 출장 주방에 해당하는 Lambda도 고객 계정의 EC2 인스턴스에서 실행됩니다. 실행 환경의 최소값을 1 이상으로 두면 주문이 없는 시간에도 인스턴스 요금이 과금됩니다.</p>
 </div></section>
 
 <section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>vLLM과 AWS가 배포하는 컨테이너 이미지</h2></header><div class="prose">
@@ -312,7 +312,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 <ul>
 <li><b>운영 범위</b>: GPU 인스턴스 수명 주기, OS와 GPU 드라이버 패치, 상태 확인, 확장, 요청 라우팅과 로드 밸런싱을 Lambda가 맡습니다. vLLM 서버가 상태 확인에 세 번 연속 실패하면 실행 환경을 교체합니다. GPU 사용률과 GPU 메모리 지표는 Amazon CloudWatch에 기본으로 게시됩니다.</li>
 <li><b>요청 경로</b>: 다른 Lambda 함수와 같이 동기 호출, 비동기 호출, 이벤트 소스 매핑(Amazon SQS, Amazon Kinesis 등)으로 호출하고 IAM으로 인증합니다. 컨테이너는 포트를 외부에 열지 않습니다. 동기 호출의 요청과 응답은 각각 6 MB까지이고 제한 시간은 동기 호출 30분, 비동기 호출과 이벤트 소스 매핑 90분입니다.</li>
-<li><b>확장과 시작 시간</b>: GPU 사용률(기본 목표 40%), CPU 사용률, 동시 실행 수를 기준으로 Lambda가 실행 환경과 인스턴스를 늘립니다. GPU 함수는 실행 환경 수의 최솟값이 기본 1이고 0으로 설정할 수 있습니다. 0에서 올라오는 수 분 동안 들어온 호출은 HTTP 429로 거절됩니다. AWS News Blog의 예시는 Hugging Face 모델 ID에서 호출 가능한 엔드포인트까지 약 10분이 걸렸다고 밝힙니다.</li>
+<li><b>확장과 시작 시간</b>: GPU 사용률(기본 목표 40%), CPU 사용률, 동시 실행 수를 기준으로 Lambda가 실행 환경과 인스턴스를 늘립니다. GPU 함수는 실행 환경 수의 최소값이 기본 1이고 0으로 설정할 수 있습니다. 0에서 올라오는 수 분 동안 들어온 호출은 HTTP 429로 거절됩니다. AWS News Blog의 예시는 Hugging Face 모델 ID에서 호출 가능한 엔드포인트까지 약 10분이 걸렸다고 밝힙니다.</li>
 <li><b>요금 단위</b>: EC2 On-Demand 요금에 관리 수수료 9.75%(GPU G 시리즈)와 요청 100만 건당 0.20 USD가 더해집니다. 호출별 실행 시간 요금은 없습니다. Savings Plans와 예약 인스턴스 할인은 EC2 요금 부분에만 적용됩니다.</li>
 </ul>
 <p>제약은 모델 크기에서 먼저 나옵니다. 지원 인스턴스는 EC2 G 시리즈(G4dn, G5, G6, Gr6, G6e, G6f, Gr6f)이고 실행 환경 하나에 GPU가 정확히 1개 할당됩니다. GPU 메모리는 최대 48 GB, 함수 메모리는 최대 32,768 MB, 컨테이너 이미지는 최대 32 GB입니다. 여러 GPU에 나눠 올려야 하는 모델은 대상이 아닙니다.</p>
@@ -351,7 +351,7 @@ client = OpenAI(
 <ul>
 <li><b>운영 범위</b>: 노드 상태 감시와 자동 교체는 HyperPod가 맡습니다. 오케스트레이션 운영, Operator 상태 감시, add-on 업그레이드, 노드 패치 실행(<code>update-cluster-software</code>)은 고객이 맡습니다. 관측 구성(Amazon Managed Service for Prometheus와 Amazon Managed Grafana 대시보드)은 한 번의 설정으로 제공됩니다.</li>
 <li><b>요청 경로</b>: Operator가 만든 ALB를 HTTPS로 직접 호출하거나 SageMaker 엔드포인트로 호출합니다. SageMaker 엔드포인트 등록은 선택입니다. Inference Gateway를 활성화하면 클러스터당 OpenAI 호환 엔드포인트 하나가 요청 본문의 <code>model</code> 값을 보고 모델별 Pod로 요청을 보냅니다. Gateway는 기본 상태에서 요청을 인증하지 않으므로 문서는 JWT 인증 설정을 강하게 권고합니다.</li>
-<li><b>확장과 시작 시간</b>: Pod는 Operator에 포함된 KEDA가, 노드는 HyperPod가 관리하는 Karpenter가 늘립니다. 복제본의 최솟값을 0으로 둘 수 있고 Pod가 0이 되면 노드도 제거됩니다. AWS는 모델과 이미지를 노드의 NVMe에 캐시하는 기능으로 57 GB에서 145 GB 크기 모델의 확장 시간이 약 60% 줄었다고 밝힙니다.</li>
+<li><b>확장과 시작 시간</b>: Pod는 Operator에 포함된 KEDA가, 노드는 HyperPod가 관리하는 Karpenter가 늘립니다. 복제본의 최소값을 0으로 둘 수 있고 Pod가 0이 되면 노드도 제거됩니다. AWS는 모델과 이미지를 노드의 NVMe에 캐시하는 기능으로 57 GB에서 145 GB 크기 모델의 확장 시간이 약 60% 줄었다고 밝힙니다.</li>
 <li><b>요금 단위</b>: <code>ml.</code> 인스턴스 요금을 내고 연결된 EKS 제어 플레인, Amazon FSx for Lustre, Amazon S3 요금은 별도입니다. 요금 페이지가 나열하는 SageMaker Savings Plans의 적용 대상에는 HyperPod가 없으므로 약정이 적용되는 범위를 먼저 확인하는 것을 권고합니다.</li>
 </ul>
 <p>HyperPod가 다른 다섯 곳과 구별되는 부분은 추론 최적화 기능입니다. 세 가지 기능을 <code>InferenceEndpointConfig</code>의 필드로 활성화합니다. 첫째는 Prefix와 KV 캐시 상태를 보는 지능형 라우팅이고 둘째는 CPU 메모리와 외부 저장소를 사용하는 2단계 KV 캐시입니다. 셋째는 Prefill과 Decode를 서로 다른 GPU 풀에 나누는 DPD(Disaggregated Prefill and Decode)입니다. KV 캐시와 지능형 라우팅은 vLLM 컨테이너에서만 동작합니다. DPD는 EFA를 지원하는 P 계열 48xlarge 인스턴스가 필요하고 문서는 70B 이상 모델과 4,000 토큰 이상의 긴 입력에서 효과가 있다고 설명합니다.</p>
