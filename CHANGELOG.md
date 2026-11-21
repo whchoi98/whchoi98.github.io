@@ -34,7 +34,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add post (KO/EN): "GPT-6.2 Sol and Astra: the official announcement and real test results" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), with five figures in a Korean and an English version
 - Add post (KO/EN): "Six AWS platforms for running vLLM and how to choose" (`docs/techblog/aiml/vllm-on-aws-platform-selection`), with four figures in a Korean and an English version
 - Add post (KO/EN): "Start-up time and concurrency of AWS Lambda GPU functions, tested in Seoul" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), with four figures in a Korean and an English version
-- Add a three-part series (KO/EN): "Serving two models with vLLM on Amazon EKS" (`docs/techblog/container/eks-vllm-two-models-part-1` to `-part-3`): Part 1 "Cutting cold start phase by phase", Part 2 "Throughput and SLO on a single L40S", Part 3 "Model routing with a gateway and a BFF", each with three figures in a Korean and an English version
+- Add a three-part guide series (KO/EN): "OpenWeight on AWS GPU" (`docs/techblog/container/eks-vllm-two-models-part-1` to `-part-3`): Part 1 "The eight stages of an LLM API call on Amazon EKS and vLLM", Part 2 "The architecture for serving two models and Amazon EKS optimizations", Part 3 "Building the environment in ten steps", with three, five and three figures in a Korean and an English version
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
 - Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
@@ -109,7 +109,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가(한영): "GPT-6.2 Sol과 Astra, 공식 발표 내용과 실제 테스트 결과" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), 그림 5장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "AWS에서 vLLM을 실행하는 플랫폼 여섯 가지와 선택 기준" (`docs/techblog/aiml/vllm-on-aws-platform-selection`), 그림 4장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "서울 리전에서 테스트한 AWS Lambda GPU 함수의 시작 시간과 동시성" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), 그림 4장의 한국어판과 영어판 포함
-- 연재 게시물 3편 추가(한영): "Amazon EKS에서 vLLM으로 두 모델 서빙하기" (`docs/techblog/container/eks-vllm-two-models-part-1`부터 `-part-3`): 1부 "콜드 스타트 구간별 단축", 2부 "L40S 한 장의 처리량과 SLO", 3부 "게이트웨이와 BFF의 모델 라우팅", 편마다 그림 3장의 한국어판과 영어판 포함
+- 안내서 연재 게시물 3편 추가(한영): "OpenWeight on AWS GPU" (`docs/techblog/container/eks-vllm-two-models-part-1`부터 `-part-3`): 1부 "Amazon EKS와 vLLM의 LLM API 호출 8개 단계", 2부 "두 모델을 서빙하는 구조와 Amazon EKS 최적화", 3부 "10개 단계로 따라 하는 구축 과정", 그림 3장, 5장, 3장의 한국어판과 영어판 포함
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
 - 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)

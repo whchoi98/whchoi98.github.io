@@ -1,13 +1,13 @@
 ---
-title: "Amazon EKS에서 vLLM으로 두 모델 서빙하기 1부: 콜드 스타트 구간별 단축"
-title_en: "Serving two models with vLLM on Amazon EKS, Part 1: Cutting cold start phase by phase"
+title: "OpenWeight on AWS GPU 1부: Amazon EKS와 vLLM의 LLM API 호출 8개 단계"
+title_en: "OpenWeight on AWS GPU, Part 1: The eight stages of an LLM API call on Amazon EKS and vLLM"
 layout: report
 report_src: /docs/techblog/container/eks-vllm-two-models-part-1-report.html
 date: 2026-11-21
 category: Container
-tags: ["Amazon EKS", "vLLM", "Karpenter", "LLM inference", "GPU", "Amazon S3"]
+tags: ["Amazon EKS", "vLLM", "LLM inference", "Open-weight models", "Gateway API Inference Extension", "Amazon Bedrock AgentCore"]
 icon: eks
-minutes: 21
-excerpt: "GPU 노드에서 vLLM 파드가 Ready가 되기까지의 시간을 노드 프로비저닝, 이미지 pull, 가중치 로드, 엔진 초기화의 네 구간으로 나눠 쟀습니다. Gemma 4 31B의 콜드 스타트는 394초에서 260초로, 웜 재시작은 214초에서 86초로 줄었고 구간마다 다른 조치가 효과를 냈습니다."
-excerpt_en: "I split the time a vLLM pod on a GPU node takes to become Ready into four phases: node provisioning, image pull, weight load and engine initialization. The Gemma 4 31B cold start fell from 394 s to 260 s and the warm restart from 214 s to 86 s, and a different action worked in each phase."
+minutes: 19
+excerpt: "LLM API 호출 한 건을 8개 단계로 나누고 Amazon EKS와 vLLM으로 두 모델을 서빙하는 환경에서 단계마다 어떤 구성 요소가 그 일을 하는지 설명합니다. 첫 내용까지의 시간은 Gemma 4 31B 81.9ms, Qwen3.8-27B 177.5ms였고 그 가운데 77%와 83%를 vLLM이 사용했습니다."
+excerpt_en: "One LLM API call split into 8 stages, with the component that does each stage in an environment that serves two models with vLLM on Amazon EKS. Time to first content was 81.9 ms for Gemma 4 31B and 177.5 ms for Qwen3.8-27B, and vLLM took 77% and 83% of it."
 ---

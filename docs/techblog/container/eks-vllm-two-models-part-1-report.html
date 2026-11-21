@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Amazon EKS에서 vLLM으로 두 모델 서빙하기 1부: 콜드 스타트 구간별 단축</title>
-<meta name="description" content="GPU 노드에서 vLLM 파드가 Ready가 되기까지의 시간을 노드 프로비저닝, 이미지 pull, 가중치 로드, 엔진 초기화의 네 구간으로 나눠 쟀습니다. Gemma 4 31B의 콜드 스타트는 394초에서 260초로, 웜 재시작은 214초에서 86초로 줄었고 구간마다 다른 조치가 효과를 냈습니다.">
+<title>OpenWeight on AWS GPU 1부: Amazon EKS와 vLLM의 LLM API 호출 8개 단계</title>
+<meta name="description" content="LLM API 호출 한 건을 8개 단계로 나누고 Amazon EKS와 vLLM으로 두 모델을 서빙하는 환경에서 단계마다 어떤 구성 요소가 그 일을 하는지 설명합니다. 첫 내용까지의 시간은 Gemma 4 31B 81.9ms, Qwen3.8-27B 177.5ms였고 그 가운데 77%와 83%를 vLLM이 사용했습니다.">
 <link rel="canonical" href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-1/">
 <script>
 /* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
@@ -196,913 +196,747 @@ html[data-lang="en"] .l-ko{display:none!important}
   </div>
 </nav>
 <header class="masthead">
-<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-21</span><span class="l-en">Published 2026-11-21</span></span><span>Container</span><span><span class="l-ko">읽는 시간 21분</span><span class="l-en">21 min read</span></span></div>
-<h1><span class="l-ko">Amazon EKS에서 vLLM으로 두 모델 서빙하기 1부: 콜드 스타트 구간별 단축</span><span class="l-en">Serving two models with vLLM on Amazon EKS, Part 1: Cutting cold start phase by phase</span></h1>
-<p class="thesis"><span class="l-ko">GPU 노드에서 LLM 서빙 파드가 요청을 받기까지 걸리는 몇 분은 어디에 쓰이고 어디를 줄일 수 있을까요? Amazon EKS의 g6e.4xlarge에서 vLLM으로 Gemma 4 31B를 띄우는 시간을 네 구간으로 나눠 재 보니 이미지 pull, 가중치 로드, 엔진 초기화가 각각 다른 조치로 줄었습니다. 콜드 스타트는 394초에서 260초, 웜 재시작은 214초에서 86초가 됐고 노드 프로비저닝과 기타 구간은 그대로 남았습니다.</span><span class="l-en">Where do the minutes go before an LLM serving pod on a GPU node can take requests, and which of them can be cut? I split the start-up of Gemma 4 31B on vLLM, on a g6e.4xlarge in Amazon EKS, into four phases and found that image pull, weight load and engine initialization each shrank with a different action. The cold start went from 394 s to 260 s and the warm restart from 214 s to 86 s, while node provisioning and the remaining time stayed where they were.</span></p>
-<div class="tags"><span>#Amazon EKS</span><span>#vLLM</span><span>#Karpenter</span><span>#LLM inference</span><span>#GPU</span><span>#Amazon S3</span></div>
-<ul class="facts"><li><span class="l-ko"><b>전체 시간</b>: Gemma 4 31B의 콜드 스타트는 394초에서 260초(34% 감소), 웜 재시작은 214초에서 86초(60% 감소)가 됐습니다. Qwen3.8-27B는 최적화 구성에서 290초와 123초였습니다.</span><span class="l-en"><b>Total time</b>: the Gemma 4 31B cold start went from 394 s to 260 s (34% less) and the warm restart from 214 s to 86 s (60% less). Qwen3.8-27B took 290 s and 123 s in the optimized configuration.</span></li><li><span class="l-ko"><b>가중치 로드</b>: Mountpoint for Amazon S3로 마운트한 경로를 기본 로더로 읽으면 59.6초, <code>runai_streamer</code>로 S3에서 GPU 메모리로 스트리밍하면 19.2초였습니다.</span><span class="l-en"><b>Weight load</b>: 59.6 s when the default loader read a path mounted with Mountpoint for Amazon S3, and 19.2 s when <code>runai_streamer</code> streamed from S3 into GPU memory.</span></li><li><span class="l-ko"><b>엔진 초기화</b>: compile 캐시를 노드와 S3에 보존하자 95.5초에서 23.7초가 됐습니다. <code>torch.compile</code>이 61.0초에서 0.9초로 줄었습니다.</span><span class="l-en"><b>Engine initialization</b>: 95.5 s to 23.7 s once the compile cache was kept on the node and in S3. <code>torch.compile</code> dropped from 61.0 s to 0.9 s.</span></li><li><span class="l-ko"><b>이미지 pull</b>: 노드 부팅 중에 시작하는 사전 pull로 kubelet 기준 111.1초에서 71.0초가 됐습니다. 받는 시간은 그대로이고 받기 시작하는 시점이 앞당겨졌습니다.</span><span class="l-en"><b>Image pull</b>: 111.1 s to 71.0 s as seen by the kubelet, with a pre-pull that starts while the node boots. The download takes as long as before; it only starts earlier.</span></li><li><span class="l-ko"><b>남은 구간</b>: 노드 프로비저닝과 기타는 줄지 않아 최적화 구성 260초 가운데 146.1초를 차지합니다. 모든 값은 시나리오마다 한 번 잰 것입니다.</span><span class="l-en"><b>What is left</b>: node provisioning and the remaining time did not shrink and make up 146.1 s of the 260 s. Every value comes from one run per scenario.</span></li></ul>
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-21</span><span class="l-en">Published 2026-11-21</span></span><span>Container</span><span><span class="l-ko">읽는 시간 19분</span><span class="l-en">19 min read</span></span></div>
+<h1><span class="l-ko">OpenWeight on AWS GPU 1부: Amazon EKS와 vLLM의 LLM API 호출 8개 단계</span><span class="l-en">OpenWeight on AWS GPU, Part 1: The eight stages of an LLM API call on Amazon EKS and vLLM</span></h1>
+<p class="thesis"><span class="l-ko">오픈 웨이트 모델을 GPU에서 직접 서빙하면 API 호출 한 건은 어디를 지나고 시간은 어디에 쓰일까요? Amazon EKS에서 vLLM으로 Gemma 4 31B와 Qwen3.8-27B를 서빙하는 환경에서 호출 한 건을 8개 단계로 나눠 단계마다 맡은 구성 요소와 측정값을 정리했습니다. 모델은 BFF의 규칙과 Strands Decider 2B가 정하고 웹 검색은 BFF가 도구로 실행하며 첫 내용까지의 시간 가운데 77%와 83%는 vLLM이 사용했습니다.</span><span class="l-en">When you serve open-weight models on your own GPUs, where does one API call go and where does its time go? This post splits one call into 8 stages in an environment that serves Gemma 4 31B and Qwen3.8-27B with vLLM on Amazon EKS, and lists the component and the measured values for each stage. BFF rules and Strands Decider 2B decide the model, the BFF runs web search as a tool, and vLLM took 77% and 83% of the time to first content.</span></p>
+<div class="tags"><span>#Amazon EKS</span><span>#vLLM</span><span>#LLM inference</span><span>#Open-weight models</span><span>#Gateway API Inference Extension</span><span>#Amazon Bedrock AgentCore</span></div>
+<ul class="facts"><li><span class="l-ko"><b>8개 단계</b>: 요청 진입, 부하 분산, 토큰화, 모델 결정, 추론, 후처리, 응답과 비용, 기록과 관측입니다. 이 환경에서는 모델 결정이 토큰화보다 먼저 실행됩니다.</span><span class="l-en"><b>8 stages</b>: request entry, load balancing, tokenization, model decision, inference, post-processing, response and cost, logs and metrics. In this environment the model decision runs before tokenization.</span></li><li><span class="l-ko"><b>모델 결정</b>: BFF가 민감 정보 규칙, 업무 종류, 이미지 첨부, Decider 2B의 판단, 기본값의 순서로 정합니다. Decider 2B에 묻는 왕복은 139.4ms에서 150.0ms였고 세션의 첫 요청에서 한 번만 묻습니다.</span><span class="l-en"><b>Model decision</b>: the BFF decides in the order sensitive data rule, task type, image attachment, Decider 2B judgment, default. The round trip to Decider 2B took 139.4 ms to 150.0 ms and happens once, on the first request of a session.</span></li><li><span class="l-ko"><b>Web Search</b>: 요청이 <code>x-web-search: on</code>을 보낼 때만 BFF가 도구를 넣고 us-east-1의 <code>InvokeWebSearch</code>를 호출합니다. 민감 정보 요청에는 넣지 않고 도구 호출 차례는 3번까지입니다.</span><span class="l-en"><b>Web Search</b>: the BFF attaches the tool only when a request sends <code>x-web-search: on</code>, and calls <code>InvokeWebSearch</code> in us-east-1. Sensitive requests never get it, and a request gets at most 3 rounds of tool calls.</span></li><li><span class="l-ko"><b>첫 내용까지의 시간</b>: Gemma 4 31B 81.9ms, Qwen3.8-27B 177.5ms 가운데 vLLM이 63.2ms와 147.6ms를 사용했습니다. 그 앞의 구간은 중앙값을 더해 18.2ms와 29.7ms였습니다.</span><span class="l-en"><b>Time to first content</b>: of 81.9 ms for Gemma 4 31B and 177.5 ms for Qwen3.8-27B, vLLM took 63.2 ms and 147.6 ms. The segments before it added up to 18.2 ms and 29.7 ms in medians.</span></li><li><span class="l-ko"><b>응답 헤더</b>: <code>x-bff-decision</code>, <code>x-bff-search</code>, <code>x-bff-timing</code>으로 요청이 지난 경로와 시간이 쓰인 곳을 읽습니다.</span><span class="l-en"><b>Response headers</b>: <code>x-bff-decision</code>, <code>x-bff-search</code> and <code>x-bff-timing</code> show the path a request took and where its time went.</span></li></ul>
 </header>
-<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">394초 가운데 줄인 구간은 세 곳</a><a href="#ko-s2">L40S 두 대와 vLLM v0.33.0으로 잰 환경</a><a href="#ko-s3">네 구간과 두 가지 구성</a><a href="#ko-s4">콜드 스타트 134초, 웜 재시작 128초 단축</a><a href="#ko-s5">이미지 pull의 시작 시점을 당긴 사전 pull</a><a href="#ko-s6">가중치를 S3에서 GPU 메모리로 스트리밍하는 로더</a><a href="#ko-s7">엔진 초기화를 줄인 compile 캐시의 게시와 복원</a><a href="#ko-s8">시작 실패를 막는 메모리와 프로브 설정</a><a href="#ko-s9">한 번씩 잰 값의 한계</a><a href="#ko-s10">상황별 적용 기준</a><a href="#sources">참고 자료</a></nav>
-<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Three of the phases inside 394 seconds got shorter</a><a href="#en-s2">The environment: two L40S GPUs and vLLM v0.33.0</a><a href="#en-s3">Four phases and two configurations</a><a href="#en-s4">Cold start 134 s shorter, warm restart 128 s shorter</a><a href="#en-s5">A pre-pull that moves the start of the image pull forward</a><a href="#en-s6">A loader that streams weights from S3 into GPU memory</a><a href="#en-s7">Publishing and restoring the compile cache to shorten engine initialization</a><a href="#en-s8">Memory and probe settings that prevent failed starts</a><a href="#en-s9">Limits of values measured once</a><a href="#en-s10">When to apply which action</a><a href="#sources">References</a></nav>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">같은 API인데 첫 내용이 81.9ms와 4.06초로 갈리는 이유</a><a href="#ko-s2">요청 한 건과 응답 헤더</a><a href="#ko-s3">8개 단계와 단계별 구성 요소</a><a href="#ko-s4">요청 진입과 부하 분산 (1, 2단계)</a><a href="#ko-s5">규칙이 먼저이고 Decider 2B가 다음인 모델 결정 (4단계)</a><a href="#ko-s6">토큰화와 추론 (3, 5단계)</a><a href="#ko-s7">후처리와 Web Search 도구 (6단계)</a><a href="#ko-s8">응답 전달과 비용 (7단계)</a><a href="#ko-s9">기록과 관측 (8단계)</a><a href="#ko-s10">첫 내용까지의 시간 가운데 77%와 83%는 vLLM</a><a href="#ko-s11">응답 헤더를 읽는 순서와 증상별로 먼저 볼 단계</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Why the same API returns first content in 81.9 ms or in 4.06 s</a><a href="#en-s2">One request and its response headers</a><a href="#en-s3">The 8 stages and the component behind each</a><a href="#en-s4">Request entry and load balancing (stages 1 and 2)</a><a href="#en-s5">The model decision: rules first, Decider 2B second (stage 4)</a><a href="#en-s6">Tokenization and inference (stages 3 and 5)</a><a href="#en-s7">Post-processing and the Web Search tool (stage 6)</a><a href="#en-s8">Delivering the response, and cost (stage 7)</a><a href="#en-s9">Logs and metrics (stage 8)</a><a href="#en-s10">vLLM takes 77% and 83% of the time to first content</a><a href="#en-s11">The order for reading the response headers, and the stage to check first per symptom</a><a href="#sources">References</a></nav>
 <div class="col l-ko" lang="ko">
-<section class="sec" id="ko-s1"><header class="sec-head"><h2>394초 가운데 줄인 구간은 세 곳</h2></header><div class="prose">
-<p>GPU 노드에서 LLM 서빙 파드를 새로 띄우면 요청을 받기까지 몇 분이 걸립니다. 이 환경에서 Gemma 4 31B의 파드는 생성에서 Ready까지 394초가 걸렸습니다. 노드가 준비되면 9.7GB 컨테이너 이미지를 받고 30GiB가 넘는 가중치를 GPU 메모리에 올립니다. 그 뒤 엔진이 연산 그래프를 컴파일해야 파드가 Ready가 됩니다.</p>
-<p>측정은 이 394초를 노드 프로비저닝, 이미지 pull, 가중치 로드, 엔진 초기화의 네 구간으로 나누는 데서 시작했습니다. 구간마다 기다리는 대상이 다르므로 줄이는 방법도 구간마다 따로 있을 것이라고 가정했습니다. 측정 결과는 이 가정과 맞았습니다. 이미지 pull, 가중치 로드, 엔진 초기화가 서로 다른 조치로 줄어 새 노드에서 시작하는 콜드 스타트(Cold start)는 260초가 됐습니다. 같은 노드에서 파드만 다시 띄우는 웜 재시작(Warm restart)은 214초에서 86초가 됐습니다.</p>
-<p>대상은 Amazon Elastic Kubernetes Service(Amazon EKS)에서 vLLM으로 서빙하는 Gemma 4 31B와 Qwen3.8-27B입니다. 모든 값은 2026년 11월 14일 서울 리전(ap-northeast-2)에서 시나리오마다 한 번 잰 것이어서 반복했을 때의 편차는 담겨 있지 않습니다.</p>
-<p>이 글은 "Amazon EKS에서 vLLM으로 두 모델 서빙하기" 시리즈의 1부입니다. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>는 같은 환경의 처리량과 SLO(서비스 수준 목표)를, <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">3부</a>는 게이트웨이와 모델 라우팅, 앱 계층을 다룹니다. Amazon EKS에서 GPU 워크로드를 운영하는 플랫폼 엔지니어를 대상으로 하며 Kubernetes와 LLM 서빙의 기본 개념을 알고 있다면 무리 없이 읽을 수 있습니다.</p>
-<p>그림 1에 측정 결과와 구간별 조치를 한 장으로 모았습니다. 각 값을 잰 방법과 구성은 이어지는 절에서 차례로 설명합니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig01-overview.png" alt="콜드 스타트의 구간 분해와 최적화를 한 장에 정리한 인포그래픽. Gemma 4 31B의 파드 생성에서 Ready까지의 시간이 콜드 스타트는 394초에서 260초로, 웜 재시작은 214초에서 86초로 줄었고, 이미지 pull은 노드 부팅 중 사전 pull로 111.1초에서 71.0초, 가중치 로드는 runai_streamer로 59.6초에서 19.2초, 엔진 초기화는 compile 캐시 복원으로 95.5초에서 23.7초가 됐음을 시나리오별 막대와 조치 표로 보여 준다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 이 글의 내용 한눈에 보기. 시나리오별 시작 시간, 구간별 원인과 조치, 적용한 조치와 결과, 운영 점검 항목의 네 부분입니다. Qwen3.8-27B는 최적화 구성만 쟀습니다</figcaption></figure>
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>같은 API인데 첫 내용이 81.9ms와 4.06초로 갈리는 이유</h2></header><div class="prose">
+<p>같은 주소에 같은 형식으로 보낸 요청인데 첫 내용이 도착하는 시간은 크게 다릅니다. 이 글의 예제 환경에서 Gemma 4 31B로 간 요청은 중앙값 81.9ms에, 잠들어 있던 Qwen3.8-27B로 간 요청은 4.06초에 첫 내용을 받았습니다. 관리형 LLM API를 호출할 때는 요청과 응답 사이가 보이지 않습니다. 오픈 웨이트 모델(가중치가 공개되어 내려받아 직접 실행할 수 있는 모델)을 GPU 인스턴스에서 직접 서빙하면 그 사이의 모든 단계가 내 환경 안에 놓입니다. 인증, 모델 선택, 토큰화, 추론, 응답 전달, 관측을 직접 구성해야 하고 응답이 느리거나 실패하면 어느 단계의 문제인지도 직접 찾아야 합니다. 이 글은 LLM API 호출 한 건을 8개 단계로 나누고 단계마다 어떤 구성 요소가 그 일을 하는지, 시간이 얼마나 걸리는지 설명합니다.</p>
+<p>이 글은 OpenWeight on AWS GPU(OW on GPU) 시리즈의 1부입니다. 이 시리즈는 오픈 웨이트 모델 서빙을 처음 시작하는 분을 위한 안내서입니다. 예제 환경은 Amazon Elastic Kubernetes Service(Amazon EKS)에서 vLLM으로 Gemma 4 31B와 Qwen3.8-27B를 함께 서빙합니다. 코드는 <a href="https://github.com/whchoi98/ow-on-gpu" target="_blank" rel="noopener">ow-on-gpu 저장소</a>에 있습니다. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>는 두 모델을 서빙하는 구조와 Amazon EKS 최적화를, <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">3부</a>는 이 환경을 10개 단계로 만드는 구축 과정을 다룹니다. Kubernetes와 AWS의 기본 개념을 알고 OpenAI 호환 API를 호출해 본 적이 있다면 LLM 서빙이 처음이어도 읽을 수 있습니다. 본문의 값은 2026년 11월 14일부터 17일 사이에 서울 리전(ap-northeast-2)에서 측정했고 날짜와 횟수는 표와 문장마다 적었습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig01-llm-api-call.png" alt="LLM API 호출 한 건이 지나는 8개 단계를 한 장에 모은 인포그래픽. API Gateway, Load Balancer, Tokenization, Model Router, Inference Engine, Post-processing, Response and Billing, Logging and Observability의 순서로 단계마다 이 환경의 구성 요소와 측정값을 적었고 첫 내용까지의 시간은 Gemma 4 31B 81.9ms와 Qwen3.8-27B 177.5ms이며 그 가운데 77%에서 83%를 vLLM이 사용했음을 오른쪽 위의 막대로 보여 준다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> LLM API 호출 한 건이 지나는 8개 단계. 단계마다 이 환경에서 그 일을 하는 구성 요소와 측정값을 적었습니다. 왼쪽 아래의 Web Search 도구는 요청이 켰을 때만 지나는 선택 경로입니다.</figcaption></figure>
 </div></section>
 
-<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>L40S 두 대와 vLLM v0.33.0으로 잰 환경</h2></header><div class="prose">
-<h3>시리즈에서 다루는 구성</h3>
-<p>환경은 서울 리전의 Amazon EKS 1.37 클러스터 하나입니다. Gemma 4 31B와 Qwen3.8-27B가 각각 NVIDIA L40S(g6e.4xlarge) 한 장을 사용합니다. Strands Decider 2B는 요청을 어느 모델로 보낼지 판단을 돕는 모델이고 g6.xlarge 한 대에서 실행됩니다. GPU 노드 세 대는 모두 On-Demand이고 Karpenter가 만듭니다.</p>
-<p>그림 2의 왼쪽은 요청이 지나는 경로이고 오른쪽은 모델과 이미지를 GPU 노드에 대는 쪽입니다. 아래쪽 띠의 번호는 기동 순서이고 이 글은 0번에서 4번까지를 다룹니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig02-structure.png" alt="브라우저에서 CloudFront, 내부 ALB, BFF, 게이트웨이를 지나 GPU 노드의 Gemma 4 31B와 Qwen3.8-27B에 이르는 요청 경로와, Hugging Face의 체크포인트를 적재 Job이 S3 모델 버킷에 올리고 GPU 노드가 그 버킷과 이미지 레지스트리에서 가중치, compile 캐시, 컨테이너 이미지를 받는 공급 경로를 한 장에 그린 구조도. 아래쪽 띠는 모델 적재, 노드 프로비저닝, 이미지 pull, 가중치 로드, 엔진 초기화, 추론 요청의 순서를 번호로 보여 준다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 시리즈에서 다루는 서빙 구조와 기동 순서. 번호 0에서 4가 이 글의 범위이고 구조도의 같은 번호가 그 단계가 일어나는 곳입니다. 요청 경로(번호 5)는 3부에서 다룹니다</figcaption></figure>
-<p>요청은 Amazon CloudFront와 내부 ALB(Application Load Balancer)를 지나 BFF(Backend for Frontend)에 도착합니다. BFF는 같은 클러스터의 파드이고 게이트웨이를 클러스터 안의 Service로 호출합니다. 게이트웨이는 요청을 모델에 맞는 vLLM 파드로 넘깁니다. 이 경로는 3부에서 다루고 이 글은 모델과 이미지가 GPU 노드에 올라가는 쪽을 다룹니다.</p>
-<p>서빙 파드는 Hugging Face에서 가중치를 내려받지 않습니다. 적재 Job이 체크포인트를 Amazon Simple Storage Service(Amazon S3) 버킷에 한 번 올리고 서빙 파드는 그 버킷의 <code>models/</code>와 <code>vllm-cache/</code>만 읽습니다. 권한은 EKS Pod Identity로 주고 버킷까지의 트래픽은 VPC의 S3 게이트웨이 엔드포인트를 지납니다.</p>
-<h3>버전 조합</h3>
-<p>모든 구성 요소는 2026년 11월 14일 기준 최신 버전을 사용하되 서로의 지원 범위 안에서 맞췄습니다.</p>
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>요청 한 건과 응답 헤더</h2></header><div class="prose">
+<p>이 환경의 API는 OpenAI 호환 형식의 <code>POST /v1/chat/completions</code> 하나입니다. 요청을 받는 곳은 BFF(Backend for Frontend)입니다. BFF는 화면과 모델 사이에서 인증, 모델 결정, 도구 실행을 맡는 서비스이고 이 환경에서는 Amazon EKS의 파드로 실행합니다. 아래 요청을 그대로 보내면 응답 헤더와 스트리밍 응답이 함께 출력됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># APP_URL: terraform -chdir=infra/terraform output -raw app_url 의 출력
+# ACCESS_TOKEN: Amazon Cognito 사용자 풀이 발급한 액세스 토큰
+curl -sN -D - "$APP_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "x-session-id: guide-001" \
+  -H "x-task: support" \
+  -d '{
+    "messages": [{"role": "user", "content": "반품은 며칠 안에 신청해야 하나요?"}],
+    "stream": true,
+    "stream_options": {"include_usage": true},
+    "max_tokens": 128
+  }'</code></pre></div>
+<p>액세스 토큰은 Cognito의 <code>InitiateAuth</code>(<code>USER_PASSWORD_AUTH</code> 흐름)로 받습니다. 저장소의 <code>bench/bff/stream_check.py</code>는 로그인부터 스트리밍 확인까지 한 번에 실행합니다. 본문에는 <code>model</code>을 적지 않습니다. 어느 모델로 보낼지는 BFF가 정하고 요청은 헤더로 힌트만 줍니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>구성 요소</th><th>버전</th><th>맞춘 근거</th></tr>
+<tr><th>요청 헤더</th><th>값</th><th>뜻</th></tr>
 </thead>
 <tbody>
-<tr><td>Amazon EKS</td><td>1.37</td><td>서울 리전의 최신이자 기본 버전</td></tr>
-<tr><td>GPU 노드 AMI</td><td>EKS 최적화 AL2023 NVIDIA 1.37.1-20261107 (NVIDIA 드라이버 580.178.04)</td><td>amazon-eks-ami v20261107 릴리스</td></tr>
-<tr><td>Karpenter</td><td>v1.15.2</td><td>호환표에서 Kubernetes 1.37은 Karpenter 1.15 계열</td></tr>
-<tr><td>EKS Pod Identity Agent</td><td>v1.4.1-eksbuild.3</td><td>Kubernetes 1.37 기준 애드온의 최신 버전</td></tr>
-<tr><td>NVIDIA device plugin</td><td>v0.20.1</td><td>정적 매니페스트를 사용</td></tr>
-<tr><td>vLLM</td><td>v0.33.0 (<code>vllm/vllm-openai:v0.33.0</code>, linux/amd64 9.74GB)</td><td>이미지가 CUDA 13.0.2 기반이고 대응 드라이버 브랜치가 R580</td></tr>
-<tr><td>Mountpoint for Amazon S3 CSI 드라이버</td><td>v2.9.2-eksbuild.1</td><td>기준 구성의 측정에만 사용</td></tr>
+<tr><td><code>x-session-id</code></td><td>문자열</td><td>같은 값이면 첫 요청에서 정한 모델을 30분 동안 다시 사용</td></tr>
+<tr><td><code>x-task</code></td><td><code>support</code>, <code>translate</code>, <code>summarize</code>, <code>vision</code>, <code>ocr</code>, <code>coding</code></td><td>업무 종류. 있으면 Decider 2B를 거치지 않고 배정표로 모델을 정함</td></tr>
+<tr><td><code>x-priority</code></td><td><code>interactive</code>, <code>batch</code></td><td>우선순위. 없으면 업무 종류의 기본값</td></tr>
+<tr><td><code>x-web-search</code></td><td><code>on</code></td><td>웹 검색 도구를 추가</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 1.</b> 이 글에서 다루는 구성 요소의 버전(2026년 11월 14일 확인)</p>
-<p>vLLM 이미지와 GPU 드라이버의 조합은 따로 확인했습니다. EKS 사용 설명서에 따르면 CUDA 13 이상에는 NVIDIA 580 드라이버가 필요합니다. EKS 최적화 AL2023 NVIDIA AMI는 노드의 GPU에 맞는 드라이버를 첫 부팅 때 고릅니다. L40S 노드에는 580.178.04가 올라왔습니다.</p>
-<p>g6e.4xlarge의 사양은 vCPU 16개, 메모리 128GiB, L40S 한 장, 인스턴스 스토어 600GB입니다. GPU 메모리는 제품 페이지 표기로 48GB이고 <code>describe-instance-types</code>의 값은 45,776MiB(44.7GiB)입니다. 조회 시점에 이 인스턴스는 서울 리전의 가용 영역 네 곳 가운데 ap-northeast-2a와 ap-northeast-2b에서만 제공됐습니다.</p>
+<p class="cap"><b>표 1.</b> 모델 결정과 도구에 영향을 주는 요청 헤더. 전체 목록은 저장소의 <code>docs/api-reference.md</code>에 있습니다.</p>
+<p>응답은 헤더와 SSE(Server-Sent Events, 서버가 한 연결로 이벤트를 차례로 보내는 방식) 본문으로 옵니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 응답 헤더 (일부, 숫자 자리는 요청마다 다른 값)
+x-request-id: &lt;요청 ID&gt;
+x-bff-model: gemma-4-31b
+x-bff-decision: task
+x-bff-sensitive: false
+x-bff-thinking: false
+x-bff-search: off
+x-bff-reason: {"task":"support","cached":false}
+x-bff-timing: {"decide_ms":&lt;ms&gt;,"wake_ms":&lt;ms&gt;,"upstream_ms":&lt;ms&gt;,"woke":false,"tools":true}
+
+# 응답 본문 (SSE)
+data: {"choices":[{"delta":{"content":"..."}}]}
+data: {"choices":[{"delta":{"content":"..."}}]}
+data: {"choices":[],"usage":{"prompt_tokens":&lt;입력&gt;,"completion_tokens":&lt;출력&gt;}}
+data: [DONE]</code></pre></div>
+<p><code>x-bff-</code>로 시작하는 헤더는 이 요청이 어느 경로를 지났는지를 알려 줍니다. 이 글을 다 읽으면 표 2의 값을 보고 요청이 지난 경로와 시간이 쓰인 곳을 읽을 수 있습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>응답 헤더</th><th>값</th><th>알려 주는 것</th></tr>
+</thead>
+<tbody>
+<tr><td><code>x-bff-model</code></td><td><code>gemma-4-31b</code>, <code>qwen38-27b</code></td><td>요청을 받은 모델</td></tr>
+<tr><td><code>x-bff-decision</code></td><td><code>rule</code>, <code>task</code>, <code>attachment</code>, <code>decider</code>, <code>fallback</code>, <code>eval</code></td><td>무엇으로 모델을 정했는지</td></tr>
+<tr><td><code>x-bff-sensitive</code>, <code>x-bff-thinking</code></td><td><code>true</code>, <code>false</code></td><td>민감 정보 요청으로 다뤘는지, thinking을 켰는지</td></tr>
+<tr><td><code>x-bff-search</code></td><td><code>on</code>, <code>off</code>, <code>sensitive</code>, <code>fallback</code>, <code>disabled</code></td><td>웹 검색 도구를 넣었는지, 넣지 않았다면 그 이유</td></tr>
+<tr><td><code>x-bff-reason</code></td><td>JSON</td><td>결정의 근거. 적용한 규칙, Decider 2B의 선택과 신뢰도</td></tr>
+<tr><td><code>x-bff-timing</code></td><td>JSON</td><td>BFF 안의 구간 시간. 판단(<code>decide_ms</code>), 깨우기(<code>wake_ms</code>), 게이트웨이의 응답 헤더까지(<code>upstream_ms</code>)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> BFF가 응답에 넣는 헤더</p>
 </div></section>
 
-<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>네 구간과 두 가지 구성</h2></header><div class="prose">
-<h3>구간마다 기다리는 대상</h3>
-<p>파드 생성에서 Ready까지의 시간은 네 구간과 나머지(기타)로 나눕니다. 구간마다 기다리는 대상이 다르므로 줄이는 방법도 다릅니다.</p>
-<p>기준 구성은 최적화를 적용하기 전의 구성입니다. 모델 버킷을 Mountpoint for Amazon S3로 마운트해 vLLM 기본 로더로 읽고 compile 캐시를 컨테이너 안에 둡니다. 노드는 이미지를 미리 받지 않습니다. 최적화 구성은 지금 서빙에 사용하는 구성입니다.</p>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>8개 단계와 단계별 구성 요소</h2></header><div class="prose">
+<p>LLM API 호출은 어느 환경에서나 비슷한 단계를 지납니다. 이 글은 그 단계를 8개로 나누고 이 환경에서 각 단계를 맡는 구성 요소를 표 3과 같이 대응시켰습니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>구간</th><th>기준 구성</th><th>최적화 구성</th></tr>
+<tr><th>단계</th><th>하는 일</th><th>이 환경의 구성 요소</th></tr>
 </thead>
 <tbody>
-<tr><td>노드 프로비저닝</td><td>Karpenter가 g6e.4xlarge On-Demand 노드를 만듦</td><td>같음</td></tr>
-<tr><td>이미지 pull</td><td>파드가 스케줄된 뒤 kubelet이 받기 시작</td><td>노드가 뜨는 동안 사용자 데이터의 유닛이 먼저 받기 시작</td></tr>
-<tr><td>가중치 로드</td><td>Mountpoint for Amazon S3로 마운트한 경로를 vLLM 기본 로더로 읽음</td><td><code>s3://</code> 경로를 runai_streamer로 읽어 GPU 메모리로 스트리밍</td></tr>
-<tr><td>엔진 초기화</td><td>compile 캐시가 컨테이너 안에 생기고 파드와 함께 사라짐</td><td>S3의 compile 캐시를 initContainer가 노드의 hostPath로 복원</td></tr>
+<tr><td>1 API Gateway (요청 진입)</td><td>암호화된 연결 수신, 호출 횟수 제한, 인증, 본문 검증</td><td>Amazon CloudFront, AWS WAF, Amazon Cognito, BFF</td></tr>
+<tr><td>2 Load Balancer (부하 분산)</td><td>요청을 받을 대상에게 나눠 보냄</td><td>내부 Application Load Balancer(ALB), 게이트웨이(agentgateway)</td></tr>
+<tr><td>3 Tokenization (토큰화)</td><td>문장을 토큰 ID로 바꾸고 길이를 확인</td><td>vLLM API 서버</td></tr>
+<tr><td>4 Model Router (모델 결정)</td><td>어느 모델의 어느 파드가 처리할지 결정</td><td>BFF, Strands Decider 2B, InferencePool과 EPP, 깨우기 API</td></tr>
+<tr><td>5 Inference Engine (추론)</td><td>토큰 생성</td><td>vLLM v0.33.0, 모델마다 NVIDIA L40S 1장</td></tr>
+<tr><td>6 Post-processing (후처리)</td><td>토큰을 텍스트로 복원, 추론 과정과 도구 호출 분리, 도구 실행</td><td>vLLM의 parser, BFF, Amazon Bedrock AgentCore Web Search</td></tr>
+<tr><td>7 Response &amp; Billing (응답과 비용)</td><td>응답 전달, 사용량 집계</td><td>BFF의 SSE 전달, <code>usage</code>, 응답 헤더</td></tr>
+<tr><td>8 Logging &amp; Observability (기록과 관측)</td><td>구간별 기록과 지표 수집</td><td>Prometheus agent, Amazon Managed Service for Prometheus, BFF 로그, ALB 접근 로그</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 2.</b> 구간별로 본 기준 구성과 최적화 구성의 차이. 모델, vLLM 버전, 로더를 뺀 엔진 플래그는 두 구성이 같습니다</p>
-<p>노드 프로비저닝은 두 구성이 같으므로 줄일 대상은 나머지 세 구간입니다. 이미지 pull은 노드 설정에서, 가중치 로드는 로더에서, 엔진 초기화는 캐시에서 줄입니다.</p>
-<p>새 매장을 여는 일에 비유하면 이해하기 쉽습니다. 노드 프로비저닝은 빈 점포를 구하는 일이고 이미지 pull은 주방 설비를 들여놓는 일입니다. 가중치 로드는 식재료를 창고에서 주방으로 옮기는 일이고 엔진 초기화는 영업 전에 재료를 손질해 두는 준비입니다. 최적화 구성은 점포 공사가 끝나기 전에 설비를 미리 주문합니다. 식재료는 중간 창고에 쌓지 않고 주방으로 바로 받고 지난번에 손질해 둔 재료를 꺼내 사용합니다. 점포를 구하는 시간은 그대로이므로 네 가지 가운데 세 가지만 빨라집니다. 웜 재시작은 같은 점포에서 다음 날 다시 문을 여는 경우여서 앞의 두 가지가 필요 없습니다. 실제와 다른 점도 있습니다. 식재료는 한 번 들이면 주방에 남지만 가중치는 파드가 뜰 때마다 30GiB 전체를 GPU 메모리에 다시 올립니다.</p>
-<p>측정 결과를 먼저 보고 그 뒤에 구간별 구성을 이 순서로 설명합니다.</p>
-<h3>구간을 나눈 근거</h3>
-<p>측정 스크립트는 시나리오의 시작 상태를 만든 뒤 새 파드가 Ready가 될 때까지 기다리고 Kubernetes 객체의 시각과 vLLM 로그에서 구간을 뽑습니다. 콜드 시나리오는 서빙을 0으로 줄이고 그 모델의 GPU 노드를 지운 뒤 다시 1로 올립니다. 웜 재시작 시나리오는 같은 노드에서 파드만 지워 다시 만들게 합니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>구간</th><th>근거</th></tr>
-</thead>
-<tbody>
-<tr><td>전체</td><td>파드 생성 시각부터 파드의 Ready 전환 시각까지</td></tr>
-<tr><td>노드 프로비저닝</td><td>NodeClaim 생성 시각부터 노드의 Ready 전환 시각까지</td></tr>
-<tr><td>이미지 pull</td><td>kubelet의 <code>Pulled</code> 이벤트에 적힌 시간. 이미지가 이미 있으면 0</td></tr>
-<tr><td>가중치 로드</td><td>vLLM 로그의 <code>Model loading took</code></td></tr>
-<tr><td>엔진 초기화</td><td>vLLM 로그의 <code>init engine (profile, create kv cache, warmup model) took</code></td></tr>
-<tr><td>기타</td><td>전체에서 위 네 구간을 뺀 값</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 3.</b> 구간별 측정 근거. Kubernetes의 시각은 1초 단위여서 전체 시간과 노드 프로비저닝에는 최대 1초의 오차가 있습니다</p>
-<p>기준 구성의 Mountpoint 볼륨은 <code>max-threads 96</code>과 <code>maximum-throughput-gbps 20</code>(g6e.4xlarge의 네트워크 대역폭)으로 마운트했습니다. 이미지 사전 pull이 없는 조건은 EC2NodeClass만 다른 별도 NodePool로 만들었습니다.</p>
-<p>가중치 로드의 표식은 <code>Model loading took</code>으로 통일했습니다. v0.33.0은 스트리밍 로더 경로에서 <code>Loading weights took</code>을 남기지 않기 때문입니다. 기준 구성에는 두 줄이 모두 있고 값은 55.9초와 59.6초였습니다.</p>
+<p class="cap"><b>표 3.</b> LLM API 호출의 8개 단계와 이 환경의 구성 요소</p>
+<p>콜센터에 걸려 온 전화 한 통에 견주면 역할이 잘 보입니다. 대표 번호로 받아 본인을 확인하는 일이 1단계이고 전화를 접수 창구로 나눠 연결하는 일이 2단계입니다. 접수 상담원(BFF)은 문의를 듣고 담당 부서를 정합니다. 정해진 기준에 맞으면 바로 정하고 기준에 없는 문의만 옆자리의 분류 담당(Decider 2B)에게 묻습니다. 교환기(게이트웨이)는 접수 상담원이 적어 준 부서 이름만 보고 전화를 연결합니다. 담당 부서의 전문 상담사(vLLM의 모델)는 문의를 끝까지 읽은 뒤(Prefill) 한 마디씩 답합니다(Decode). 상담사가 모르는 최신 정보는 접수 상담원이 자료실(Web Search)에서 찾아 건네주고 상담사는 그 자료를 읽고 다시 답합니다. 통화가 끝나면 통화 기록이 남습니다. 실제 동작이 이 비유와 다른 점은 전문 상담사 한 명이 여러 통화를 동시에 받는다는 것이고 그 수는 GPU 메모리가 정합니다.</p>
+<p>이 환경에서는 4단계가 3단계보다 먼저 실행됩니다. BFF와 게이트웨이는 토큰화하지 않고 헤더와 원문 텍스트만 보고 모델을 정합니다. 토큰화는 모델마다 다른 토크나이저로 하는 일이어서 모델이 정해진 뒤 그 모델의 vLLM 파드 안에서 일어납니다.</p>
+<p>요청이 지나는 순서는 CloudFront, 내부 ALB, BFF, 게이트웨이, vLLM입니다. 인터넷에 열린 곳은 CloudFront 하나이고 그 뒤의 구성 요소는 모두 VPC 안에 있습니다. 각 구성 요소를 어디에 어떻게 배치했는지는 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서 다룹니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>콜드 스타트 134초, 웜 재시작 128초 단축</h2></header><div class="prose">
-<h3>시나리오별 전체 시간</h3>
-<p>Qwen3.8-27B의 기준 구성은 재지 않았습니다.</p>
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>요청 진입과 부하 분산 (1, 2단계)</h2></header><div class="prose">
+<p>1단계는 요청을 받아도 되는지 확인하는 단계입니다. 확인은 CloudFront, AWS WAF, Cognito, BFF가 나눠 합니다.</p>
+<ul>
+<li>CloudFront는 HTTPS 요청을 받아 <code>/v1/*</code> 경로만 VPC origin을 거쳐 내부 ALB로 보냅니다. 나머지 경로는 Amazon S3의 정적 페이지입니다.</li>
+<li>AWS WAF는 IP 하나의 요청이 5분에 300회를 넘으면 403으로 차단합니다.</li>
+<li>Cognito는 로그인한 사용자에게 액세스 토큰을 발급합니다. 유효 시간은 60분이고 사용자 풀의 가입은 막아 두었습니다.</li>
+<li>BFF는 사용자 풀의 공개 키로 토큰의 RS256 서명을 확인하고 발급자, 만료 시각, <code>token_use</code>, 앱 클라이언트 ID를 확인합니다.</li>
+</ul>
+<p>인증은 BFF가 맡으므로 로그인하지 않은 요청도 CloudFront와 ALB를 지나 BFF까지 도달한 뒤 401을 받습니다. 그 앞에서 막는 장치는 AWS WAF의 속도 기반 규칙 하나입니다. 이 규칙은 한도를 넘는 순간에 바로 작동하지 않습니다. 2026년 11월 14일에 정적 페이지로 0.5초 동안 400번을 요청했을 때 400번이 모두 200이었습니다. 첫 403은 요청을 시작하고 25.6초 뒤에 나왔고 차단은 그로부터 300.4초 뒤에 풀렸습니다. <a href="https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based-caveats.html" target="_blank" rel="noopener">AWS WAF 문서</a>도 속도 기반 규칙이 정밀한 요청 수 제한용이 아니라고 설명합니다.</p>
+<p>오류 코드를 보면 요청이 어디까지 갔는지 알 수 있습니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>시나리오</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
+<tr><th>코드</th><th>돌려주는 곳</th><th>상황</th></tr>
 </thead>
 <tbody>
-<tr><td>콜드, 기준 구성</td><td class="num">394초</td><td class="num">재지 않음</td></tr>
-<tr><td>콜드, 최적화 구성</td><td class="num">260초</td><td class="num">290초</td></tr>
-<tr><td>웜 재시작, 기준 구성</td><td class="num">214초</td><td class="num">재지 않음</td></tr>
-<tr><td>웜 재시작, 최적화 구성</td><td class="num">86초</td><td class="num">123초</td></tr>
+<tr><td>403</td><td>AWS WAF</td><td>그 IP가 속도 제한에 걸림. BFF에 닿지 않음</td></tr>
+<tr><td>401</td><td>BFF</td><td>토큰이 없거나 서명, 발급자, 만료 시각 확인에 실패. ID 토큰은 받지 않음</td></tr>
+<tr><td>400</td><td>BFF</td><td>본문이 JSON이 아니거나 <code>messages</code>가 없음</td></tr>
+<tr><td>422</td><td>BFF</td><td>민감 정보가 있는 요청에 이미지가 있음</td></tr>
+<tr><td>502</td><td>BFF</td><td>잠든 Qwen3.8-27B를 깨우지 못함</td></tr>
+<tr><td>429</td><td>게이트웨이</td><td>모델의 풀이 포화된 동안 들어온 배치 요청</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 4.</b> 파드 생성에서 Ready까지의 시간(g6e.4xlarge, vLLM v0.33.0, 2026년 11월 14일 서울 리전, 시나리오마다 한 번)</p>
-<p>Gemma의 콜드 스타트는 134초(34%), 웜 재시작은 128초(60%) 줄었습니다. 줄어든 시간은 비슷하고 웜 재시작에는 노드 프로비저닝과 이미지 pull이 없어서 비율이 더 큽니다.</p>
-<h3>Gemma 4 31B의 구간별 결과</h3>
-<p>웜 재시작에서는 노드와 이미지가 이미 있으므로 앞의 두 구간이 0입니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>구간</th><th>콜드, 기준</th><th>콜드, 최적화</th><th>웜 재시작, 기준</th><th>웜 재시작, 최적화</th></tr>
-</thead>
-<tbody>
-<tr><td>노드 프로비저닝</td><td class="num">55.0</td><td class="num">71.0</td><td class="num">0</td><td class="num">0</td></tr>
-<tr><td>이미지 pull</td><td class="num">111.1</td><td class="num">71.0</td><td class="num">0</td><td class="num">0</td></tr>
-<tr><td>가중치 로드</td><td class="num">59.6</td><td class="num">19.2</td><td class="num">59.1</td><td class="num">19.6</td></tr>
-<tr><td>엔진 초기화</td><td class="num">95.5</td><td class="num">23.7</td><td class="num">95.6</td><td class="num">23.7</td></tr>
-<tr><td>(그중 torch.compile)</td><td class="num">61.0</td><td class="num">0.9</td><td class="num">60.8</td><td class="num">0.9</td></tr>
-<tr><td>기타</td><td class="num">72.7</td><td class="num">75.1</td><td class="num">59.3</td><td class="num">42.7</td></tr>
-<tr><td>합계</td><td class="num">394</td><td class="num">260</td><td class="num">214</td><td class="num">86</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 5.</b> Gemma 4 31B의 구간별 시간(초, 시나리오마다 한 번). 합계는 1초 단위로 잰 전체 시간이고 torch.compile은 엔진 초기화에 포함된 값입니다</p>
-<p>가중치 로드는 Mountpoint로 읽으면 59.6초, 스트리밍 로더로 읽으면 19.2초였습니다(3.1배). 웜 재시작에서도 59.1초와 19.6초여서 이 구간은 노드가 새것인지와 무관했습니다.</p>
-<p>엔진 초기화는 95.5초에서 23.7초가 됐고 차이의 대부분은 <code>torch.compile</code>입니다(61.0초에서 0.9초). 새 노드에서 initContainer가 S3의 캐시 522개를 3.3초에 복원했고 캐시가 적중했습니다. 남은 23.7초에는 CUDA graph 캡처가 들어 있습니다. 로그에 기록된 캡처 시간은 7초와 10초였습니다.</p>
-<p>이미지 pull은 kubelet 기준으로 111.1초에서 71.0초가 됐습니다. 사전 pull이 노드가 뜨는 동안 먼저 시작하므로 kubelet이 기다린 시간이 줄었습니다. 그래도 71.0초는 기타를 빼면 최적화 구성에서 노드 프로비저닝과 함께 가장 긴 구간입니다.</p>
-<p>노드 프로비저닝은 55.0초와 71.0초였습니다. 두 구성의 EC2NodeClass에서 다른 것은 사용자 데이터의 사전 pull 유닛뿐입니다. 한 번씩 잰 값이라 16초의 차이가 사전 pull의 영향인지 그날의 편차인지는 가르지 못합니다. 같은 날 처음 만든 GPU 노드는 118초가 걸렸습니다. 이 구간을 뺀 나머지만 보면 339초에서 189초로 44% 줄었습니다.</p>
-<p>기타는 콜드 스타트에서 줄지 않았습니다(72.7초와 75.1초). 여기에는 스케줄링 대기, 컨테이너 생성, vLLM 프로세스가 가중치 로드에 들어가기 전의 시간, 엔진 초기화 뒤 API 서버가 뜨는 시간이 들어갑니다. 웜 재시작에서는 59.3초에서 42.7초로 줄었는데 어느 단계가 줄었는지는 나눠 보지 못했습니다.</p>
-<p>Gemma의 최적화 구성에서는 기타가 가장 긴 구간입니다. 웜 재시작 최적화 구성에서 컨테이너 시작부터 Ready까지는 82초였고 그중 가중치 로드와 엔진 초기화가 43.3초였습니다. 나머지 39초쯤은 두 표식 바깥의 시간이어서 기타가 86초의 절반을 차지합니다.</p>
-<h3>Qwen3.8-27B의 구간별 결과</h3>
-<p>Qwen3.8-27B는 최적화 구성의 두 시나리오만 쟀습니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>구간</th><th>콜드, 최적화</th><th>웜 재시작, 최적화</th></tr>
-</thead>
-<tbody>
-<tr><td>노드 프로비저닝</td><td class="num">63.0</td><td class="num">0</td></tr>
-<tr><td>이미지 pull</td><td class="num">77.5</td><td class="num">0</td></tr>
-<tr><td>가중치 로드</td><td class="num">34.9</td><td class="num">35.4</td></tr>
-<tr><td>엔진 초기화</td><td class="num">42.5</td><td class="num">41.8</td></tr>
-<tr><td>(그중 torch.compile)</td><td class="num">0.8</td><td class="num">0.9</td></tr>
-<tr><td>기타</td><td class="num">72.1</td><td class="num">45.8</td></tr>
-<tr><td>합계</td><td class="num">290</td><td class="num">123</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 6.</b> Qwen3.8-27B의 구간별 시간(초, 최적화 구성, 시나리오마다 한 번)</p>
-<p>Qwen은 가중치가 34.39GiB로 더 커서 가중치 로드가 34.9초로 Gemma의 19.2초보다 깁니다. compile 캐시는 2,056개를 복원하는 데 10초가 걸렸고 compile은 0.8초에 끝났습니다. 엔진 초기화가 Gemma보다 긴 42.5초인 이유는 따로 분석하지 않았습니다.</p>
-<h3>sleep 복귀와의 비교</h3>
-<p>파드를 다시 띄우지 않는 방법도 있습니다. vLLM의 level 1 sleep은 가중치를 호스트 메모리로 옮기고 KV 캐시를 버려 GPU 메모리를 비웁니다. 웜 재시작으로 새로 뜬 Qwen 파드에서 복귀를 두 번 쟀을 때 깨우기 API가 응답하기까지 3.70초와 3.67초였습니다. 같은 파드의 웜 재시작은 123초, 콜드 스타트는 290초였습니다. 다만 sleep은 노드와 파드를 그대로 두므로 노드를 회수하지는 못합니다. 진입 시간도 파드가 뜬 뒤 첫 번째는 31.71초, 두 번째는 2.98초로 달랐습니다. sleep을 일정에 맞춰 운영하는 구성은 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">3부</a>에서 다룹니다.</p>
+<p class="cap"><b>표 4.</b> 오류 코드와 그 코드를 돌려주는 위치</p>
+<p>2단계는 요청을 받을 대상에게 나눠 보내는 단계이고 두 번 일어납니다. 내부 ALB는 요청을 BFF 파드 2개에 나눕니다. BFF는 세션의 결정을 파드의 메모리에 보관하므로 같은 브라우저의 요청이 같은 파드로 가도록 ALB에 쿠키 고정(1,800초)을 설정했습니다. BFF는 게이트웨이를 클러스터 안의 Service로 직접 호출하고 게이트웨이 파드 2개가 요청을 모델별 풀로 보냅니다. GPU 부하를 보고 파드를 고르는 일은 4단계에서 설명할 EPP가 합니다.</p>
+<p>두 단계가 사용한 시간은 짧습니다. 2026년 11월 15일의 측정에서 중앙값은 사용자와 엣지 사이 1.8ms, CloudFront 5.0ms, ALB 1.6ms였습니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>이미지 pull의 시작 시점을 당긴 사전 pull</h2></header><div class="prose">
-<p>이미지 pull은 kubelet 기준으로 111.1초에서 71.0초가 됐습니다. 이 구간을 줄인 설정은 Karpenter의 NodePool과 EC2NodeClass에 있습니다.</p>
-<h3>모델마다 한 대로 묶는 NodePool</h3>
-<p>NodePool은 모델마다 하나씩 두었습니다(<code>gemma-od</code>, <code>qwen-od</code>, <code>decider</code>). 아래는 Gemma용입니다. Qwen용은 이름만 다르고 Decider용은 인스턴스 유형과 EC2NodeClass가 다릅니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>apiVersion: karpenter.sh/v1
-kind: NodePool
-metadata:
-  name: gemma-od
-spec:
-  template:
-    spec:
-      nodeClassRef:
-        group: karpenter.k8s.aws
-        kind: EC2NodeClass
-        name: vllm
-      requirements:
-        - key: node.kubernetes.io/instance-type
-          operator: In
-          values: ["g6e.4xlarge"]
-        - key: karpenter.sh/capacity-type
-          operator: In
-          values: ["on-demand"]
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-  limits:
-    nvidia.com/gpu: 1
-  disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: 30m</code></pre></div>
-<p><code>limits</code>의 <code>nvidia.com/gpu: 1</code>은 이 NodePool이 만드는 GPU를 한 장으로 묶습니다. Karpenter 문서에 따르면 한도를 넘은 NodePool은 노드가 종료될 때까지 새 노드를 만들지 않습니다. 복제본 수를 실수로 올려도 GPU 노드가 의도와 다르게 늘지 않게 하려는 값입니다.</p>
-<p><code>taints</code>를 두면 이 taint를 허용하지 않는 파드는 GPU 노드에 스케줄되지 않습니다. vLLM 파드는 같은 키의 toleration과 <code>karpenter.sh/nodepool</code> nodeSelector로 자기 NodePool을 고릅니다. 가용 영역 조건은 두지 않아 Karpenter가 용량이 있는 영역을 고릅니다. g6e.4xlarge가 실제로 뜰 수 있는 곳은 앞에서 본 두 영역입니다.</p>
-<p><code>consolidationPolicy: WhenEmpty</code>는 워크로드 파드가 없는 노드만 회수 대상으로 삼습니다. <code>consolidateAfter</code>를 30분으로 둔 데에는 측정 사정이 들어 있습니다. 웜 재시작을 재려면 파드를 지우고 다시 만드는 사이에 노드가 남아 있어야 합니다. 반대로 회수를 아예 끄면 작업을 잊었을 때 GPU 노드가 계속 남습니다.</p>
-<h3>인스턴스 스토어와 이미지 사전 pull</h3>
-<p>Gemma와 Qwen의 노드는 EC2NodeClass <code>vllm</code>을 사용합니다. 저장소의 매니페스트에서 주석만 뺀 것입니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>apiVersion: karpenter.k8s.aws/v1
-kind: EC2NodeClass
-metadata:
-  name: vllm
-spec:
-  role: KarpenterNodeRole-ow-on-gpu
-  amiSelectorTerms:
-    - alias: al2023@v20261107
-  subnetSelectorTerms:
-    - tags:
-        karpenter.sh/discovery: ow-on-gpu
-  securityGroupSelectorTerms:
-    - tags:
-        karpenter.sh/discovery: ow-on-gpu
-  instanceStorePolicy: RAID0
-  userData: |
-    MIME-Version: 1.0
-    Content-Type: multipart/mixed; boundary="BOUNDARY"
-
-    --BOUNDARY
-    Content-Type: text/x-shellscript; charset="us-ascii"
-
-    #!/bin/bash
-    systemd-run --unit=prepull-vllm --no-block /bin/bash -c '
-      until ctr --namespace k8s.io version &gt;/dev/null 2&gt;&amp;1; do sleep 1; done
-      ctr --namespace k8s.io images pull docker.io/vllm/vllm-openai:v0.33.0
-    '
-    --BOUNDARY--</code></pre></div>
-<p><code>amiSelectorTerms</code>의 별칭은 EKS 최적화 AL2023 AMI의 릴리스를 고정합니다. 별칭을 사용하면 Karpenter가 인스턴스에 맞는 변형을 고르므로 GPU 노드에는 NVIDIA 변형 AMI가 올라옵니다. 이 AMI에는 NVIDIA 드라이버와 container toolkit이 들어 있고 NVIDIA device plugin은 들어 있지 않습니다. 그래서 device plugin v0.20.1의 정적 매니페스트를 설치했고 nodeSelector를 더해 NVIDIA GPU 노드에만 뜨게 했습니다.</p>
-<p><code>instanceStorePolicy: RAID0</code>은 인스턴스 스토어를 RAID0으로 묶어 kubelet과 containerd의 저장 공간으로 사용하게 합니다. AL2023에서는 Karpenter가 만든 NodeConfig가 디스크를 구성하고 <code>/mnt/k8s-disks/0</code>에 마운트합니다. GPU 노드에서는 559GB가 그 경로에 마운트됐고 컨테이너 이미지가 여기에 저장됐습니다. 루트 볼륨은 20GB입니다.</p>
-<p><code>userData</code>의 스크립트가 이미지 사전 pull을 맡습니다. 사용자 스크립트는 containerd가 뜨기 전에 실행될 수 있습니다. 그래서 containerd를 기다렸다가 이미지를 받는 일회성 systemd 유닛으로 일을 넘겼습니다. 유닛은 노드 등록을 막지 않고 kubelet과 나란히 진행되며 kubelet이 보는 <code>k8s.io</code> 네임스페이스에 이미지를 받습니다.</p>
-<p>처음 만든 GPU 노드에서 이 동작을 확인했습니다. 사전 pull은 containerd가 뜬 직후에 시작해 9.1GiB를 108.7초에 받았습니다(85.5MiB/s). kubelet의 pull은 진행 중인 다운로드를 이어받아 사전 pull이 끝난 1초 뒤에 끝났고 kubelet이 기록한 pull 시간은 45.0초였습니다. 사전 pull은 이미지를 받는 시간을 줄이지 않습니다. 받기 시작하는 시점을 파드 스케줄 뒤에서 노드 부팅 중으로 당깁니다.</p>
-</div></section>
-
-<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>가중치를 S3에서 GPU 메모리로 스트리밍하는 로더</h2></header><div class="prose">
-<p>가중치 로드는 59.6초에서 19.2초가 됐습니다. 체크포인트를 Amazon S3에 한 번 올려 두고 서빙 파드가 그 버킷에서 GPU 메모리로 바로 읽게 한 결과입니다. 체크포인트 선택, 적재, 권한, 로더의 순서로 설명합니다.</p>
-<h3>L40S에서 FP8 체크포인트를 고른 이유</h3>
-<p>L40S는 Ada 세대 GPU이고 compute capability가 8.9입니다. vLLM 문서의 양자화 지원표에서 llm-compressor FP8(W8A8)은 Ada(SM 8.9)와 Hopper(SM 9.0)에서 지원됩니다. 두 모델 모두 이 형식의 FP8-dynamic 체크포인트를 사용했습니다. 가중치는 채널별 정적 FP8이고 활성값은 토큰별 동적 FP8입니다.</p>
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>규칙이 먼저이고 Decider 2B가 다음인 모델 결정 (4단계)</h2></header><div class="prose">
+<p>모델이 두 개이므로 요청마다 어느 모델이 처리할지 정해야 합니다. 이 환경에서는 BFF가 요청의 내용과 정책을 보고 모델을 정하고 게이트웨이는 BFF가 적은 값만 보고 모델의 풀을 고릅니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig02-model-decision.png" alt="요청 하나의 모델이 정해지는 순서를 3개 부분으로 나눠 그린 인포그래픽. BFF는 민감 정보 규칙, 업무 종류, 이미지 첨부, Decider 2B의 판단, 기본값의 순서로 먼저 맞는 규칙을 적용하고 Decider 2B는 모델 선택과 개인정보 여부와 추론 필요 여부를 신뢰도와 함께 돌려주며 결정된 값은 본문의 model과 priority, 헤더로 게이트웨이에 전달되어 InferencePool과 EPP를 거쳐 vLLM 파드에 도착한다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 모델 결정 순서. BFF의 결정 순서, Decider 2B의 판단과 기준값, 결정이 게이트웨이와 엔진으로 전달되는 경로를 나눠 그렸습니다.</figcaption></figure>
+<h3>BFF의 결정 순서</h3>
+<p>BFF는 비용이 거의 없는 규칙을 먼저 적용하고 규칙으로 정해지지 않는 요청만 판단 모델에 묻습니다. 표 5의 순서로 먼저 맞는 규칙 하나를 적용합니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>모델</th><th>체크포인트 (리비전)</th><th>가중치 파일</th><th>GPU에 올라간 크기</th></tr>
+<tr><th>순서</th><th>조건</th><th>결정</th><th><code>x-bff-decision</code></th></tr>
 </thead>
 <tbody>
-<tr><td>Gemma 4 31B</td><td>RedHatAI/gemma-4-31B-it-FP8-dynamic (<code>d4ab4f57</code>)</td><td>safetensors 2개, 33.27GB</td><td>30.63GiB</td></tr>
-<tr><td>Qwen3.8-27B</td><td>AzatAI/Qwen3.8-27B-FP8-dynamic (<code>10c68ff4</code>)</td><td>safetensors 3개, 36.78GB (MTP 헤드 0.85GB 포함)</td><td>34.39GiB</td></tr>
+<tr><td>1</td><td>주민등록번호나 카드번호 형식이 있음</td><td>Gemma 4 31B, 민감 정보 요청으로 표시</td><td><code>rule</code></td></tr>
+<tr><td>2</td><td>업무 종류(<code>x-task</code>)가 있음</td><td>상담, 번역, 요약은 Gemma 4 31B, 이미지 이해, OCR, 코딩은 Qwen3.8-27B</td><td><code>task</code></td></tr>
+<tr><td>3</td><td>이미지가 첨부됨</td><td>Qwen3.8-27B</td><td><code>attachment</code></td></tr>
+<tr><td>4</td><td>Decider 2B의 판단이 기준 이상</td><td>Decider 2B가 고른 모델</td><td><code>decider</code></td></tr>
+<tr><td>5</td><td>그 밖의 경우</td><td>Gemma 4 31B, thinking 끔</td><td><code>fallback</code></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 7.</b> 두 모델의 체크포인트. 파일 크기는 1GB = 10^9바이트 기준이고 GPU에 올라간 크기는 vLLM 로그의 <code>Model loading took</code> 값입니다</p>
-<p>Qwen3.8-27B에는 FP8 체크포인트가 두 가지 있습니다. 공식 저장소(Qwen/Qwen3.8-27B-FP8)는 블록 크기 128로 양자화한 block FP8이고 가중치가 30.87GB로 5.9GB 작습니다. 다만 vLLM v0.33.0 소스에서 CUTLASS block FP8 커널은 compute capability 9.0 이상에서만 지원됩니다. 같은 Ada 세대인 RTX 6000 Ada에서 이 체크포인트가 Marlin FP8 커널로 내려갔다는 보고가 vLLM 이슈에 있습니다. L40S에서 실제로 어떤 커널을 고르는지와 성능 차이는 확인하지 못했습니다.</p>
-<p>그래서 문서가 Ada 지원을 명시한 per-channel 체크포인트를 골랐습니다. 두 모델 모두 기동 로그에서 <code>CutlassFP8ScaledMMLinearKernel</code>이 선택됐습니다. 대가는 GPU 메모리입니다. 가중치가 큰 만큼 KV 캐시(Key-Value cache)에 남는 메모리가 줄어들고 이 차이는 뒤에서 설명할 <code>--gpu-memory-utilization</code> 설정에서 다시 나옵니다.</p>
-<p>AzatAI 저장소는 개인 조직이 올린 것이어서 적재할 때 리비전 해시로 고정했습니다. 파일은 safetensors뿐이라 pickle 실행 위험은 없습니다.</p>
-<h3>Hugging Face에서 S3로 올리는 적재 Job</h3>
-<p>적재 Job은 리비전 해시로 고정한 저장소 네 개를 버킷의 <code>models/</code> 아래에 올립니다. Decider의 저장소에는 LoRA 어댑터와 헤드만 있어서 기반 모델(Qwen/Qwen3.5-2B-Base)을 함께 올렸습니다. compile 캐시까지 더한 버킷의 구조입니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>s3://&lt;bucket&gt;/models/gemma-4-31B-it-FP8-dynamic/
-s3://&lt;bucket&gt;/models/Qwen3.8-27B-FP8-dynamic/
-s3://&lt;bucket&gt;/models/strands-decider-2B-qwen3.5-v1-2610/
-s3://&lt;bucket&gt;/models/Qwen3.5-2B-Base/
-s3://&lt;bucket&gt;/vllm-cache/v0.33.0-gemma4-31b-fp8-l40s/
-s3://&lt;bucket&gt;/vllm-cache/v0.33.0-qwen38-27b-fp8-l40s/</code></pre></div>
-<p>Job은 파일을 받는 대로 <code>s5cmd pipe</code>로 S3에 올리므로 가중치를 로컬 디스크에 쌓지 않습니다. 파일 8개를 동시에 처리하고 파일마다 64MiB 파트 4개를 병렬로 올립니다. 받으면서 해시를 계산해 Hugging Face가 알려 준 값과 비교합니다(LFS 파일은 sha256, 나머지는 git blob sha1). 끝나면 S3의 객체 목록을 기대값과 비교하고 경로나 크기가 다르면 Job이 실패합니다. 다시 실행하면 같은 크기로 이미 올라간 파일은 건너뜁니다. Job은 CPU 노드(<code>system</code> NodePool)에서 실행됩니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>저장소</th><th>객체 수</th><th>크기</th></tr>
-</thead>
-<tbody>
-<tr><td>RedHatAI/gemma-4-31B-it-FP8-dynamic</td><td class="num">18</td><td class="num">33.30GB</td></tr>
-<tr><td>AzatAI/Qwen3.8-27B-FP8-dynamic</td><td class="num">14</td><td class="num">36.80GB</td></tr>
-<tr><td>StrandsAgents/strands-decider-2B-qwen3.5-v1-2610</td><td class="num">29</td><td class="num">0.23GB</td></tr>
-<tr><td>Qwen/Qwen3.5-2B-Base</td><td class="num">12</td><td class="num">4.57GB</td></tr>
-<tr><td>합계</td><td class="num">73</td><td class="num">74.90GB</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 8.</b> 적재 Job이 올린 저장소(2026년 11월 14일). 1GB = 10^9바이트</p>
-<p>Job은 시작부터 완료까지 9분 8초가 걸렸고 그중 전송과 검증이 491.4초였습니다. 재시도는 없었습니다. 전체 시간을 정한 것은 Qwen의 19.98GB 파일로, 40.7MB/s로 490초가 걸렸습니다. Gemma의 26.89GB 파일은 213.4MB/s로 126초 만에 끝났습니다. 내려받는 속도는 저장소에 따라 다섯 배쯤 달랐습니다. 적재 뒤에 S3 객체 세 개를 다시 받아 sha256을 Hugging Face의 값과 대조했고 모두 일치했습니다.</p>
-<h3>EKS Pod Identity로 주는 S3 권한</h3>
-<p>서빙 파드와 Job이 S3에 접근하는 권한은 EKS Pod Identity로 줍니다. EKS Pod Identity는 AWS Identity and Access Management(IAM) 역할을 네임스페이스의 ServiceAccount에 연결하는 기능이고 OIDC 자격 증명 공급자가 필요 없습니다. 노드마다 DaemonSet으로 실행되는 Pod Identity Agent가 같은 노드의 파드에 임시 자격 증명을 전달합니다. 아래는 Terraform 정의에서 신뢰 정책과 읽기 전용 쪽만 옮긴 것입니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">hcl</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># karpenter.tf (발췌)
-locals {
-  pod_identity_trust = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "pods.eks.amazonaws.com" }
-      Action    = ["sts:AssumeRole", "sts:TagSession"]
-    }]
-  })
-}
-
-# storage.tf (발췌)
-locals {
-  model_object_arns = [
-    "${aws_s3_bucket.models.arn}/models/*",
-    "${aws_s3_bucket.models.arn}/vllm-cache/*",
-  ]
-
-  model_reader_service_accounts = ["gemma", "qwen", "decider"]
-  model_writer_service_accounts = ["model-sync", "cache-publish"]
-}
-
-resource "aws_iam_role" "model_reader" {
-  name               = "${var.cluster_name}-model-reader"
-  assume_role_policy = local.pod_identity_trust
-}
-
-resource "aws_eks_pod_identity_association" "model_reader" {
-  for_each = toset(local.model_reader_service_accounts)
-
-  cluster_name    = aws_eks_cluster.this.name
-  namespace       = "inference"
-  service_account = each.key
-  role_arn        = aws_iam_role.model_reader.arn
+<p class="cap"><b>표 5.</b> BFF의 모델 결정 순서와 응답 헤더의 값</p>
+<p>첫 번째 규칙이 맨 앞에 있는 이유는 이 환경의 데이터 정책 때문입니다. 민감 정보가 든 요청은 Gemma 4 31B로만 보내도록 정했고 형식이 정해진 민감 정보는 판단 모델에 맡기지 않고 정규식과 Luhn 검사로 찾습니다. Gemma 4 31B는 이 구성에서 이미지를 받지 않으므로 민감 정보와 이미지가 함께 온 요청은 422로 거절합니다.</p>
+<p>한 번 정한 결과는 세션(<code>x-session-id</code>)에 30분 동안 저장해 다시 사용합니다. 대화의 두 번째 메시지부터는 판단 시간이 더해지지 않습니다. 민감 정보 형식만은 세션에 결정이 있어도 메시지마다 다시 확인하고 대화 도중에 나오면 그 뒤로는 Gemma 4 31B로만 보냅니다.</p>
+<h3>Decider 2B의 판단</h3>
+<p><a href="https://github.com/strands-labs/strands-decider" target="_blank" rel="noopener">Strands Decider 2B</a>는 요청을 읽고 어느 모델이 맡을지를 판단하는 작은 모델입니다. 글을 생성하지 않고 선택지 가운데 하나와 신뢰도, 또는 예일 확률을 돌려줍니다. 이 환경에서는 g6.xlarge(NVIDIA L4) 노드 한 대에서 실행하고 BFF는 규칙으로 정해지지 않은 요청에만 질문 3개를 한 번에 보냅니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># app/bff/bff.py에서 발췌
+DECIDER_QUESTIONS = {
+    "route": {
+        "type": "choice",
+        "instructions": "이 요청을 처리할 모델을 고르세요.",
+        "criteria": {
+            "gemma": "고객 상담, 주문 조회, 번역, 요약처럼 텍스트만 다루는 요청",
+            "qwen": "이미지나 문서를 읽어야 하거나 코드를 작성하고 고치는 요청",
+        },
+    },
+    "policy": {"type": "noul", "instructions": "이 요청에 이름, 연락처, 주소, 계좌 같은 개인정보가 들어 있습니까?"},
+    "thinking": {"type": "noul", "instructions": "이 요청에 답하려면 여러 단계를 거친 추론이 필요합니까?"},
 }</code></pre></div>
-<p>역할은 둘로 나눴습니다. 읽기 역할은 <code>models/</code>와 <code>vllm-cache/</code>의 <code>s3:GetObject</code>와 버킷 목록 조회만 허용합니다. 이 역할을 <code>inference</code> 네임스페이스의 서빙 파드용 ServiceAccount 세 개(<code>gemma</code>, <code>qwen</code>, <code>decider</code>)에 연결했습니다. 쓰기 역할은 <code>model-jobs</code> 네임스페이스의 적재 Job과 캐시 게시 Job에만 연결했습니다. 서빙 파드는 버킷에 아무것도 올리지 못합니다.</p>
-<p>자격 증명을 받는 쪽에서는 두 가지를 손봤습니다. Run:ai Model Streamer의 S3 클라이언트는 기본값에서 AWS C++ SDK의 자격 증명 공급자 체인을 사용하고 boto3 세션을 만들지 않습니다. 그래서 <code>RUNAI_STREAMER_NO_BOTO3_SESSION=0</code>으로 boto3가 받은 자격 증명을 넘기게 했습니다. vLLM 이미지 안의 boto3가 Pod Identity로 자격 증명을 받아 버킷을 나열하는 것은 배포 전에 확인했습니다. 기본값으로 두었을 때의 동작은 따로 기록하지 않았습니다. 적재 Job이 사용하는 s5cmd 2.3.0은 AWS SDK가 Pod Identity를 지원하지 않습니다. 이 경우에는 스크립트가 Pod Identity Agent에서 임시 자격 증명을 받아 s5cmd에 넘깁니다.</p>
-<h3>runai_streamer로 S3에서 직접 읽는 가중치</h3>
-<p>Gemma의 Deployment에서 시작 시간과 관련된 부분만 옮겼습니다. ServiceAccount, 리소스 요청, readinessProbe와 livenessProbe, 일부 환경 변수와 볼륨은 줄였습니다.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>    spec:
-      serviceAccountName: gemma
-      nodeSelector:
-        karpenter.sh/nodepool: gemma-od
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
-      initContainers:
-        - name: cache-restore
-          image: vllm/vllm-openai:v0.33.0
-          command: ["python3", "/scripts/cache-restore.py"]
-          env:
-            - name: CACHE_PREFIX
-              value: vllm-cache/v0.33.0-gemma4-31b-fp8-l40s
-          volumeMounts:
-            - name: vllm-cache
-              mountPath: /vllm-cache
-      containers:
-        - name: vllm
-          image: vllm/vllm-openai:v0.33.0
-          args:
-            - s3://$(MODEL_BUCKET)/models/gemma-4-31B-it-FP8-dynamic
-            - --served-model-name=gemma-4-31b
-            - --load-format=runai_streamer
-            - --language-model-only
-            - --max-model-len=16384
-            - --kv-cache-dtype=fp8
-            - --gpu-memory-utilization=0.90
-            - --enable-prefix-caching
-            - --scheduling-policy=priority
-            - --enable-auto-tool-choice
-            - --tool-call-parser=gemma4
-            - --reasoning-parser=gemma4
-          env:
-            - name: MODEL_BUCKET
-              valueFrom:
-                configMapKeyRef: {name: platform, key: MODEL_BUCKET}
-            - name: VLLM_CACHE_ROOT
-              value: /vllm-cache
-            - name: RUNAI_STREAMER_NO_BOTO3_SESSION
-              value: "0"
-            - name: HF_HUB_OFFLINE
-              value: "1"
-          startupProbe:
-            httpGet: {path: /health, port: http}
-            periodSeconds: 1
-            failureThreshold: 1800
-          volumeMounts:
-            - name: vllm-cache
-              mountPath: /vllm-cache
-      volumes:
-        - name: vllm-cache
-          hostPath:
-            path: /var/cache/vllm
-            type: DirectoryOrCreate</code></pre></div>
-<p>이 매니페스트에서 시작 시간을 줄이는 부분은 두 곳입니다. <code>--load-format=runai_streamer</code>는 가중치를 읽는 경로를 바꾸고 <code>cache-restore</code> initContainer와 <code>VLLM_CACHE_ROOT</code>는 compile 캐시를 두는 위치를 바꿉니다. 그림 3은 두 경로를 기준 구성과 나란히 보여 줍니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig03-supply-paths.png" alt="가중치와 compile 캐시가 GPU 노드에 올라가는 경로를 기준 구성과 최적화 구성으로 견준 도식. 가중치는 Mountpoint for Amazon S3와 vLLM 기본 로더를 거치면 59.6초, runai_streamer로 S3에서 GPU 메모리로 스트리밍하면 19.2초가 걸렸고, compile 캐시는 컨테이너 안에 두면 파드와 함께 사라져 엔진 초기화가 95.5초, 노드의 hostPath나 S3 prefix에 두면 23.7초였다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 가중치를 읽는 두 경로(위)와 compile 캐시를 두는 세 위치(아래). 시간은 Gemma 4 31B의 콜드 스타트에서 한 번 잰 값이고 S3 prefix의 <code>&lt;구성&gt;</code>은 vLLM 버전, 모델, 정밀도, GPU를 이은 이름입니다</figcaption></figure>
-<p>vLLM 문서에 따르면 Run:ai Model Streamer는 텐서를 동시에 읽으면서 GPU 메모리로 스트리밍하는 라이브러리입니다. <code>--load-format=runai_streamer</code>를 주고 모델 인자에 <code>s3://</code> 경로를 적으면 safetensors 파일을 S3에서 바로 읽습니다. 가중치를 노드의 디스크에 먼저 내려받는 단계가 없고 설정과 토크나이저 파일만 로컬 캐시로 받습니다. 이미지에는 runai-model-streamer 0.17.1이 들어 있었습니다.</p>
-<p><code>HF_HUB_OFFLINE=1</code>은 서빙 파드가 Hugging Face에서 내려받으려 하면 실패하게 만듭니다. 설정이 틀렸을 때 조용히 외부에서 받아 오는 일을 막으려는 값입니다.</p>
-<p>로더의 동시성과 청크 크기는 기본값으로 두었습니다. EKS 사용 설명서에는 모델 크기에 맞춰 <code>--model-loader-extra-config</code>의 <code>concurrency</code>와 <code>RUNAI_STREAMER_CHUNK_BYTESIZE</code>를 조정하는 방법이 있습니다. 조정했을 때의 값은 재지 않았습니다.</p>
-</div></section>
-
-<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>엔진 초기화를 줄인 compile 캐시의 게시와 복원</h2></header><div class="prose">
-<p>엔진 초기화는 95.5초에서 23.7초가 됐고 줄어든 시간의 대부분은 <code>torch.compile</code>입니다. 한 번 만든 컴파일 결과를 노드와 Amazon S3에 남겨 다음 시작에서 다시 사용하게 했습니다.</p>
-<p>vLLM은 요청을 받기 전에 모든 컴파일을 끝냅니다. 그래서 <code>torch.compile</code>에 걸리는 시간은 그대로 시작 시간에 들어갑니다. 컴파일 결과는 캐시 루트 아래 <code>torch_compile_cache/</code>에 저장됩니다. vLLM 문서에 따르면 이 디렉터리를 통째로 배포 환경에 복사해 컴파일 시간을 줄일 수 있습니다. 이 방법을 따라 캐시를 두 곳에 두었습니다.</p>
-<p>노드에는 hostPath(<code>/var/cache/vllm</code>)를 두고 <code>VLLM_CACHE_ROOT</code>로 vLLM이 그 경로에 캐시를 저장하게 했습니다. 파드가 다시 떠도 노드가 같으면 캐시가 남습니다. EKS 사용 설명서는 이 hostPath를 인스턴스 스토어의 마운트 지점 아래에 두는 것을 권장합니다. 이 환경은 위 경로를 사용했고 경로에 따른 차이는 재지 않았습니다.</p>
-<p>S3에는 새 노드를 위한 사본을 둡니다. 모델이 한 번 기동해 캐시가 생기면 캐시 게시 Job이 노드의 캐시 디렉터리를 S3 prefix로 올립니다. Job은 podAffinity로 vLLM 파드와 같은 노드에 스케줄되고 GPU를 요청하지 않습니다. 이미지는 노드에 이미 있는 vLLM 이미지를 사용합니다. 새 노드에서는 vLLM 파드의 initContainer(초기화 컨테이너) <code>cache-restore</code>가 그 prefix를 hostPath로 내려받습니다. 같은 크기로 이미 있는 파일은 건너뛰고 prefix가 비어 있으면 아무것도 하지 않고 끝납니다.</p>
+<p>BFF는 답을 기준값 0.6과 견줍니다. <code>route</code>는 선택의 신뢰도를 그대로 보고 <code>policy</code>는 확률이 0.5에서 떨어진 정도를 신뢰도로 봅니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>모델</th><th>S3 prefix</th><th>객체 수</th><th>크기</th><th>새 노드에서 복원한 시간</th></tr>
+<tr><th>Decider 2B의 답</th><th>BFF의 처리</th><th>응답 헤더</th></tr>
 </thead>
 <tbody>
-<tr><td>Gemma 4 31B</td><td><code>vllm-cache/v0.33.0-gemma4-31b-fp8-l40s/</code></td><td class="num">522</td><td class="num">90.8MB</td><td class="num">3.3초</td></tr>
-<tr><td>Qwen3.8-27B</td><td><code>vllm-cache/v0.33.0-qwen38-27b-fp8-l40s/</code></td><td class="num">2,056</td><td class="num">216.7MB</td><td class="num">10초</td></tr>
+<tr><td>모델 선택과 개인정보 판단의 신뢰도가 모두 0.6 이상</td><td>Decider 2B가 고른 모델. 개인정보가 있다고 보면 Gemma 4 31B와 민감 표시. thinking은 확률 0.5 이상이면 켬</td><td><code>decider</code></td></tr>
+<tr><td>모델 선택의 신뢰도만 0.6 미만이고 개인정보가 없다는 판단은 0.6 이상</td><td>Gemma 4 31B, thinking 끔. 민감 정보 요청으로 다루지 않음</td><td><code>fallback</code>, <code>x-bff-sensitive: false</code></td></tr>
+<tr><td>응답 없음, 2초 초과, 개인정보 판단의 신뢰도가 0.6 미만, 개인정보가 있다는 판단</td><td>Gemma 4 31B, thinking 끔, 민감 정보 요청으로 다룸</td><td><code>fallback</code>, <code>x-bff-sensitive: true</code></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 9.</b> S3에 게시한 compile 캐시와 콜드 스타트 측정에서 initContainer가 복원한 시간</p>
-<p>prefix 이름에는 vLLM 버전, 모델, 정밀도, GPU를 넣었습니다. vLLM은 관련 설정과 PyTorch 설정, 모델의 forward 코드로 캐시 디렉터리를 정하므로 이 가운데 하나가 바뀌면 캐시가 맞지 않습니다. 2026년 11월 15일에 Qwen의 prefix caching을 끈 구성을 띄웠을 때가 그 경우였고 compile에 62.6초가 걸렸습니다. EKS 사용 설명서에 따르면 GPU 유형, 모델, PyTorch 버전이 다른 캐시는 구분해 저장해야 합니다. 구성을 바꾸면 새 prefix로 다시 게시합니다.</p>
-</div></section>
-
-<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>시작 실패를 막는 메모리와 프로브 설정</h2></header><div class="prose">
-<p>이 절의 설정은 시작 시간을 줄이지 않습니다. 대신 값이 맞지 않으면 엔진이 시작하지 못하거나 Ready 판정이 실제 상태와 어긋납니다.</p>
-<h3>gpu-memory-utilization과 KV 캐시</h3>
-<p><code>--gpu-memory-utilization</code>은 vLLM이 GPU 메모리의 얼마까지를 사용할지 정합니다. 가중치와 추론 중의 활성값이 차지하는 몫을 빼고 남은 메모리가 KV 캐시가 되므로 가중치가 큰 체크포인트일수록 이 값에 민감합니다.</p>
+<p class="cap"><b>표 6.</b> Decider 2B의 답에 따른 BFF의 처리(2026년 11월 17일부터의 동작)</p>
+<p>기본값이 둘로 나뉜 이유는 일반 질문에 있습니다. 상담도 코딩도 아닌 일반 질문은 두 선택지 어디에도 뚜렷이 들지 않아 모델 선택의 신뢰도가 낮게 나옵니다. 그 이유만으로 민감 정보 요청이 되면 뒤에서 설명할 웹 검색 도구가 빠지므로 개인정보가 없다는 판단을 얻은 요청은 민감 정보 요청으로 다루지 않게 했습니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>항목</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
+<tr><th>요청</th><th>모델 선택 (신뢰도)</th><th>개인정보일 확률</th><th>추론이 필요할 확률</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--gpu-memory-utilization</code></td><td class="num">0.90</td><td class="num">0.90</td></tr>
-<tr><td>목표 메모리 (전체 44.39GiB 기준)</td><td class="num">39.95GiB</td><td class="num">39.95GiB</td></tr>
-<tr><td>가중치와 비 torch 메모리</td><td class="num">31.13GiB</td><td class="num">34.74GiB</td></tr>
-<tr><td>활성값 최대</td><td class="num">3.45GiB</td><td class="num">2.76GiB</td></tr>
-<tr><td>CUDA graph</td><td class="num">0.35GiB</td><td class="num">0.58GiB</td></tr>
-<tr><td>KV 캐시 메모리</td><td class="num">5.37GiB</td><td class="num">2.46GiB</td></tr>
-<tr><td>KV 캐시 크기</td><td class="num">34,052 토큰</td><td class="num">42,780 토큰</td></tr>
-<tr><td><code>--max-model-len</code> 길이 요청으로 환산</td><td class="num">2.08개 (16,384 토큰)</td><td class="num">1.31개 (32,768 토큰)</td></tr>
+<tr><td>주문한 운동화 배송 문의</td><td>gemma (0.95)</td><td class="num">0.06</td><td class="num">0.34</td></tr>
+<tr><td>파이썬 함수 수정</td><td>qwen (0.85)</td><td class="num">0.08</td><td class="num">0.59</td></tr>
+<tr><td>이름, 연락처, 주소가 든 배송지 변경</td><td>gemma (0.57)</td><td class="num">0.72</td><td class="num">0.29</td></tr>
+<tr><td>요금제 비교 계산</td><td>gemma (0.30)</td><td class="num">0.05</td><td class="num">0.54</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 10.</b> 기동 로그에 기록된 GPU 메모리 배분(2026년 11월 14일 첫 기동, 한 번)</p>
-<p>Gemma는 0.90으로 첫 시도에 시작됐습니다. Qwen은 처음 값인 0.85로는 엔진이 시작하지 못했습니다. 가중치가 34.39GiB를 차지해 KV 캐시에 0.24GiB만 남았습니다. vLLM은 최대 길이(32,768 토큰) 요청 하나에 KV 캐시 1.87GiB가 필요하다는 오류를 냈습니다. 남은 메모리가 이 정도면 <code>--max-model-len</code>을 줄여서는 해결되지 않습니다. 0.90으로 올리자 sleep mode를 켠 채로 시작됐고 KV 캐시 2.46GiB를 얻었습니다.</p>
-<p>두 모델 모두 KV 캐시가 작습니다. 이 크기가 동시에 처리하는 요청 수와 처리량을 어떻게 정하는지는 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서 다룹니다.</p>
-<h3>그 밖의 플래그와 프로브</h3>
-<p>엔진 플래그는 시작 시간보다 서빙 동작을 정하지만 시작 실패의 원인이 되는 것이 있어 함께 적습니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>설정</th><th>적용 대상</th><th>이유</th></tr>
-</thead>
-<tbody>
-<tr><td><code>--language-model-only</code></td><td>Gemma</td><td>멀티모달 입력 한도를 0으로 두고 언어 모델만 사용. 체크포인트 카드의 평가 재현 명령에도 있는 플래그</td></tr>
-<tr><td><code>--max-num-seqs=32</code></td><td>Qwen</td><td>하이브리드 모델은 이 값이 Mamba 캐시 블록 수보다 크면 엔진이 시작하지 못함</td></tr>
-<tr><td><code>--kv-cache-dtype=fp8</code></td><td>둘 다</td><td>KV 캐시를 FP8로 저장해 GPU 메모리 사용을 줄임</td></tr>
-<tr><td><code>--scheduling-policy=priority</code></td><td>둘 다</td><td>요청 본문의 <code>priority</code>로 처리 순서를 정함(3부)</td></tr>
-<tr><td><code>--speculative-config</code> (MTP, 추측 토큰 3개)</td><td>Qwen</td><td>모델의 MTP 헤드로 speculative decoding(2부)</td></tr>
-<tr><td><code>--enable-sleep-mode</code>, <code>VLLM_SERVER_DEV_MODE=1</code></td><td>Qwen</td><td><code>/sleep</code>, <code>/wake_up</code>, <code>/is_sleeping</code> 엔드포인트를 등록(3부)</td></tr>
-<tr><td><code>startupProbe</code> 주기 1초, 실패 허용 1,800회</td><td>둘 다</td><td>Ready 시각을 1초 단위로 잡고 최대 30분을 기다림</td></tr>
-<tr><td><code>progressDeadlineSeconds: 1800</code></td><td>둘 다</td><td>기본값 600초는 콜드 스타트보다 짧을 수 있음</td></tr>
-<tr><td><code>strategy: Recreate</code></td><td>둘 다</td><td>GPU 한 장을 파드 하나가 사용하므로 기존 파드를 먼저 내림</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 11.</b> 시작 시간이나 시작 성공 여부에 영향을 주는 설정. 괄호 안은 그 동작을 다루는 편입니다</p>
-<p>Qwen의 readinessProbe는 <code>/health</code>가 아닌 <code>/is_sleeping</code>을 확인합니다. <code>/health</code>는 sleep 중에도 200을 돌려주므로 잠든 파드가 트래픽을 받지 않게 하려면 sleep 상태를 직접 봐야 합니다.</p>
+<p class="cap"><b>표 7.</b> Decider 2B에 직접 보낸 예시 요청의 답(2026년 11월 14일, 요청마다 한 번). 정확도를 평가한 값은 아닙니다.</p>
+<p>판단에 걸리는 시간은 질문 하나에 약 70ms입니다. 게이트웨이를 거쳐 질문을 하나씩 50회 보낸 중앙값은 72.6ms에서 73.0ms였습니다(2026년 11월 14일). BFF가 질문 3개를 한 요청에 담아 보낸 왕복은 139.4ms에서 150.0ms였습니다(2026년 11월 15일, 4건). 세션의 첫 요청에서 한 번만 묻기 때문에 이 시간은 메시지마다 더해지지 않습니다. 업무 종류를 헤더로 보낸 요청의 판단 시간은 중앙값 0.1ms였습니다(2026년 11월 15일, 모델마다 20건).</p>
+<h3>게이트웨이의 풀 선택과 Qwen3.8-27B 깨우기</h3>
+<p>결정이 나면 BFF는 그 결과를 요청에 적어 게이트웨이로 보냅니다. 본문의 <code>model</code>과 <code>priority</code>, <code>chat_template_kwargs.enable_thinking</code>, 그리고 헤더 <code>x-llm-d-inference-objective</code>입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># BFF가 게이트웨이로 보내는 요청 (발췌)
+x-llm-d-inference-objective: gemma-interactive
+
+{"model": "gemma-4-31b", "priority": 0, "chat_template_kwargs": {"enable_thinking": false}, "messages": [...], "stream": true}</code></pre></div>
+<p>게이트웨이 계층은 <a href="https://gateway-api-inference-extension.sigs.k8s.io/" target="_blank" rel="noopener">Gateway API Inference Extension</a>(GAIE)으로 구성했습니다. GAIE는 Kubernetes Gateway API에 추론용 리소스를 더하는 프로젝트입니다. InferencePool은 모델 서버 파드의 묶음이고 EPP(Endpoint Picker)는 풀 안에서 요청을 받을 파드를 고릅니다. OpenAI 호환 API에서 모델 이름은 URL이 아닌 본문에 있으므로 게이트웨이 구현체인 agentgateway가 본문의 <code>model</code> 값을 헤더로 옮깁니다. HTTPRoute는 그 헤더로 모델의 InferencePool을 고릅니다. 등록하지 않은 <code>model</code> 값은 404입니다. 모델의 풀로 가는 경로는 <code>/v1/chat/completions</code>와 <code>/v1/models</code>뿐이어서 <code>/sleep</code> 같은 관리 경로는 게이트웨이로 노출되지 않습니다. EPP의 스케줄링 시간은 요청당 0.03ms였습니다(2026년 11월 14일).</p>
+<p>우선순위는 두 곳에 전달됩니다. 헤더의 objective 이름은 게이트웨이가 풀이 포화됐을 때 배치 요청을 거절하는 데 사용하고 본문의 <code>priority</code>는 vLLM이 대기열에서 먼저 처리할 요청을 고르는 데 사용합니다. 배치 부하가 걸린 상태에서 상담 요청의 TTFT 중앙값은 30.9초였고 엔진 우선순위를 켜자 0.19초가 됐습니다(2026년 11월 14일, Gemma 4 31B). 구성과 측정은 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서 설명합니다.</p>
+<p>Qwen3.8-27B로 가는 요청에는 한 가지 일이 더 있습니다. 내부 업무용인 Qwen3.8-27B는 업무 시간 밖에는 vLLM의 sleep mode로 재우도록 구성했습니다. 그래서 BFF는 Qwen 요청마다 깨우기 API를 먼저 호출합니다. 깨어 있을 때는 확인만 하고 중앙값 12.8ms가 걸렸습니다(2026년 11월 15일, 20건). 잠들어 있을 때는 깨우기에 3,662ms가 걸렸고 그 요청의 첫 내용은 4.06초에 도착했습니다(같은 날, 1건). 응답 헤더 <code>x-bff-timing</code>의 <code>woke</code>와 <code>wake_ms</code>가 이 값입니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>한 번씩 잰 값의 한계</h2></header><div class="prose">
-<p>모든 시나리오는 한 번씩 쟀습니다. 반복했을 때의 편차는 재지 않았고 특히 노드 프로비저닝은 같은 날에도 55초에서 118초까지 달랐습니다. 이 글의 값을 다른 환경의 예상치로 사용하기보다 같은 방법으로 직접 재는 것을 권고합니다.</p>
-<p>Qwen3.8-27B의 기준 구성은 재지 않았으므로 Qwen에서 줄어든 폭은 알 수 없습니다. 기타 구간은 전체에서 네 구간을 뺀 값이라 안쪽을 더 나누지 못했습니다. 로더의 동시성 조정, hostPath의 위치, block FP8 체크포인트의 커널과 성능도 확인하지 않았습니다.</p>
-<p>측정 조건으로 적어 둘 것도 있습니다. 콜드 시나리오마다 이전 GPU 노드를 지우는 데 6분 30초쯤 걸렸고 이 시간은 시작 시간에 넣지 않았습니다. GPU 노드에는 Amazon GuardDuty 에이전트가 함께 떠 있었고 기준 구성에서는 Mountpoint 파드가 새 노드에 함께 떴습니다. 네 시나리오 모두 컨테이너 재시작은 없었습니다.</p>
-</div></section>
-
-<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>상황별 적용 기준</h2></header><div class="prose">
-<p>같은 방법을 적용하려면 먼저 구간별로 재는 것을 권고합니다. NodeClaim과 파드의 시각, kubelet의 <code>Pulled</code> 이벤트, vLLM 로그의 두 줄이면 네 구간이 나오고 어느 구간이 긴지에 따라 손댈 곳이 달라집니다. 표 12에 상황별로 먼저 검토할 조치와 이 환경에서 확인한 조건을 정리했습니다.</p>
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>토큰화와 추론 (3, 5단계)</h2></header><div class="prose">
+<p>모델이 정해지면 요청은 그 모델의 vLLM 파드에 도착합니다. 3단계에서 vLLM의 API 서버는 메시지 목록에 chat template을 적용해 하나의 문자열로 만들고 그 모델의 토크나이저로 토큰 ID로 바꿉니다. 입력과 출력을 합친 길이의 한도는 <code>--max-model-len</code>이고 Gemma 4 31B는 16,384토큰, Qwen3.8-27B는 32,768토큰으로 설정했습니다. 토큰화에 걸린 시간은 따로 측정하지 않았습니다.</p>
+<p>5단계의 추론은 2개 구간으로 나뉩니다.</p>
+<ul>
+<li>Prefill: 입력 토큰 전체를 한 번에 계산하고 결과를 KV 캐시에 기록합니다. KV 캐시는 이미 계산한 토큰의 중간 결과를 GPU 메모리에 보관해 다음 토큰을 만들 때 다시 계산하지 않게 하는 저장 공간입니다.</li>
+<li>Decode: KV 캐시를 다시 사용하면서 토큰을 하나씩 만듭니다. 만든 토큰은 바로 Chunk로 나갑니다.</li>
+</ul>
+<p>2개 구간은 각각 다른 지표로 드러납니다. TTFT(Time To First Token)는 첫 토큰까지의 시간이고 대부분 Prefill입니다. ITL(Inter-Token Latency)은 스트리밍 Chunk 사이의 간격이고 Decode의 속도입니다. TPOT(Time Per Output Token)은 출력 토큰 하나당 시간입니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>상황</th><th>먼저 검토할 조치</th><th>이 환경에서 줄어든 시간</th><th>적용 조건과 한계</th></tr>
+<tr><th>지표</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
 </thead>
 <tbody>
-<tr><td>가중치를 Amazon S3에 두고 마운트한 경로로 읽음</td><td>스트리밍 로더(<code>--load-format=runai_streamer</code>)와 EKS Pod Identity</td><td>가중치 로드 59.6초에서 19.2초</td><td>로더의 동시성과 청크 크기는 기본값. 조정했을 때의 값은 재지 않음</td></tr>
-<tr><td>같은 노드에서 파드를 다시 띄우는 일이 잦음</td><td>compile 캐시를 노드의 hostPath에 보존(<code>VLLM_CACHE_ROOT</code>)</td><td>엔진 초기화 95.6초에서 23.7초</td><td>노드가 바뀌면 캐시가 없음</td></tr>
-<tr><td>새 노드가 자주 뜸</td><td>compile 캐시의 S3 게시와 initContainer 복원, 이미지 사전 pull</td><td>엔진 초기화 95.5초에서 23.7초, 이미지 pull 111.1초에서 71.0초</td><td>vLLM 버전, 모델, 정밀도, GPU 가운데 하나가 바뀌면 새 prefix로 다시 게시</td></tr>
-<tr><td>업무 시간 밖에 GPU 메모리만 비우면 됨</td><td>sleep과 깨우기로 파드 유지</td><td>복귀 3.70초와 3.67초(웜 재시작은 123초)</td><td>노드와 파드가 남으므로 노드는 회수하지 못함</td></tr>
+<tr><td>TTFT 중앙값 (p99)</td><td class="num">81.3ms (86.6ms)</td><td class="num">167.6ms (210.4ms)</td></tr>
+<tr><td>ITL 중앙값 (p99)</td><td class="num">54.0ms (57.7ms)</td><td class="num">69.8ms (74.3ms)</td></tr>
+<tr><td>TPOT 중앙값</td><td class="num">53.9ms</td><td class="num">26.6ms</td></tr>
+<tr><td>생성 속도</td><td class="num">초당 18.5토큰</td><td class="num">초당 32.5토큰</td></tr>
+<tr><td>128토큰 응답의 전체 시간</td><td class="num">6,927.8ms</td><td class="num">3,554.7ms</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 12.</b> 상황별로 먼저 검토할 조치. 줄어든 시간은 Gemma 4 31B에서, sleep 복귀는 Qwen3.8-27B에서 잰 값입니다</p>
-<p>노드 프로비저닝과 기타는 이 조치들로 줄지 않습니다. 최적화 구성에서는 두 구간이 260초 가운데 146.1초이고 노드 프로비저닝은 같은 날에도 55초에서 118초까지 달랐습니다. 목표로 하는 시작 시간이 이보다 짧다면 파드를 다시 띄우지 않는 sleep 복귀가 이 글에서 확인한 유일한 대안입니다.</p>
-<p><a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서는 이렇게 띄운 두 모델이 L40S 한 장에서 동시에 몇 건을 처리하는지를 SLO 기준으로 잽니다.</p>
+<p class="cap"><b>표 8.</b> 요청 하나의 추론 시간(2026년 11월 14일, 입력 256토큰과 출력 128토큰, 동시성 1, vLLM의 Service를 직접 호출한 요청 16건을 한 번 실행한 값)</p>
+<p>응답 하나의 전체 시간은 두 지표로 계산됩니다. Gemma 4 31B의 값을 넣으면 측정한 6,927.8ms와 맞습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>전체 시간 ≒ TTFT + (출력 토큰 수 - 1) × TPOT
+          = 81.3ms + 127 × 53.91ms ≒ 6,928ms</code></pre></div>
+<p>출력이 길수록 전체 시간은 Decode가 정합니다. 입력이 길면 TTFT가 늘어납니다. Gemma 4 31B의 TTFT p99는 입력 256토큰에서 86.6ms, 4,096토큰에서 1,093ms였습니다.</p>
+<p>Qwen3.8-27B는 ITL이 더 긴데도 생성 속도가 빠릅니다. Qwen3.8-27B는 다음 토큰 여러 개를 미리 추측하는 MTP(Multi-Token Prediction)를 켜 두어 Chunk 하나에 여러 토큰이 담겨 옵니다. 그래서 Chunk 간격은 69.8ms이고 토큰 하나당 시간은 26.6ms입니다.</p>
+<p>한 GPU가 동시에 실행하는 요청 수는 KV 캐시 크기에 묶입니다. L40S의 GPU 메모리에서 가중치를 올리고 남은 공간이 KV 캐시가 됩니다. 표 8과 같은 워크로드로 동시성을 올렸을 때 Gemma 4 31B는 45건, Qwen3.8-27B는 3건까지 동시에 실행했습니다. 이 한도의 원인과 조정 방법은 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서 다룹니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>후처리와 Web Search 도구 (6단계)</h2></header><div class="prose">
+<h3>텍스트 복원과 parser</h3>
+<p>vLLM은 생성한 토큰 ID를 텍스트로 되돌리고(Detokenize) 두 가지를 답변에서 분리합니다. Reasoning parser는 추론 과정을 <code>reasoning_content</code>로 분리하고 Tool-call parser는 도구 호출을 <code>tool_calls</code>로 추출합니다. Gemma 4 31B는 <code>gemma4</code>, Qwen3.8-27B는 <code>qwen3</code>과 <code>qwen3_coder</code> parser를 사용합니다. 스트리밍 중에는 이 처리가 Chunk마다 함께 진행됩니다. 응답의 <code>finish_reason</code>이 <code>tool_calls</code>이면 모델이 답변 대신 도구 실행을 요청했다는 뜻입니다. 출력 안전 필터는 이 환경에 두지 않았습니다.</p>
+<h3>Web Search 도구의 흐름</h3>
+<p>웹 검색은 8개 단계 가운데 하나가 아닙니다. 요청이 켰을 때만 6단계에서 5단계로 다시 가는 선택 경로입니다. 추론은 그대로 Gemma 4 31B와 Qwen3.8-27B가 하고 검색만 <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/web-search-api.html" target="_blank" rel="noopener">Amazon Bedrock AgentCore Web Search</a>가 맡습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig03-web-search-flow.png" alt="웹 검색 도구가 실행되는 순서를 브라우저, BFF, 모델, AgentCore Web Search의 4개 줄로 그린 인포그래픽. 요청이 x-web-search: on을 보내면 BFF가 도구 정의와 지시문을 넣고 모델이 web_search를 호출하면 BFF가 us-east-1의 InvokeWebSearch를 실행해 결과 5건에 출처 번호를 매겨 돌려주며 모델이 번호를 넣어 답하면 화면이 출처 목록을 함께 표시한다. 도구를 넣는 조건과 검색 시간, 입력 토큰, 요금을 함께 적었다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> Web Search 도구의 흐름. 왼쪽은 도구를 넣는 조건과 측정값이고 오른쪽은 한 요청 안에서 일어나는 순서입니다.</figcaption></figure>
+<ol>
+<li>요청이 <code>x-web-search: on</code> 헤더를 보내면 BFF가 모델 요청에 <code>web_search</code> 도구 정의와 지시문(오늘 날짜, 출처 번호 규칙)을 넣습니다.</li>
+<li>검색할지와 무엇을 검색할지는 모델이 정합니다. 모델이 <code>web_search(query)</code>를 호출하면 그 응답은 <code>finish_reason: tool_calls</code>로 끝납니다.</li>
+<li>BFF가 <code>InvokeWebSearch</code> API를 호출합니다. 검색어에 주민등록번호나 카드번호 형식이 있으면 그 검색은 보내지 않습니다.</li>
+<li>BFF가 결과 5건에 출처 번호를 매기고 본문을 1,200자까지 잘라 모델에 돌려줍니다. 주소가 없는 결과는 버립니다.</li>
+<li>모델이 결과를 읽고 <code>[1]</code>, <code>[2]</code> 같은 번호를 넣어 답합니다. 엔진은 결과가 더해진 요청을 Prefill부터 다시 처리합니다.</li>
+<li>모델이 도구를 호출할 수 있는 차례는 3번입니다. 세 번째 뒤에는 BFF가 <code>tool_choice: none</code>으로 보내 그때까지의 결과로 답하게 합니다.</li>
+</ol>
+<p>BFF는 검색할 때마다 SSE 주석 줄로 검색어와 출처 목록을 알립니다. OpenAI 형식의 클라이언트는 주석 줄을 무시하고 확인용 페이지는 이 목록을 답변 아래에 링크로 표시합니다. 이용 조건이 검색 결과를 사용한 출력에 출처와 링크를 표시하도록 요구하므로 모델이 번호를 빠뜨려도 목록은 항상 보이게 했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>: bff {"event":"tool_call","name":"web_search","ms":&lt;ms&gt;,"query":"...","search_ms":&lt;ms&gt;,"sources":[{"n":1,"title":"...","url":"https://...","published_at":"..."}]}</code></pre></div>
+<p>도구를 넣을지는 표 9의 조건으로 정하고 결과는 응답 헤더 <code>x-bff-search</code>에 담깁니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th><code>x-bff-search</code></th><th>뜻</th></tr>
+</thead>
+<tbody>
+<tr><td><code>on</code></td><td>모델 요청에 웹 검색 도구를 넣음</td></tr>
+<tr><td><code>off</code></td><td>요청이 켜지 않았거나, 성능 평가 요청이거나, 요청이 자기 <code>tools</code>를 가져옴</td></tr>
+<tr><td><code>sensitive</code></td><td>민감 정보 요청이라 넣지 않음</td></tr>
+<tr><td><code>fallback</code></td><td>기본값으로 보낸 요청 가운데 개인정보가 없다는 판단을 얻지 못해 넣지 않음</td></tr>
+<tr><td><code>disabled</code></td><td>이 환경에 웹 검색이 설정되지 않음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 9.</b> 응답 헤더 <code>x-bff-search</code>의 값</p>
+<p>민감 정보 요청에 도구를 넣지 않는 이유는 리전에 있습니다. 이 API는 서울 리전에서 제공되지 않아 BFF가 us-east-1의 API를 호출하고 검색어는 서울 리전 밖으로 나갑니다. 호출 권한은 BFF 파드에 EKS Pod Identity로 연결한 IAM 역할에 <code>bedrock-agentcore:InvokeWebSearch</code> 하나만 주었고 자격 증명은 코드에 없습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>값</th><th>조건</th></tr>
+</thead>
+<tbody>
+<tr><td>검색 1회의 시간 (작업 장비에서 호출)</td><td>481ms에서 1,065ms</td><td>서울의 작업 장비에서 us-east-1을 6회 호출</td></tr>
+<tr><td>검색 1회의 시간 (BFF 파드에서 호출)</td><td>547.9ms, 594.9ms</td><td>2026년 11월 17일, 요청 2건</td></tr>
+<tr><td>검색 결과가 더해진 입력</td><td>Gemma 4 31B 2,606토큰, Qwen3.8-27B 4,328토큰</td><td>각각 검색 1회와 2회, 결과 5건씩</td></tr>
+<tr><td>요금과 기본 할당량</td><td>쿼리 1,000건당 7.00 USD, 초당 10건</td><td>계정과 리전 기준</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 10.</b> 웹 검색의 측정값과 한도. 요금은 2026년 11월 15일에 확인한 공개 단가입니다.</p>
+<p>검색을 사용한 요청은 첫 내용이 늦게 도착합니다. 모델이 도구 호출을 생성하는 시간, 검색, 결과를 넣은 두 번째 추론의 Prefill이 모두 첫 내용 앞에 놓이기 때문입니다. 같은 흐름을 Qwen3.8-27B로 직접 실행했을 때 첫 차례는 2.6초, 결과 10건을 읽고 답한 두 번째 차례는 12.1초였습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>응답 전달과 비용 (7단계)</h2></header><div class="prose">
+<p>BFF는 게이트웨이에서 받은 SSE Chunk를 모으지 않고 받은 그대로 전달합니다. 중간에서 응답이 모이면 글자가 한꺼번에 나타나 스트리밍의 의미가 사라집니다. 그래서 CloudFront의 <code>/v1/*</code> 동작은 캐시와 압축을 껐습니다. 2026년 11월 15일에 상담 요청 하나를 CloudFront 주소로 보냈을 때 내용이 담긴 이벤트 53개가 간격 중앙값 53.5ms로 하나씩 도착했습니다. 1ms 안에 연달아 온 이벤트는 없었습니다. 이 간격은 표 8의 Gemma 4 31B ITL과 같은 수준입니다.</p>
+<p>스트리밍 응답은 첫 토큰 전에 수 초 동안 아무것도 흐르지 않을 수 있고 그 뒤로는 수십 ms 간격으로 Chunk가 이어집니다. 경로의 타임아웃은 이 2개 구간에 맞춰야 합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>설정</th><th>값</th><th>근거</th></tr>
+</thead>
+<tbody>
+<tr><td>CloudFront 오리진 응답 타임아웃</td><td>60초 (기본 30초)</td><td>첫 바이트까지, 그리고 패킷 사이에 기다리는 시간</td></tr>
+<tr><td>ALB 유휴 제한 시간</td><td>120초 (기본 60초)</td><td>CloudFront가 먼저 끊도록 그보다 길게 설정</td></tr>
+<tr><td>HTTPRoute의 요청 타임아웃</td><td>300초</td><td>4,096토큰 출력이 이 안에 끝남(Gemma 4 31B는 약 3분)</td></tr>
+<tr><td>Decider 2B 호출</td><td>2초</td><td>넘으면 기본값으로 처리</td></tr>
+<tr><td>깨우기 API 호출</td><td>60초</td><td>측정한 복귀 시간은 3.66초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 11.</b> 스트리밍 경로의 타임아웃 설정</p>
+<p>사용량은 응답에 함께 옵니다. 요청에 <code>stream_options.include_usage</code>를 넣으면 마지막 Chunk의 <code>usage</code>에 입력과 출력 토큰 수가 담깁니다. 다만 이 환경에는 토큰 단가가 없습니다. 비용은 GPU 노드가 떠 있는 시간에 발생하고 이 환경의 고정 비용은 시간당 약 10.05 USD로 추정됩니다. 출력이 길어져도 요금은 늘지 않지만 그 요청이 GPU를 점유하는 시간이 늘어납니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>기록과 관측 (8단계)</h2></header><div class="prose">
+<p>요청이 지난 구간마다 기록이 남습니다. 표 12의 기록을 요청 ID(<code>x-request-id</code>)와 <code>X-Amzn-Trace-Id</code>로 이으면 요청 하나의 구간별 시간을 얻습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>구간</th><th>기록</th><th>확인 방법</th></tr>
+</thead>
+<tbody>
+<tr><td>CloudFront</td><td>응답 헤더 <code>Server-Timing</code></td><td>응답 헤더에서 엣지와 오리진의 시간 확인</td></tr>
+<tr><td>내부 ALB</td><td>접근 로그</td><td>Amazon S3 버킷의 로그 파일</td></tr>
+<tr><td>BFF</td><td>파드의 표준 출력 (<code>chat</code>, <code>chat_end</code> 이벤트)</td><td><code>kubectl -n app logs -l app.kubernetes.io/name=bff</code></td></tr>
+<tr><td>게이트웨이, EPP</td><td>Prometheus 지표</td><td>Amazon Managed Service for Prometheus</td></tr>
+<tr><td>vLLM</td><td>Prometheus 지표</td><td><code>vllm:time_to_first_token_seconds</code>, <code>vllm:inter_token_latency_seconds</code>, <code>vllm:num_requests_waiting</code>, <code>vllm:kv_cache_usage_perc</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 12.</b> 구간별 기록과 확인 방법</p>
+<p>지표는 Prometheus v3.16.0을 agent 모드로 하나 실행해 모읍니다. vLLM 파드 2개는 5초, EPP 파드 4개와 게이트웨이 파드 2개는 15초 주기로 수집해 Amazon Managed Service for Prometheus로 보냅니다.</p>
+<p>브라우저나 클라이언트에서 알 수 있는 것과 없는 것은 나뉩니다. 응답 헤더가 도착한 시간, <code>x-bff-timing</code>, <code>Server-Timing</code>, 첫 Chunk까지의 시간, Chunk 간격, 전체 시간, <code>usage</code>는 클라이언트가 직접 봅니다. 대기열, Prefill, 후처리의 시간은 클라이언트에 보이지 않으므로 vLLM 지표로 확인해야 합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>첫 내용까지의 시간 가운데 77%와 83%는 vLLM</h2></header><div class="prose">
+<p>8개 단계를 모두 지난 요청에서 구간마다 시간이 얼마나 쓰였는지 측정했습니다. 서울 리전의 Amazon EC2 인스턴스에서 CloudFront 주소로 요청을 하나씩 보냈고 모델마다 20건입니다. Gemma 4 31B에는 상담 업무의 짧은 질문을, Qwen3.8-27B에는 코딩 업무의 짧은 질문을 보냈습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>구간</th><th>Gemma 4 31B 중앙값</th><th>Gemma 4 31B 최대</th><th>Qwen3.8-27B 중앙값</th><th>Qwen3.8-27B 최대</th></tr>
+</thead>
+<tbody>
+<tr><td>사용자와 엣지 사이</td><td class="num">1.8ms</td><td class="num">3.2ms</td><td class="num">1.9ms</td><td class="num">5.0ms</td></tr>
+<tr><td>CloudFront</td><td class="num">5.0ms</td><td class="num">79.0ms</td><td class="num">5.0ms</td><td class="num">9.0ms</td></tr>
+<tr><td>ALB</td><td class="num">1.6ms</td><td class="num">4.2ms</td><td class="num">1.6ms</td><td class="num">12.7ms</td></tr>
+<tr><td>BFF</td><td class="num">0.1ms</td><td class="num">0.1ms</td><td class="num">12.8ms</td><td class="num">21.9ms</td></tr>
+<tr><td>게이트웨이 (agentgateway, EPP)</td><td class="num">9.7ms</td><td class="num">16.4ms</td><td class="num">8.4ms</td><td class="num">78.0ms</td></tr>
+<tr><td>vLLM</td><td class="num">63.2ms</td><td class="num">66.6ms</td><td class="num">147.6ms</td><td class="num">160.0ms</td></tr>
+<tr><td>사용자가 본 첫 내용</td><td class="num">81.9ms</td><td class="num">153.6ms</td><td class="num">177.5ms</td><td class="num">253.1ms</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 13.</b> 구간별 첫 내용까지의 시간(2026년 11월 15일, 요청을 하나씩, 모델마다 20건, 최대 출력 32토큰). 구간별 중앙값이므로 합이 마지막 행과 정확히 일치하지 않습니다.</p>
+<p>첫 내용까지의 시간은 대부분 vLLM이 사용합니다. Gemma 4 31B는 81.9ms 중 63.2ms(77%), Qwen3.8-27B는 177.5ms 중 147.6ms(83%)입니다. 그 시간은 거의 다 Prefill입니다. 요청을 하나씩 보냈으므로 대기열 시간은 0ms였고 Prefill이 각각 58.8ms와 144.4ms였습니다.</p>
+<p>vLLM 앞의 구간을 중앙값으로 더하면 Gemma 4 31B 18.2ms, Qwen3.8-27B 29.7ms입니다. Qwen 쪽이 긴 것은 BFF가 요청마다 깨우기 API를 호출하기 때문입니다. 인증, 모델 결정, 라우팅을 직접 구성한 계층이 더한 시간은 두 모델 모두 30ms 안쪽이었습니다.</p>
+<p>이 표는 3가지 조건에서 측정한 값입니다. 측정 장비가 같은 리전의 인스턴스여서 사용자와 엣지 사이의 시간이 짧습니다. 이미 열린 연결로 보낸 요청이며 TLS 연결을 새로 여는 데는 14.5ms와 14.2ms가 걸렸습니다. 요청을 하나씩 보냈으므로 부하가 걸렸을 때 더해지는 대기 시간은 들어 있지 않습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>응답 헤더를 읽는 순서와 증상별로 먼저 볼 단계</h2></header><div class="prose">
+<p>응답이 예상과 다를 때는 응답 헤더를 정해진 순서로 읽으면 살펴볼 단계가 좁혀집니다.</p>
+<ol>
+<li>오류 코드가 있으면 표 4에서 요청이 어디까지 갔는지 확인합니다.</li>
+<li><code>x-bff-model</code>과 <code>x-bff-decision</code>으로 어느 모델을 무엇으로 정했는지 확인합니다. <code>fallback</code>이면 <code>x-bff-reason</code>에 적힌 신뢰도를 봅니다.</li>
+<li>웹 검색을 켠 요청이면 <code>x-bff-search</code>가 <code>on</code>인지 확인합니다.</li>
+<li>느린 요청이면 <code>x-bff-timing</code>에서 판단, 깨우기, 게이트웨이의 응답 헤더까지의 시간을 나눠 봅니다. 3개 값이 모두 짧다면 남은 시간은 vLLM의 대기열과 Prefill입니다.</li>
+</ol>
+<p>증상별로 먼저 볼 곳은 표 14에 모았습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>증상</th><th>먼저 볼 곳</th><th>본문의 근거</th></tr>
+</thead>
+<tbody>
+<tr><td>한동안 모든 요청이 403</td><td>1단계의 AWS WAF</td><td>IP당 5분 300회. 첫 403까지 25.6초, 해제까지 300.4초</td></tr>
+<tr><td>401</td><td>1단계의 BFF</td><td>액세스 토큰의 유효 시간 60분. ID 토큰은 받지 않음</td></tr>
+<tr><td>예상과 다른 모델이 응답</td><td><code>x-bff-decision</code>, <code>x-bff-reason</code></td><td>민감 정보 규칙이 업무 종류보다 먼저. 세션의 결정은 30분 동안 재사용</td></tr>
+<tr><td>웹 검색을 켰는데 검색하지 않음</td><td><code>x-bff-search</code></td><td><code>sensitive</code>, <code>fallback</code>, <code>off</code>의 조건</td></tr>
+<tr><td>Qwen3.8-27B의 첫 내용이 수 초 늦음</td><td><code>x-bff-timing</code>의 <code>woke</code>, <code>wake_ms</code></td><td>잠든 상태에서 깨우기 3,662ms, 첫 내용 4.06초</td></tr>
+<tr><td>부하가 걸리면 첫 내용이 늦음</td><td>8단계의 <code>vllm:num_requests_waiting</code>, <code>vllm:kv_cache_usage_perc</code></td><td>동시에 실행하는 요청 수는 KV 캐시에 묶임</td></tr>
+<tr><td>글자가 한꺼번에 나타남</td><td>7단계의 경로 설정</td><td>캐시와 압축을 끈 경로에서 이벤트 간격 53.5ms</td></tr>
+<tr><td>긴 응답이 중간에 끊김</td><td>7단계의 타임아웃</td><td>CloudFront 60초, ALB 120초, HTTPRoute 300초</td></tr>
+<tr><td>배치 요청이 429</td><td>4단계의 게이트웨이</td><td>풀이 포화되면 우선순위가 낮은 요청을 거절</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 14.</b> 증상별로 먼저 볼 단계와 근거</p>
+<p>이 표의 근거에는 한계가 있습니다. 토큰화와 후처리의 시간은 따로 측정하지 않았습니다. 쿠키 고정으로 세션의 결정이 같은 파드에서 다시 사용되는 동작은 설정만 적었고 따로 확인하지 않았습니다. 응답이 60초 넘게 한 글자도 나오지 않는 경우의 동작도 재현하지 않았습니다. 대부분 한 번씩 측정한 값이어서 반복했을 때의 편차는 담겨 있지 않습니다. 각 구성 요소를 어떤 구조로 배치했고 시작 시간과 동시 처리량을 어떻게 조정했는지는 <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">2부</a>에서 이어집니다.</p>
 </div></section>
 </div>
 <div class="col l-en" lang="en">
-<section class="sec" id="en-s1"><header class="sec-head"><h2>Three of the phases inside 394 seconds got shorter</h2></header><div class="prose">
-<p>When you start a new LLM serving pod on a GPU node, it takes minutes before it can take requests. In this environment the Gemma 4 31B pod took 394 s from creation to Ready. Once the node is ready, a 9.7 GB container image is pulled and more than 30 GiB of weights are loaded into GPU memory. The engine then has to compile its computation graph before the pod turns Ready.</p>
-<p>The measurement started by splitting those 394 s into four phases: node provisioning, image pull, weight load and engine initialization. Each phase waits for something different, so I assumed that each would need its own way of being shortened. The results agreed with that assumption. Image pull, weight load and engine initialization each shrank with a different action, and the cold start, which begins on a new node, came down to 260 s. The warm restart, which only recreates the pod on the same node, went from 214 s to 86 s.</p>
-<p>The subjects are Gemma 4 31B and Qwen3.8-27B served with vLLM on Amazon Elastic Kubernetes Service (Amazon EKS). Every value was measured once per scenario in the Seoul Region (ap-northeast-2) on November 14, 2026, so run-to-run variation is not included.</p>
-<p>This is Part 1 of the series "Serving two models with vLLM on Amazon EKS". <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> covers throughput and the service level objectives (SLOs) of the same environment, and <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">Part 3</a> covers the gateway, model routing and the app layer. The post is written for platform engineers who run GPU workloads on Amazon EKS, and it assumes the basics of Kubernetes and LLM serving.</p>
-<p>Figure 1 puts the results and the action taken in each phase on one page. The sections that follow explain how each value was measured and how the environment is configured.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig01-overview-en.png" alt="An infographic that sums up the cold start split into phases and its optimization. The time from pod creation to Ready for Gemma 4 31B fell from 394 s to 260 s for the cold start and from 214 s to 86 s for the warm restart. Bars per scenario and a table of actions show that image pull went from 111.1 s to 71.0 s with a pre-pull during node boot, weight load from 59.6 s to 19.2 s with runai_streamer, and engine initialization from 95.5 s to 23.7 s by restoring the compile cache" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> This post at a glance, in four parts: start-up time by scenario, cause and action per phase, the actions applied and their results, and an operations checklist. Qwen3.8-27B was measured in the optimized configuration only</figcaption></figure>
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Why the same API returns first content in 81.9 ms or in 4.06 s</h2></header><div class="prose">
+<p>Two requests go to the same address in the same format, and the time until the first content arrives differs a lot. In the example environment of this post, a request routed to Gemma 4 31B got its first content at a median of 81.9 ms, and a request routed to a sleeping Qwen3.8-27B got it after 4.06 s. With a managed LLM API you cannot see what happens between the request and the response. When you serve an open-weight model (a model whose weights are published, so you can download and run it yourself) on your own GPU instances, every stage in between sits inside your environment. You set up authentication, model selection, tokenization, inference, response delivery and observability yourself, and when a response is slow or fails, you also have to find the stage that caused it. This post splits one LLM API call into 8 stages and explains which component does each stage and how long it takes.</p>
+<p>This is Part 1 of the series OpenWeight on AWS GPU (OW on GPU), a guide for people who are starting to serve open-weight models. The example environment serves Gemma 4 31B and Qwen3.8-27B together with vLLM on Amazon Elastic Kubernetes Service (Amazon EKS). The code is in the <a href="https://github.com/whchoi98/ow-on-gpu" target="_blank" rel="noopener">ow-on-gpu repository</a>. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> covers the architecture that serves the two models and the Amazon EKS optimizations, and <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">Part 3</a> covers building this environment in 10 steps. If you know the basics of Kubernetes and AWS and have called an OpenAI-compatible API before, you can follow along even if LLM serving is new to you. The values were measured in the Seoul Region (ap-northeast-2) between November 14 and 17, 2026, and each table and sentence gives its date and number of runs.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig01-llm-api-call-en.png" alt="An infographic of the 8 stages one LLM API call passes through: API Gateway, Load Balancer, Tokenization, Model Router, Inference Engine, Post-processing, Response and Billing, Logging and Observability. Each stage lists the components of this environment and measured values. The bars at the top right show that time to first content is 81.9 ms for Gemma 4 31B and 177.5 ms for Qwen3.8-27B, and that vLLM takes 77% to 83% of it" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The 8 stages of one LLM API call, with the component that does each stage in this environment and the measured values. The Web Search tool at the bottom left is an optional path that a request takes only when it turns the tool on.</figcaption></figure>
 </div></section>
 
-<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>The environment: two L40S GPUs and vLLM v0.33.0</h2></header><div class="prose">
-<h3>The setup the series covers</h3>
-<p>The environment is one Amazon EKS 1.37 cluster in the Seoul Region. Gemma 4 31B and Qwen3.8-27B each use one NVIDIA L40S (g6e.4xlarge). Strands Decider 2B is a model that helps decide which model a request goes to, and it runs on one g6.xlarge. All three GPU nodes are On-Demand and are created by Karpenter.</p>
-<p>The left side of Figure 2 is the path a request takes, and the right side is what supplies the model and the image to the GPU nodes. The numbers in the strip at the bottom give the start-up order, and this post covers steps 0 to 4.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig02-structure-en.png" alt="A map that puts two paths on one page: the request path from the browser through CloudFront, the internal ALB, the BFF and the gateway to Gemma 4 31B and Qwen3.8-27B on the GPU nodes, and the supply path in which a sync Job uploads checkpoints from Hugging Face to the S3 model bucket and the GPU nodes get weights, the compile cache and the container image from that bucket and the image registry. A strip at the bottom numbers the order: model sync, node provisioning, image pull, weight load, engine initialization and inference request" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> The serving architecture of the series and the start-up order. Steps 0 to 4 are the scope of this post, and the same numbers on the map show where each step happens. The request path (step 5) is covered in Part 3</figcaption></figure>
-<p>A request passes through Amazon CloudFront and an internal Application Load Balancer (ALB) and reaches the BFF (Backend for Frontend). The BFF is a pod in the same cluster and calls the gateway as a Service inside the cluster. The gateway hands the request to the vLLM pod for its model. Part 3 covers this path, and this post covers how the model and the image get onto the GPU nodes.</p>
-<p>The serving pods do not download weights from Hugging Face. A sync Job uploads the checkpoints to an Amazon Simple Storage Service (Amazon S3) bucket once, and the serving pods read only <code>models/</code> and <code>vllm-cache/</code> in that bucket. Access is granted with EKS Pod Identity, and traffic to the bucket goes through the S3 gateway endpoint of the VPC.</p>
-<h3>Versions</h3>
-<p>Every component is the latest version as of November 14, 2026, chosen within the range the others support.</p>
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>One request and its response headers</h2></header><div class="prose">
+<p>This environment has one API: <code>POST /v1/chat/completions</code> in the OpenAI-compatible format. The BFF (Backend for Frontend) receives it. The BFF is the service between the page and the models that handles authentication, the model decision and tool execution, and here it runs as pods on Amazon EKS. Send the request below as it is, and the response headers and the streaming response are printed together.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># APP_URL: the output of terraform -chdir=infra/terraform output -raw app_url
+# ACCESS_TOKEN: an access token issued by the Amazon Cognito user pool
+curl -sN -D - "$APP_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "x-session-id: guide-001" \
+  -H "x-task: support" \
+  -d '{
+    "messages": [{"role": "user", "content": "How many days do I have to request a return?"}],
+    "stream": true,
+    "stream_options": {"include_usage": true},
+    "max_tokens": 128
+  }'</code></pre></div>
+<p>You get the access token from Cognito with <code>InitiateAuth</code> (the <code>USER_PASSWORD_AUTH</code> flow). <code>bench/bff/stream_check.py</code> in the repository signs in and checks streaming in one run. The body has no <code>model</code>. The BFF decides which model gets the request, and the request only gives hints in headers.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Component</th><th>Version</th><th>Why this version</th></tr>
+<tr><th>Request header</th><th>Value</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td>Amazon EKS</td><td>1.37</td><td>The latest and the default version in the Seoul Region</td></tr>
-<tr><td>GPU node AMI</td><td>EKS-optimized AL2023 NVIDIA 1.37.1-20261107 (NVIDIA driver 580.178.04)</td><td>amazon-eks-ami release v20261107</td></tr>
-<tr><td>Karpenter</td><td>v1.15.2</td><td>The compatibility table pairs Kubernetes 1.37 with Karpenter 1.15</td></tr>
-<tr><td>EKS Pod Identity Agent</td><td>v1.4.1-eksbuild.3</td><td>The latest add-on version for Kubernetes 1.37</td></tr>
-<tr><td>NVIDIA device plugin</td><td>v0.20.1</td><td>Installed from the static manifest</td></tr>
-<tr><td>vLLM</td><td>v0.33.0 (<code>vllm/vllm-openai:v0.33.0</code>, linux/amd64, 9.74 GB)</td><td>The image is built on CUDA 13.0.2, and the matching driver branch is R580</td></tr>
-<tr><td>Mountpoint for Amazon S3 CSI driver</td><td>v2.9.2-eksbuild.1</td><td>Used only to measure the baseline configuration</td></tr>
+<tr><td><code>x-session-id</code></td><td>String</td><td>The same value reuses the model chosen for the first request for 30 minutes</td></tr>
+<tr><td><code>x-task</code></td><td><code>support</code>, <code>translate</code>, <code>summarize</code>, <code>vision</code>, <code>ocr</code>, <code>coding</code></td><td>Task type. When present, the model comes from the assignment table and Decider 2B is not asked</td></tr>
+<tr><td><code>x-priority</code></td><td><code>interactive</code>, <code>batch</code></td><td>Priority. Without it, the default of the task type applies</td></tr>
+<tr><td><code>x-web-search</code></td><td><code>on</code></td><td>Adds the web search tool</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 1.</b> Versions of the components in this post (checked on November 14, 2026)</p>
-<p>I checked the pairing of the vLLM image and the GPU driver separately. According to the Amazon EKS User Guide, CUDA 13 and later need the NVIDIA 580 driver. The EKS-optimized AL2023 NVIDIA AMI picks a driver that matches the GPU of the node at first boot. The L40S nodes came up with 580.178.04.</p>
-<p>A g6e.4xlarge has 16 vCPUs, 128 GiB of memory, one L40S and a 600 GB instance store. The GPU memory is 48 GB on the product page and 45,776 MiB (44.7 GiB) in <code>describe-instance-types</code>. When I looked it up, the instance was offered in only two of the four Availability Zones of the Seoul Region, ap-northeast-2a and ap-northeast-2b.</p>
+<p class="cap"><b>Table 1.</b> Request headers that affect the model decision and the tools. The full list is in <code>docs/api-reference.md</code> in the repository.</p>
+<p>The response comes as headers and an SSE body (Server-Sent Events: the server sends events one after another over one connection).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Response headers (some of them; the number slots differ per request)
+x-request-id: &lt;request ID&gt;
+x-bff-model: gemma-4-31b
+x-bff-decision: task
+x-bff-sensitive: false
+x-bff-thinking: false
+x-bff-search: off
+x-bff-reason: {"task":"support","cached":false}
+x-bff-timing: {"decide_ms":&lt;ms&gt;,"wake_ms":&lt;ms&gt;,"upstream_ms":&lt;ms&gt;,"woke":false,"tools":true}
+
+# Response body (SSE)
+data: {"choices":[{"delta":{"content":"..."}}]}
+data: {"choices":[{"delta":{"content":"..."}}]}
+data: {"choices":[],"usage":{"prompt_tokens":&lt;input&gt;,"completion_tokens":&lt;output&gt;}}
+data: [DONE]</code></pre></div>
+<p>The headers that start with <code>x-bff-</code> tell you which path this request took. After reading this post you can look at the values in Table 2 and read off the path of a request and where its time went.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Response header</th><th>Value</th><th>What it tells you</th></tr>
+</thead>
+<tbody>
+<tr><td><code>x-bff-model</code></td><td><code>gemma-4-31b</code>, <code>qwen38-27b</code></td><td>The model that got the request</td></tr>
+<tr><td><code>x-bff-decision</code></td><td><code>rule</code>, <code>task</code>, <code>attachment</code>, <code>decider</code>, <code>fallback</code>, <code>eval</code></td><td>What decided the model</td></tr>
+<tr><td><code>x-bff-sensitive</code>, <code>x-bff-thinking</code></td><td><code>true</code>, <code>false</code></td><td>Whether the request was handled as sensitive, and whether thinking was on</td></tr>
+<tr><td><code>x-bff-search</code></td><td><code>on</code>, <code>off</code>, <code>sensitive</code>, <code>fallback</code>, <code>disabled</code></td><td>Whether the web search tool was attached, and why not if it was not</td></tr>
+<tr><td><code>x-bff-reason</code></td><td>JSON</td><td>The basis of the decision: the rule that applied, the choice and confidence of Decider 2B</td></tr>
+<tr><td><code>x-bff-timing</code></td><td>JSON</td><td>Time inside the BFF: deciding (<code>decide_ms</code>), waking (<code>wake_ms</code>), until the gateway's response headers (<code>upstream_ms</code>)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Headers the BFF adds to the response</p>
 </div></section>
 
-<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Four phases and two configurations</h2></header><div class="prose">
-<h3>What each phase waits for</h3>
-<p>The time from pod creation to Ready is split into four phases and the rest (other). Each phase waits for something different, so the way to shorten it differs too.</p>
-<p>The baseline configuration is the one before any optimization. It mounts the model bucket with Mountpoint for Amazon S3, reads it with the default vLLM loader, and keeps the compile cache inside the container. The node does not pull the image in advance. The optimized configuration is the one that serves traffic now.</p>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>The 8 stages and the component behind each</h2></header><div class="prose">
+<p>An LLM API call goes through similar stages in any environment. This post splits them into 8 and maps each stage to the components of this environment in Table 3.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Phase</th><th>Baseline configuration</th><th>Optimized configuration</th></tr>
+<tr><th>Stage</th><th>What it does</th><th>Components in this environment</th></tr>
 </thead>
 <tbody>
-<tr><td>Node provisioning</td><td>Karpenter creates a g6e.4xlarge On-Demand node</td><td>Same</td></tr>
-<tr><td>Image pull</td><td>The kubelet starts pulling after the pod is scheduled</td><td>A unit in the user data starts pulling while the node boots</td></tr>
-<tr><td>Weight load</td><td>The default vLLM loader reads a path mounted with Mountpoint for Amazon S3</td><td><code>runai_streamer</code> reads the <code>s3://</code> path and streams into GPU memory</td></tr>
-<tr><td>Engine initialization</td><td>The compile cache is created inside the container and is lost with the pod</td><td>An initContainer restores the compile cache from S3 to a hostPath on the node</td></tr>
+<tr><td>1 API Gateway (request entry)</td><td>Accepts the encrypted connection, limits call rates, authenticates, validates the body</td><td>Amazon CloudFront, AWS WAF, Amazon Cognito, BFF</td></tr>
+<tr><td>2 Load Balancer</td><td>Spreads requests over the targets that can take them</td><td>Internal Application Load Balancer (ALB), gateway (agentgateway)</td></tr>
+<tr><td>3 Tokenization</td><td>Turns text into token IDs and checks the length</td><td>vLLM API server</td></tr>
+<tr><td>4 Model Router (model decision)</td><td>Decides which pod of which model handles the request</td><td>BFF, Strands Decider 2B, InferencePool and EPP, wake API</td></tr>
+<tr><td>5 Inference Engine</td><td>Generates tokens</td><td>vLLM v0.33.0, one NVIDIA L40S per model</td></tr>
+<tr><td>6 Post-processing</td><td>Turns tokens back into text, separates reasoning and tool calls, runs tools</td><td>vLLM parsers, BFF, Amazon Bedrock AgentCore Web Search</td></tr>
+<tr><td>7 Response &amp; Billing</td><td>Delivers the response, counts usage</td><td>SSE relay in the BFF, <code>usage</code>, response headers</td></tr>
+<tr><td>8 Logging &amp; Observability</td><td>Records each segment and collects metrics</td><td>Prometheus agent, Amazon Managed Service for Prometheus, BFF logs, ALB access logs</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 2.</b> The baseline and the optimized configuration, phase by phase. The model, the vLLM version and the engine flags other than the loader are the same in both</p>
-<p>Node provisioning is the same in both, so the three other phases are what can be shortened. Image pull is shortened in the node configuration, weight load in the loader, and engine initialization in the cache.</p>
-<p>Opening a new restaurant is a helpful comparison. Node provisioning is finding an empty unit, and image pull is bringing in the kitchen equipment. Weight load is moving the ingredients from the warehouse to the kitchen, and engine initialization is the prep work done on the ingredients before opening. The optimized configuration orders the equipment before the building work on the unit is finished. It takes the ingredients straight into the kitchen without stacking them in an intermediate storeroom, and it reuses the ingredients that were prepped last time. Finding the unit takes as long as before, so three of the four steps get faster. A warm restart is reopening the same restaurant the next day, so the first two steps are not needed. The comparison also breaks down at one point. Ingredients stay in the kitchen once they are delivered, but the weights, all 30 GiB of them, are loaded into GPU memory again every time a pod starts.</p>
-<p>The results come first, and the configuration of each phase follows in this order.</p>
-<h3>How the phases are separated</h3>
-<p>The measurement script sets up the starting state of a scenario, waits until the new pod is Ready, and then extracts the phases from the timestamps of Kubernetes objects and from the vLLM log. A cold scenario scales the serving Deployment to 0, deletes the GPU node of that model, and scales back to 1. A warm restart scenario deletes only the pod so that it is recreated on the same node.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Phase</th><th>Evidence</th></tr>
-</thead>
-<tbody>
-<tr><td>Total</td><td>From the pod creation time to the time the pod turns Ready</td></tr>
-<tr><td>Node provisioning</td><td>From the NodeClaim creation time to the time the node turns Ready</td></tr>
-<tr><td>Image pull</td><td>The duration in the kubelet <code>Pulled</code> event. 0 when the image is already on the node</td></tr>
-<tr><td>Weight load</td><td><code>Model loading took</code> in the vLLM log</td></tr>
-<tr><td>Engine initialization</td><td><code>init engine (profile, create kv cache, warmup model) took</code> in the vLLM log</td></tr>
-<tr><td>Other</td><td>The total minus the four phases above</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 3.</b> Evidence for each phase. Kubernetes timestamps have a resolution of 1 second, so the total and node provisioning can be off by up to 1 second</p>
-<p>The Mountpoint volume of the baseline configuration was mounted with <code>max-threads 96</code> and <code>maximum-throughput-gbps 20</code> (the network bandwidth of g6e.4xlarge). The condition without the image pre-pull was a separate NodePool that differs only in its EC2NodeClass.</p>
-<p>I used <code>Model loading took</code> as the marker for weight load in every case, because v0.33.0 does not log <code>Loading weights took</code> on the streaming loader path. The baseline has both lines, with 55.9 s and 59.6 s.</p>
+<p class="cap"><b>Table 3.</b> The 8 stages of an LLM API call and the components in this environment</p>
+<p>Think of one phone call to a call center. Answering on the main number and verifying the caller is stage 1, and connecting the call to one of the reception desks is stage 2. The receptionist (the BFF) listens to the inquiry and decides which department takes it. When a fixed rule fits, the receptionist decides right away, and only an inquiry that no rule covers goes to the triage colleague at the next desk (Decider 2B). The switchboard (the gateway) connects the call by looking only at the department name the receptionist wrote down. The specialist in that department (a model in vLLM) reads the whole inquiry first (prefill) and then answers word by word (decode). When the specialist lacks recent information, the receptionist looks it up in the reference room (Web Search) and hands it over, and the specialist reads it and answers again. When the call ends, a call record remains. Where the analogy differs from the real system: one specialist takes several calls at the same time, and GPU memory sets how many.</p>
+<p>In this environment stage 4 runs before stage 3. The BFF and the gateway do not tokenize. They choose the model from the headers and the raw text. Tokenization uses a tokenizer that differs per model, so it happens after the model is chosen, inside the vLLM pod of that model.</p>
+<p>A request passes CloudFront, the internal ALB, the BFF, the gateway and vLLM, in that order. CloudFront is the only component open to the internet, and everything behind it is inside the VPC. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> covers where and how each component is placed.</p>
 </div></section>
 
-<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Cold start 134 s shorter, warm restart 128 s shorter</h2></header><div class="prose">
-<h3>Total time by scenario</h3>
-<p>The baseline configuration of Qwen3.8-27B was not measured.</p>
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Request entry and load balancing (stages 1 and 2)</h2></header><div class="prose">
+<p>Stage 1 checks whether the request may come in. CloudFront, AWS WAF, Cognito and the BFF share that check.</p>
+<ul>
+<li>CloudFront accepts HTTPS requests and sends only the <code>/v1/*</code> path through a VPC origin to the internal ALB. Every other path is a static page in Amazon S3.</li>
+<li>AWS WAF blocks an IP with 403 when it sends more than 300 requests in 5 minutes.</li>
+<li>Cognito issues an access token to a signed-in user. The token is valid for 60 minutes, and sign-up is disabled in the user pool.</li>
+<li>The BFF verifies the RS256 signature of the token with the public keys of the user pool and checks the issuer, the expiry, <code>token_use</code> and the app client ID.</li>
+</ul>
+<p>Because the BFF does the authentication, a request without a sign-in still passes CloudFront and the ALB, reaches the BFF and gets 401 there. The only thing that stops requests before that is one rate-based rule in AWS WAF. That rule does not act the moment the limit is exceeded. On November 14, 2026, 400 requests sent to the static page within 0.5 s all returned 200. The first 403 came 25.6 s after the requests started, and the block was lifted 300.4 s after that. The <a href="https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based-caveats.html" target="_blank" rel="noopener">AWS WAF documentation</a> also says that rate-based rules are not meant for precise request limiting.</p>
+<p>The error code tells you how far a request got.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Scenario</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
+<tr><th>Code</th><th>Returned by</th><th>Situation</th></tr>
 </thead>
 <tbody>
-<tr><td>Cold, baseline</td><td class="num">394 s</td><td class="num">Not measured</td></tr>
-<tr><td>Cold, optimized</td><td class="num">260 s</td><td class="num">290 s</td></tr>
-<tr><td>Warm restart, baseline</td><td class="num">214 s</td><td class="num">Not measured</td></tr>
-<tr><td>Warm restart, optimized</td><td class="num">86 s</td><td class="num">123 s</td></tr>
+<tr><td>403</td><td>AWS WAF</td><td>The IP hit the rate limit. The request does not reach the BFF</td></tr>
+<tr><td>401</td><td>BFF</td><td>No token, or the signature, issuer or expiry check failed. ID tokens are not accepted</td></tr>
+<tr><td>400</td><td>BFF</td><td>The body is not JSON or has no <code>messages</code></td></tr>
+<tr><td>422</td><td>BFF</td><td>A request with sensitive data also carries an image</td></tr>
+<tr><td>502</td><td>BFF</td><td>The sleeping Qwen3.8-27B could not be woken</td></tr>
+<tr><td>429</td><td>Gateway</td><td>A batch request that arrived while the pool of the model was saturated</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 4.</b> Time from pod creation to Ready (g6e.4xlarge, vLLM v0.33.0, Seoul Region, November 14, 2026, one run per scenario)</p>
-<p>The Gemma cold start got 134 s (34%) shorter and the warm restart 128 s (60%) shorter. The time saved is about the same, and the ratio is larger for the warm restart because it has no node provisioning and no image pull.</p>
-<h3>Gemma 4 31B by phase</h3>
-<p>In a warm restart the node and the image are already there, so the first two phases are 0.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Phase</th><th>Cold, baseline</th><th>Cold, optimized</th><th>Warm restart, baseline</th><th>Warm restart, optimized</th></tr>
-</thead>
-<tbody>
-<tr><td>Node provisioning</td><td class="num">55.0</td><td class="num">71.0</td><td class="num">0</td><td class="num">0</td></tr>
-<tr><td>Image pull</td><td class="num">111.1</td><td class="num">71.0</td><td class="num">0</td><td class="num">0</td></tr>
-<tr><td>Weight load</td><td class="num">59.6</td><td class="num">19.2</td><td class="num">59.1</td><td class="num">19.6</td></tr>
-<tr><td>Engine initialization</td><td class="num">95.5</td><td class="num">23.7</td><td class="num">95.6</td><td class="num">23.7</td></tr>
-<tr><td>(of which torch.compile)</td><td class="num">61.0</td><td class="num">0.9</td><td class="num">60.8</td><td class="num">0.9</td></tr>
-<tr><td>Other</td><td class="num">72.7</td><td class="num">75.1</td><td class="num">59.3</td><td class="num">42.7</td></tr>
-<tr><td>Total</td><td class="num">394</td><td class="num">260</td><td class="num">214</td><td class="num">86</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 5.</b> Gemma 4 31B by phase (seconds, one run per scenario). The total is the overall time measured at 1-second resolution, and torch.compile is part of engine initialization</p>
-<p>Weight load took 59.6 s through Mountpoint and 19.2 s with the streaming loader (3.1 times faster). The warm restart gave 59.1 s and 19.6 s, so this phase did not depend on whether the node was new.</p>
-<p>Engine initialization went from 95.5 s to 23.7 s, and most of the difference is <code>torch.compile</code> (61.0 s to 0.9 s). On the new node the initContainer restored 522 cache files from S3 in 3.3 s, and the cache was hit. The remaining 23.7 s include capturing the CUDA graphs. The log recorded capture times of 7 s and 10 s.</p>
-<p>Image pull went from 111.1 s to 71.0 s as seen by the kubelet. The pre-pull starts while the node is still coming up, so the kubelet waited for less time. Even so, 71.0 s is, together with node provisioning, the longest phase of the optimized configuration apart from other.</p>
-<p>Node provisioning took 55.0 s and 71.0 s. The only difference between the EC2NodeClasses of the two configurations is the pre-pull unit in the user data. With one run each, I cannot tell whether the 16 s difference comes from the pre-pull or from variation on that day. The first GPU node created that day took 118 s. Leaving this phase out, the rest went from 339 s to 189 s, 44% less.</p>
-<p>Other did not shrink in the cold start (72.7 s and 75.1 s). It includes the scheduling wait, container creation, the time before the vLLM process starts loading weights, and the time for the API server to come up after engine initialization. In the warm restart it went from 59.3 s to 42.7 s, but I could not break down which step got shorter.</p>
-<p>In the optimized configuration of Gemma, other is the longest phase. In the optimized warm restart, 82 s passed from container start to Ready, and weight load and engine initialization accounted for 43.3 s of that. The remaining 39 s or so lie outside the two markers, so other makes up half of the 86 s.</p>
-<h3>Qwen3.8-27B by phase</h3>
-<p>For Qwen3.8-27B I measured only the two scenarios of the optimized configuration.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Phase</th><th>Cold, optimized</th><th>Warm restart, optimized</th></tr>
-</thead>
-<tbody>
-<tr><td>Node provisioning</td><td class="num">63.0</td><td class="num">0</td></tr>
-<tr><td>Image pull</td><td class="num">77.5</td><td class="num">0</td></tr>
-<tr><td>Weight load</td><td class="num">34.9</td><td class="num">35.4</td></tr>
-<tr><td>Engine initialization</td><td class="num">42.5</td><td class="num">41.8</td></tr>
-<tr><td>(of which torch.compile)</td><td class="num">0.8</td><td class="num">0.9</td></tr>
-<tr><td>Other</td><td class="num">72.1</td><td class="num">45.8</td></tr>
-<tr><td>Total</td><td class="num">290</td><td class="num">123</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 6.</b> Qwen3.8-27B by phase (seconds, optimized configuration, one run per scenario)</p>
-<p>Qwen has larger weights, 34.39 GiB, so its weight load takes 34.9 s against 19.2 s for Gemma. Restoring the 2,056 compile cache files took 10 s, and compilation finished in 0.8 s. I did not analyze why its engine initialization, 42.5 s, is longer than that of Gemma.</p>
-<h3>Compared with waking from sleep</h3>
-<p>There is also a way that does not restart the pod. A level 1 sleep in vLLM moves the weights to host memory and discards the KV cache, which frees the GPU memory. On a Qwen pod freshly started by a warm restart, I measured the wake twice, and the wake API answered in 3.70 s and 3.67 s. The warm restart of the same pod took 123 s and the cold start 290 s. Sleep keeps the node and the pod, however, so the node cannot be reclaimed. The time to enter sleep also differed: 31.71 s the first time after the pod started and 2.98 s the second time. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-3/" target="_blank" rel="noopener">Part 3</a> covers running sleep on a schedule.</p>
+<p class="cap"><b>Table 4.</b> Error codes and where they come from</p>
+<p>Stage 2 spreads requests over the targets that can take them, and it happens twice. The internal ALB spreads requests over 2 BFF pods. The BFF keeps the decision of a session in the memory of the pod, so the ALB has cookie stickiness (1,800 s) to send the requests of one browser to the same pod. The BFF calls the gateway directly through its in-cluster Service, and 2 gateway pods send the request to the pool of the model. Picking a pod by GPU load is the job of the EPP, described under stage 4.</p>
+<p>These two stages take little time. In the measurement of November 15, 2026, the medians were 1.8 ms between the user and the edge, 5.0 ms in CloudFront and 1.6 ms in the ALB.</p>
 </div></section>
 
-<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>A pre-pull that moves the start of the image pull forward</h2></header><div class="prose">
-<p>Image pull went from 111.1 s to 71.0 s as seen by the kubelet. The settings that shortened this phase are in the Karpenter NodePool and EC2NodeClass.</p>
-<h3>One NodePool per model, limited to one node</h3>
-<p>There is one NodePool per model (<code>gemma-od</code>, <code>qwen-od</code>, <code>decider</code>). The one for Gemma is below. The one for Qwen differs only in its name, and the one for the Decider has a different instance type and EC2NodeClass.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>apiVersion: karpenter.sh/v1
-kind: NodePool
-metadata:
-  name: gemma-od
-spec:
-  template:
-    spec:
-      nodeClassRef:
-        group: karpenter.k8s.aws
-        kind: EC2NodeClass
-        name: vllm
-      requirements:
-        - key: node.kubernetes.io/instance-type
-          operator: In
-          values: ["g6e.4xlarge"]
-        - key: karpenter.sh/capacity-type
-          operator: In
-          values: ["on-demand"]
-      taints:
-        - key: nvidia.com/gpu
-          value: "true"
-          effect: NoSchedule
-  limits:
-    nvidia.com/gpu: 1
-  disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: 30m</code></pre></div>
-<p><code>nvidia.com/gpu: 1</code> under <code>limits</code> caps the GPUs this NodePool creates at one. According to the Karpenter documentation, a NodePool that is over its limit creates no new nodes until a node is terminated. The value keeps the number of GPU nodes from growing by accident when someone raises the replica count.</p>
-<p>With <code>taints</code>, pods that do not tolerate the taint are not scheduled on the GPU nodes. The vLLM pods select their NodePool with a toleration for the same key and a <code>karpenter.sh/nodepool</code> nodeSelector. There is no Availability Zone requirement, so Karpenter picks a zone that has capacity. The zones where a g6e.4xlarge can actually launch are the two mentioned earlier.</p>
-<p><code>consolidationPolicy: WhenEmpty</code> makes only nodes with no workload pods eligible for reclaiming. Setting <code>consolidateAfter</code> to 30 minutes has to do with the measurement. To measure a warm restart, the node has to stay while the pod is deleted and recreated. Turning reclaiming off altogether, on the other hand, would leave GPU nodes running when a job is forgotten.</p>
-<h3>Instance store and the image pre-pull</h3>
-<p>The Gemma and Qwen nodes use the EC2NodeClass <code>vllm</code>. This is the manifest from the repository with only the comments removed.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>apiVersion: karpenter.k8s.aws/v1
-kind: EC2NodeClass
-metadata:
-  name: vllm
-spec:
-  role: KarpenterNodeRole-ow-on-gpu
-  amiSelectorTerms:
-    - alias: al2023@v20261107
-  subnetSelectorTerms:
-    - tags:
-        karpenter.sh/discovery: ow-on-gpu
-  securityGroupSelectorTerms:
-    - tags:
-        karpenter.sh/discovery: ow-on-gpu
-  instanceStorePolicy: RAID0
-  userData: |
-    MIME-Version: 1.0
-    Content-Type: multipart/mixed; boundary="BOUNDARY"
-
-    --BOUNDARY
-    Content-Type: text/x-shellscript; charset="us-ascii"
-
-    #!/bin/bash
-    systemd-run --unit=prepull-vllm --no-block /bin/bash -c '
-      until ctr --namespace k8s.io version &gt;/dev/null 2&gt;&amp;1; do sleep 1; done
-      ctr --namespace k8s.io images pull docker.io/vllm/vllm-openai:v0.33.0
-    '
-    --BOUNDARY--</code></pre></div>
-<p>The alias under <code>amiSelectorTerms</code> pins the release of the EKS-optimized AL2023 AMI. With an alias, Karpenter picks the variant that fits the instance, so GPU nodes get the NVIDIA variant. That AMI contains the NVIDIA driver and the container toolkit but not the NVIDIA device plugin. I therefore installed the static manifest of device plugin v0.20.1 and added a nodeSelector so that it runs only on NVIDIA GPU nodes.</p>
-<p><code>instanceStorePolicy: RAID0</code> combines the instance store volumes into a RAID0 array and uses it as storage for the kubelet and containerd. On AL2023 the NodeConfig that Karpenter generates sets up the disk and mounts it at <code>/mnt/k8s-disks/0</code>. On the GPU nodes 559 GB was mounted at that path, and the container images were stored there. The root volume is 20 GB.</p>
-<p>The script in <code>userData</code> does the image pre-pull. A user script can run before containerd is up, so it hands the work to a one-shot systemd unit that waits for containerd and then pulls the image. The unit does not block node registration, runs alongside the kubelet, and pulls the image into the <code>k8s.io</code> namespace that the kubelet looks at.</p>
-<p>I checked this behavior on the first GPU node I created. The pre-pull started right after containerd came up and pulled 9.1 GiB in 108.7 s (85.5 MiB/s). The pull by the kubelet took over the download in progress and finished 1 second after the pre-pull did, and the kubelet recorded a pull time of 45.0 s. The pre-pull does not shorten the time it takes to download the image. It moves the start of the download from after pod scheduling to the node boot.</p>
-</div></section>
-
-<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>A loader that streams weights from S3 into GPU memory</h2></header><div class="prose">
-<p>Weight load went from 59.6 s to 19.2 s. That is the result of uploading the checkpoints to Amazon S3 once and having the serving pods read them from the bucket straight into GPU memory. The explanation follows the order of choosing the checkpoint, syncing it, granting access, and the loader.</p>
-<h3>Why FP8 checkpoints on the L40S</h3>
-<p>The L40S is an Ada-generation GPU with a compute capability of 8.9. In the quantization support table of the vLLM documentation, llm-compressor FP8 (W8A8) is supported on Ada (SM 8.9) and Hopper (SM 9.0). Both models use FP8-dynamic checkpoints in this format. Weights are static per-channel FP8 and activations are dynamic per-token FP8.</p>
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>The model decision: rules first, Decider 2B second (stage 4)</h2></header><div class="prose">
+<p>There are two models, so every request needs a decision about which model handles it. In this environment the BFF looks at the content of the request and the policy and decides the model, and the gateway picks the pool of the model by looking only at the value the BFF wrote.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig02-model-decision-en.png" alt="An infographic in three parts on how a request gets its model. The BFF applies the first rule that matches, in the order sensitive data rule, task type, image attachment, Decider 2B judgment, default. Decider 2B returns the model choice, whether there is personal data and whether reasoning is needed, each with a confidence. The decision travels to the gateway in the model and priority fields of the body and in a header, and reaches the vLLM pod through the InferencePool and the EPP" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> The order of the model decision: the decision order of the BFF, the judgment of Decider 2B with the threshold, and the path the decision takes to the gateway and the engine.</figcaption></figure>
+<h3>Decision order of the BFF</h3>
+<p>The BFF applies rules that cost almost nothing first and asks the judgment model only about requests that no rule decides. It applies the first rule that matches, in the order of Table 5.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Model</th><th>Checkpoint (revision)</th><th>Weight files</th><th>Size on the GPU</th></tr>
+<tr><th>Order</th><th>Condition</th><th>Decision</th><th><code>x-bff-decision</code></th></tr>
 </thead>
 <tbody>
-<tr><td>Gemma 4 31B</td><td>RedHatAI/gemma-4-31B-it-FP8-dynamic (<code>d4ab4f57</code>)</td><td>2 safetensors files, 33.27 GB</td><td>30.63 GiB</td></tr>
-<tr><td>Qwen3.8-27B</td><td>AzatAI/Qwen3.8-27B-FP8-dynamic (<code>10c68ff4</code>)</td><td>3 safetensors files, 36.78 GB (including the 0.85 GB MTP head)</td><td>34.39 GiB</td></tr>
+<tr><td>1</td><td>The text has the format of a resident registration number or a card number</td><td>Gemma 4 31B, marked as a sensitive request</td><td><code>rule</code></td></tr>
+<tr><td>2</td><td>A task type (<code>x-task</code>) is present</td><td>Support, translation and summaries go to Gemma 4 31B. Vision, OCR and coding go to Qwen3.8-27B</td><td><code>task</code></td></tr>
+<tr><td>3</td><td>An image is attached</td><td>Qwen3.8-27B</td><td><code>attachment</code></td></tr>
+<tr><td>4</td><td>The Decider 2B judgment meets the threshold</td><td>The model Decider 2B picked</td><td><code>decider</code></td></tr>
+<tr><td>5</td><td>Anything else</td><td>Gemma 4 31B, thinking off</td><td><code>fallback</code></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 7.</b> Checkpoints of the two models. File sizes use 1 GB = 10^9 bytes, and the size on the GPU is the <code>Model loading took</code> value in the vLLM log</p>
-<p>Qwen3.8-27B has two FP8 checkpoints. The official repository (Qwen/Qwen3.8-27B-FP8) is block FP8 quantized with a block size of 128, and its weights are 30.87 GB, 5.9 GB smaller. In the vLLM v0.33.0 source, however, the CUTLASS block FP8 kernel is supported only on compute capability 9.0 and later. A vLLM issue reports that on an RTX 6000 Ada, a GPU of the same Ada generation, this checkpoint fell back to the Marlin FP8 kernel. I did not verify which kernel is actually chosen on the L40S or how much performance differs.</p>
-<p>So I chose the per-channel checkpoint, for which the documentation states Ada support. For both models the start-up log shows that <code>CutlassFP8ScaledMMLinearKernel</code> was selected. The price is GPU memory. The larger the weights, the less memory is left for the KV cache (key-value cache), and this difference comes up again in the <code>--gpu-memory-utilization</code> setting described later.</p>
-<p>The AzatAI repository was uploaded by an individual's organization, so I pinned it to a revision hash when syncing. The files are safetensors only, so there is no risk of pickle code execution.</p>
-<h3>The sync Job from Hugging Face to S3</h3>
-<p>The sync Job uploads four repositories, each pinned to a revision hash, under <code>models/</code> in the bucket. The Decider repository holds only a LoRA adapter and heads, so I uploaded its base model (Qwen/Qwen3.5-2B-Base) as well. This is the bucket layout, including the compile caches.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>s3://&lt;bucket&gt;/models/gemma-4-31B-it-FP8-dynamic/
-s3://&lt;bucket&gt;/models/Qwen3.8-27B-FP8-dynamic/
-s3://&lt;bucket&gt;/models/strands-decider-2B-qwen3.5-v1-2610/
-s3://&lt;bucket&gt;/models/Qwen3.5-2B-Base/
-s3://&lt;bucket&gt;/vllm-cache/v0.33.0-gemma4-31b-fp8-l40s/
-s3://&lt;bucket&gt;/vllm-cache/v0.33.0-qwen38-27b-fp8-l40s/</code></pre></div>
-<p>The Job uploads each file to S3 with <code>s5cmd pipe</code> as it downloads, so weights do not pile up on the local disk. It handles 8 files at a time and uploads four 64 MiB parts of each file in parallel. It computes a hash while downloading and compares it with the value Hugging Face reports (sha256 for LFS files, git blob sha1 for the others). At the end it compares the object list in S3 with the expected list, and the Job fails if a path or a size differs. On a rerun, files already uploaded with the same size are skipped. The Job runs on a CPU node (the <code>system</code> NodePool).</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Repository</th><th>Objects</th><th>Size</th></tr>
-</thead>
-<tbody>
-<tr><td>RedHatAI/gemma-4-31B-it-FP8-dynamic</td><td class="num">18</td><td class="num">33.30 GB</td></tr>
-<tr><td>AzatAI/Qwen3.8-27B-FP8-dynamic</td><td class="num">14</td><td class="num">36.80 GB</td></tr>
-<tr><td>StrandsAgents/strands-decider-2B-qwen3.5-v1-2610</td><td class="num">29</td><td class="num">0.23 GB</td></tr>
-<tr><td>Qwen/Qwen3.5-2B-Base</td><td class="num">12</td><td class="num">4.57 GB</td></tr>
-<tr><td>Total</td><td class="num">73</td><td class="num">74.90 GB</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 8.</b> Repositories uploaded by the sync Job (November 14, 2026). 1 GB = 10^9 bytes</p>
-<p>The Job took 9 minutes 8 seconds from start to completion, of which 491.4 s was transfer and verification. There were no retries. The total was set by the 19.98 GB file of Qwen, which took 490 s at 40.7 MB/s. The 26.89 GB file of Gemma finished in 126 s at 213.4 MB/s. Download speed differed by about five times between repositories. After the sync I downloaded three of the S3 objects again and compared their sha256 with the Hugging Face values, and all three matched.</p>
-<h3>S3 access through EKS Pod Identity</h3>
-<p>The serving pods and the Jobs get access to S3 through EKS Pod Identity. EKS Pod Identity associates an AWS Identity and Access Management (IAM) role with a ServiceAccount in a namespace and needs no OIDC identity provider. The Pod Identity Agent, which runs as a DaemonSet on every node, hands temporary credentials to the pods on that node. Below are the trust policy and the read-only side of the Terraform definition.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">hcl</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># karpenter.tf (excerpt)
-locals {
-  pod_identity_trust = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "pods.eks.amazonaws.com" }
-      Action    = ["sts:AssumeRole", "sts:TagSession"]
-    }]
-  })
-}
-
-# storage.tf (excerpt)
-locals {
-  model_object_arns = [
-    "${aws_s3_bucket.models.arn}/models/*",
-    "${aws_s3_bucket.models.arn}/vllm-cache/*",
-  ]
-
-  model_reader_service_accounts = ["gemma", "qwen", "decider"]
-  model_writer_service_accounts = ["model-sync", "cache-publish"]
-}
-
-resource "aws_iam_role" "model_reader" {
-  name               = "${var.cluster_name}-model-reader"
-  assume_role_policy = local.pod_identity_trust
-}
-
-resource "aws_eks_pod_identity_association" "model_reader" {
-  for_each = toset(local.model_reader_service_accounts)
-
-  cluster_name    = aws_eks_cluster.this.name
-  namespace       = "inference"
-  service_account = each.key
-  role_arn        = aws_iam_role.model_reader.arn
+<p class="cap"><b>Table 5.</b> The model decision order of the BFF and the value of the response header</p>
+<p>The first rule comes first because of the data policy of this environment. Requests with sensitive data go only to Gemma 4 31B, and sensitive data with a fixed format is found with regular expressions and the Luhn check instead of being left to the judgment model. Gemma 4 31B does not take images in this setup, so a request with both sensitive data and an image is rejected with 422.</p>
+<p>A decision is stored in the session (<code>x-session-id</code>) for 30 minutes and reused. From the second message of a conversation on, no decision time is added. Only the sensitive data formats are checked again on every message even when the session has a decision, and once one appears in a conversation, the rest of that session goes only to Gemma 4 31B.</p>
+<h3>The Decider 2B judgment</h3>
+<p><a href="https://github.com/strands-labs/strands-decider" target="_blank" rel="noopener">Strands Decider 2B</a> is a small model that reads a request and judges which model should take it. It does not generate text. It returns one of the given choices with a confidence, or the probability of yes. In this environment it runs on one g6.xlarge (NVIDIA L4) node, and the BFF sends it 3 questions at once, only for requests that no rule decides. The questions are written in Korean, and the comments in the excerpt give their meaning.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Excerpt from app/bff/bff.py (the question texts are Korean; the comments translate them)
+DECIDER_QUESTIONS = {
+    "route": {
+        "type": "choice",
+        "instructions": "이 요청을 처리할 모델을 고르세요.",  # Pick the model that should handle this request
+        "criteria": {
+            "gemma": "고객 상담, 주문 조회, 번역, 요약처럼 텍스트만 다루는 요청",  # text-only work: support, order lookup, translation, summaries
+            "qwen": "이미지나 문서를 읽어야 하거나 코드를 작성하고 고치는 요청",  # reading images or documents, writing and fixing code
+        },
+    },
+    "policy": {"type": "noul", "instructions": "이 요청에 이름, 연락처, 주소, 계좌 같은 개인정보가 들어 있습니까?"},  # Does it contain personal data (name, contact, address, account)?
+    "thinking": {"type": "noul", "instructions": "이 요청에 답하려면 여러 단계를 거친 추론이 필요합니까?"},  # Does answering it need multi-step reasoning?
 }</code></pre></div>
-<p>There are two roles. The read role allows only <code>s3:GetObject</code> on <code>models/</code> and <code>vllm-cache/</code> and listing the bucket. It is associated with the three ServiceAccounts of the serving pods in the <code>inference</code> namespace (<code>gemma</code>, <code>qwen</code>, <code>decider</code>). The write role is associated only with the sync Job and the cache publish Job in the <code>model-jobs</code> namespace. A serving pod cannot upload anything to the bucket.</p>
-<p>Two things needed attention on the side that receives the credentials. By default the S3 client of Run:ai Model Streamer uses the credential provider chain of the AWS C++ SDK and does not create a boto3 session. So I set <code>RUNAI_STREAMER_NO_BOTO3_SESSION=0</code> to pass it the credentials that boto3 obtained. Before deploying, I confirmed that boto3 inside the vLLM image gets credentials through Pod Identity and can list the bucket. I did not record what happens with the default value. The AWS SDK in s5cmd 2.3.0, which the sync Job uses, does not support Pod Identity. In that case the script gets temporary credentials from the Pod Identity Agent and passes them to s5cmd.</p>
-<h3>Reading weights straight from S3 with runai_streamer</h3>
-<p>This is the part of the Gemma Deployment that matters for start-up time. The ServiceAccount, the resource requests, the readinessProbe and livenessProbe, and some environment variables and volumes are left out.</p>
-<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>    spec:
-      serviceAccountName: gemma
-      nodeSelector:
-        karpenter.sh/nodepool: gemma-od
-      tolerations:
-        - key: nvidia.com/gpu
-          operator: Exists
-          effect: NoSchedule
-      initContainers:
-        - name: cache-restore
-          image: vllm/vllm-openai:v0.33.0
-          command: ["python3", "/scripts/cache-restore.py"]
-          env:
-            - name: CACHE_PREFIX
-              value: vllm-cache/v0.33.0-gemma4-31b-fp8-l40s
-          volumeMounts:
-            - name: vllm-cache
-              mountPath: /vllm-cache
-      containers:
-        - name: vllm
-          image: vllm/vllm-openai:v0.33.0
-          args:
-            - s3://$(MODEL_BUCKET)/models/gemma-4-31B-it-FP8-dynamic
-            - --served-model-name=gemma-4-31b
-            - --load-format=runai_streamer
-            - --language-model-only
-            - --max-model-len=16384
-            - --kv-cache-dtype=fp8
-            - --gpu-memory-utilization=0.90
-            - --enable-prefix-caching
-            - --scheduling-policy=priority
-            - --enable-auto-tool-choice
-            - --tool-call-parser=gemma4
-            - --reasoning-parser=gemma4
-          env:
-            - name: MODEL_BUCKET
-              valueFrom:
-                configMapKeyRef: {name: platform, key: MODEL_BUCKET}
-            - name: VLLM_CACHE_ROOT
-              value: /vllm-cache
-            - name: RUNAI_STREAMER_NO_BOTO3_SESSION
-              value: "0"
-            - name: HF_HUB_OFFLINE
-              value: "1"
-          startupProbe:
-            httpGet: {path: /health, port: http}
-            periodSeconds: 1
-            failureThreshold: 1800
-          volumeMounts:
-            - name: vllm-cache
-              mountPath: /vllm-cache
-      volumes:
-        - name: vllm-cache
-          hostPath:
-            path: /var/cache/vllm
-            type: DirectoryOrCreate</code></pre></div>
-<p>Two parts of this manifest shorten the start-up. <code>--load-format=runai_streamer</code> changes the path through which the weights are read, and the <code>cache-restore</code> initContainer and <code>VLLM_CACHE_ROOT</code> change where the compile cache is kept. Figure 3 shows both next to the baseline configuration.</p>
-<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig03-supply-paths-en.png" alt="A diagram comparing how the weights and the compile cache reach the GPU node in the baseline and the optimized configuration. Weights took 59.6 s through Mountpoint for Amazon S3 and the default vLLM loader, and 19.2 s when runai_streamer streamed them from S3 into GPU memory. With the compile cache inside the container it is lost with the pod and engine initialization took 95.5 s, and with the cache on a node hostPath or under an S3 prefix it took 23.7 s" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> The two paths for reading the weights (top) and the three places to keep the compile cache (bottom). Times are from one Gemma 4 31B cold start, and <code>&lt;config&gt;</code> in the S3 prefix is a name made of the vLLM version, the model, the precision and the GPU</figcaption></figure>
-<p>According to the vLLM documentation, Run:ai Model Streamer is a library that reads tensors concurrently and streams them into GPU memory. With <code>--load-format=runai_streamer</code> and an <code>s3://</code> path as the model argument, it reads the safetensors files directly from S3. There is no step that downloads the weights to the node disk first, and only the configuration and tokenizer files go to a local cache. The image contained runai-model-streamer 0.17.1.</p>
-<p><code>HF_HUB_OFFLINE=1</code> makes the serving pod fail if it tries to download from Hugging Face. It keeps a misconfiguration from quietly fetching files from outside.</p>
-<p>I left the concurrency and the chunk size of the loader at their defaults. The Amazon EKS User Guide describes how to tune <code>concurrency</code> in <code>--model-loader-extra-config</code> and <code>RUNAI_STREAMER_CHUNK_BYTESIZE</code> to the model size. I did not measure the values with tuning.</p>
-</div></section>
-
-<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Publishing and restoring the compile cache to shorten engine initialization</h2></header><div class="prose">
-<p>Engine initialization went from 95.5 s to 23.7 s, and most of the time saved is <code>torch.compile</code>. The compiled result, once made, is kept on the node and in Amazon S3 and reused at the next start.</p>
-<p>vLLM finishes all compilation before it accepts requests, so the time <code>torch.compile</code> takes goes straight into the start-up time. The compiled result is stored in <code>torch_compile_cache/</code> under the cache root. According to the vLLM documentation, you can copy this directory as a whole to the deployment environment to cut the compile time. Following that, I kept the cache in two places.</p>
-<p>On the node there is a hostPath (<code>/var/cache/vllm</code>), and <code>VLLM_CACHE_ROOT</code> makes vLLM store its cache there. When the pod restarts on the same node, the cache is still there. The Amazon EKS User Guide recommends placing this hostPath under the mount point of the instance store. This environment used the path above, and I did not measure the difference between paths.</p>
-<p>S3 holds a copy for new nodes. After a model has started once and the cache exists, a cache publish Job uploads the cache directory of the node to an S3 prefix. The Job is scheduled on the same node as the vLLM pod through podAffinity and requests no GPU. It uses the vLLM image that is already on the node. On a new node, the initContainer <code>cache-restore</code> of the vLLM pod downloads that prefix to the hostPath. It skips files that already exist with the same size, and it exits without doing anything when the prefix is empty.</p>
+<p>The BFF compares the answers with a threshold of 0.6. For <code>route</code> it takes the confidence of the choice as it is, and for <code>policy</code> it takes how far the probability is from 0.5 as the confidence.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Model</th><th>S3 prefix</th><th>Objects</th><th>Size</th><th>Restore time on a new node</th></tr>
+<tr><th>Answer from Decider 2B</th><th>What the BFF does</th><th>Response header</th></tr>
 </thead>
 <tbody>
-<tr><td>Gemma 4 31B</td><td><code>vllm-cache/v0.33.0-gemma4-31b-fp8-l40s/</code></td><td class="num">522</td><td class="num">90.8 MB</td><td class="num">3.3 s</td></tr>
-<tr><td>Qwen3.8-27B</td><td><code>vllm-cache/v0.33.0-qwen38-27b-fp8-l40s/</code></td><td class="num">2,056</td><td class="num">216.7 MB</td><td class="num">10 s</td></tr>
+<tr><td>The confidences of the model choice and of the personal data judgment are both 0.6 or higher</td><td>The model Decider 2B picked. If it sees personal data: Gemma 4 31B and marked sensitive. Thinking is on at a probability of 0.5 or higher</td><td><code>decider</code></td></tr>
+<tr><td>Only the confidence of the model choice is below 0.6, and the judgment that there is no personal data is at 0.6 or higher</td><td>Gemma 4 31B, thinking off. Not handled as a sensitive request</td><td><code>fallback</code>, <code>x-bff-sensitive: false</code></td></tr>
+<tr><td>No answer, more than 2 s, a personal data judgment with a confidence below 0.6, or a judgment that there is personal data</td><td>Gemma 4 31B, thinking off, handled as a sensitive request</td><td><code>fallback</code>, <code>x-bff-sensitive: true</code></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 9.</b> Compile caches published to S3 and the time the initContainer took to restore them in the cold start measurements</p>
-<p>The prefix name carries the vLLM version, the model, the precision and the GPU. vLLM derives the cache directory from the related settings, the PyTorch configuration and the forward code of the model, so the cache no longer matches when any of these changes. That is what happened on November 15, 2026, when I started Qwen with prefix caching turned off, and compilation took 62.6 s. According to the Amazon EKS User Guide, caches for different GPU types, models and PyTorch versions have to be stored separately. When the configuration changes, I publish again under a new prefix.</p>
-</div></section>
-
-<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Memory and probe settings that prevent failed starts</h2></header><div class="prose">
-<p>The settings in this section do not shorten the start-up. When a value is wrong, though, the engine fails to start or the Ready status no longer matches the real state.</p>
-<h3>gpu-memory-utilization and the KV cache</h3>
-<p><code>--gpu-memory-utilization</code> sets how much of the GPU memory vLLM may use. What is left after the weights and the activations during inference becomes the KV cache, so the larger the checkpoint, the more sensitive it is to this value.</p>
+<p class="cap"><b>Table 6.</b> What the BFF does with the answer from Decider 2B (behavior since November 17, 2026)</p>
+<p>The default is split in two because of general questions. A general question that is neither support nor coding does not clearly fit either choice, so the confidence of the model choice comes out low. If that alone made the request sensitive, it would lose the web search tool described later, so a request with a judgment that it has no personal data is not handled as sensitive.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Item</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
+<tr><th>Request</th><th>Model choice (confidence)</th><th>Probability of personal data</th><th>Probability that reasoning is needed</th></tr>
 </thead>
 <tbody>
-<tr><td><code>--gpu-memory-utilization</code></td><td class="num">0.90</td><td class="num">0.90</td></tr>
-<tr><td>Target memory (of 44.39 GiB in total)</td><td class="num">39.95 GiB</td><td class="num">39.95 GiB</td></tr>
-<tr><td>Weights and non-torch memory</td><td class="num">31.13 GiB</td><td class="num">34.74 GiB</td></tr>
-<tr><td>Peak activations</td><td class="num">3.45 GiB</td><td class="num">2.76 GiB</td></tr>
-<tr><td>CUDA graphs</td><td class="num">0.35 GiB</td><td class="num">0.58 GiB</td></tr>
-<tr><td>KV cache memory</td><td class="num">5.37 GiB</td><td class="num">2.46 GiB</td></tr>
-<tr><td>KV cache size</td><td class="num">34,052 tokens</td><td class="num">42,780 tokens</td></tr>
-<tr><td>In requests of <code>--max-model-len</code> length</td><td class="num">2.08 (16,384 tokens)</td><td class="num">1.31 (32,768 tokens)</td></tr>
+<tr><td>Asking about the delivery of ordered sneakers</td><td>gemma (0.95)</td><td class="num">0.06</td><td class="num">0.34</td></tr>
+<tr><td>Fixing a Python function</td><td>qwen (0.85)</td><td class="num">0.08</td><td class="num">0.59</td></tr>
+<tr><td>Changing a delivery address, with name, contact and address</td><td>gemma (0.57)</td><td class="num">0.72</td><td class="num">0.29</td></tr>
+<tr><td>Comparing and calculating phone plans</td><td>gemma (0.30)</td><td class="num">0.05</td><td class="num">0.54</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 10.</b> GPU memory allocation recorded in the start-up log (first start on November 14, 2026, one run)</p>
-<p>Gemma started on the first attempt with 0.90. Qwen could not start the engine with the initial value of 0.85. The weights took 34.39 GiB, which left only 0.24 GiB for the KV cache. vLLM reported an error saying that one request of the maximum length (32,768 tokens) needs 1.87 GiB of KV cache. With that little memory left, lowering <code>--max-model-len</code> does not solve it. At 0.90 it started with sleep mode enabled and got a 2.46 GiB KV cache.</p>
-<p>The KV cache is small for both models. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> covers how this size determines the number of requests processed at the same time and the throughput.</p>
-<h3>Other flags and probes</h3>
-<p>Engine flags decide serving behavior more than start-up time, but some of them cause failed starts, so they are listed here.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Setting</th><th>Applies to</th><th>Reason</th></tr>
-</thead>
-<tbody>
-<tr><td><code>--language-model-only</code></td><td>Gemma</td><td>Sets the multimodal input limits to 0 and uses the language model only. The flag is also in the evaluation command on the checkpoint card</td></tr>
-<tr><td><code>--max-num-seqs=32</code></td><td>Qwen</td><td>A hybrid model cannot start the engine when this value is larger than the number of Mamba cache blocks</td></tr>
-<tr><td><code>--kv-cache-dtype=fp8</code></td><td>Both</td><td>Stores the KV cache in FP8 to use less GPU memory</td></tr>
-<tr><td><code>--scheduling-policy=priority</code></td><td>Both</td><td>The <code>priority</code> in the request body sets the processing order (Part 3)</td></tr>
-<tr><td><code>--speculative-config</code> (MTP, 3 speculative tokens)</td><td>Qwen</td><td>Speculative decoding with the MTP head of the model (Part 2)</td></tr>
-<tr><td><code>--enable-sleep-mode</code>, <code>VLLM_SERVER_DEV_MODE=1</code></td><td>Qwen</td><td>Registers the <code>/sleep</code>, <code>/wake_up</code> and <code>/is_sleeping</code> endpoints (Part 3)</td></tr>
-<tr><td><code>startupProbe</code> every 1 second, up to 1,800 failures</td><td>Both</td><td>Catches the Ready time to the second and waits up to 30 minutes</td></tr>
-<tr><td><code>progressDeadlineSeconds: 1800</code></td><td>Both</td><td>The default of 600 seconds can be shorter than a cold start</td></tr>
-<tr><td><code>strategy: Recreate</code></td><td>Both</td><td>One pod uses the single GPU, so the old pod goes down first</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 11.</b> Settings that affect the start-up time or whether the start succeeds. The part in parentheses is where that behavior is covered</p>
-<p>The readinessProbe of Qwen checks <code>/is_sleeping</code>, not <code>/health</code>. <code>/health</code> returns 200 during sleep as well, so the sleep state has to be checked directly to keep a sleeping pod from receiving traffic.</p>
+<p class="cap"><b>Table 7.</b> Answers to example requests sent directly to Decider 2B (November 14, 2026, one run per request). These values are not an accuracy evaluation.</p>
+<p>One question takes about 70 ms to judge. Sent one question at a time through the gateway, 50 times each, the medians were 72.6 ms to 73.0 ms (November 14, 2026). The round trip of the BFF, with the 3 questions in one request, took 139.4 ms to 150.0 ms (November 15, 2026, 4 requests). The BFF asks once, on the first request of a session, so this time is not added to every message. For requests that sent the task type in a header, the median decision time was 0.1 ms (November 15, 2026, 20 requests per model).</p>
+<h3>The gateway picks the pool, and Qwen3.8-27B is woken</h3>
+<p>After the decision, the BFF writes the result into the request and sends it to the gateway: <code>model</code>, <code>priority</code> and <code>chat_template_kwargs.enable_thinking</code> in the body, and the header <code>x-llm-d-inference-objective</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># The request the BFF sends to the gateway (excerpt)
+x-llm-d-inference-objective: gemma-interactive
+
+{"model": "gemma-4-31b", "priority": 0, "chat_template_kwargs": {"enable_thinking": false}, "messages": [...], "stream": true}</code></pre></div>
+<p>The gateway layer is built with the <a href="https://gateway-api-inference-extension.sigs.k8s.io/" target="_blank" rel="noopener">Gateway API Inference Extension</a> (GAIE), a project that adds resources for inference to the Kubernetes Gateway API. An InferencePool is a group of model server pods, and the EPP (Endpoint Picker) picks the pod in the pool that gets the request. In an OpenAI-compatible API the model name is in the body, not in the URL, so agentgateway, the gateway implementation, copies the <code>model</code> value of the body into a header. The HTTPRoute picks the InferencePool of the model by that header. A <code>model</code> value that is not registered gets 404. Only <code>/v1/chat/completions</code> and <code>/v1/models</code> lead to the pools of the models, so management paths such as <code>/sleep</code> are not exposed through the gateway. The EPP took 0.03 ms per request to schedule (November 14, 2026).</p>
+<p>The priority goes to two places. The gateway uses the objective name in the header to reject batch requests when a pool is saturated, and vLLM uses <code>priority</code> in the body to choose which request in its queue to process first. Under batch load, the median TTFT of support requests was 30.9 s, and it became 0.19 s with engine priority on (November 14, 2026, Gemma 4 31B). <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> explains the setup and the measurement.</p>
+<p>A request for Qwen3.8-27B has one more step. Qwen3.8-27B is for internal work and is set up to be put to sleep with the vLLM sleep mode outside business hours. So the BFF calls the wake API before every Qwen request. When the model was awake, the call only checked and took a median of 12.8 ms (November 15, 2026, 20 requests). When it was asleep, waking took 3,662 ms and the first content of that request arrived after 4.06 s (the same day, 1 request). <code>woke</code> and <code>wake_ms</code> in the response header <code>x-bff-timing</code> show these values.</p>
 </div></section>
 
-<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Limits of values measured once</h2></header><div class="prose">
-<p>Every scenario was measured once. I did not measure run-to-run variation, and node provisioning in particular ranged from 55 s to 118 s on the same day. Rather than using the values in this post as estimates for another environment, I recommend measuring them yourself in the same way.</p>
-<p>The baseline configuration of Qwen3.8-27B was not measured, so how much Qwen improved is unknown. Other is the total minus the four phases, so I could not break it down further. I also did not check the effect of tuning the loader concurrency, the location of the hostPath, or the kernel and performance of the block FP8 checkpoint.</p>
-<p>Some measurement conditions are worth noting. In every cold scenario, deleting the previous GPU node took about 6 minutes 30 seconds, and that time is not counted in the start-up time. The Amazon GuardDuty agent was running on the GPU nodes, and in the baseline configuration the Mountpoint pod started on the new node as well. There were no container restarts in any of the four scenarios.</p>
-</div></section>
-
-<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>When to apply which action</h2></header><div class="prose">
-<p>To apply the same approach, I recommend measuring by phase first. NodeClaim and pod timestamps, the kubelet <code>Pulled</code> event and two lines of the vLLM log give you the four phases, and what to change depends on which phase is long. Table 12 lists the action to consider first in each situation, with the conditions I confirmed in this environment.</p>
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Tokenization and inference (stages 3 and 5)</h2></header><div class="prose">
+<p>Once the model is decided, the request arrives at the vLLM pod of that model. In stage 3 the vLLM API server applies the chat template to the message list to make one string and turns it into token IDs with the tokenizer of that model. <code>--max-model-len</code> limits the combined length of input and output, and it is set to 16,384 tokens for Gemma 4 31B and 32,768 tokens for Qwen3.8-27B. The time tokenization takes was not measured separately.</p>
+<p>The inference of stage 5 has 2 phases.</p>
+<ul>
+<li>Prefill: computes all input tokens at once and writes the result into the KV cache. The KV cache is a store in GPU memory for the intermediate results of tokens that were already computed, so they are not computed again for the next token.</li>
+<li>Decode: generates tokens one at a time while reusing the KV cache. Each token leaves right away as a chunk.</li>
+</ul>
+<p>Each of the 2 phases shows up in its own metric. TTFT (Time To First Token) is the time until the first token and is mostly prefill. ITL (Inter-Token Latency) is the interval between streaming chunks and is the speed of decode. TPOT (Time Per Output Token) is the time per output token.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>Situation</th><th>Action to consider first</th><th>Time saved in this environment</th><th>Conditions and limits</th></tr>
+<tr><th>Metric</th><th>Gemma 4 31B</th><th>Qwen3.8-27B</th></tr>
 </thead>
 <tbody>
-<tr><td>Weights are in Amazon S3 and are read through a mounted path</td><td>The streaming loader (<code>--load-format=runai_streamer</code>) and EKS Pod Identity</td><td>Weight load 59.6 s to 19.2 s</td><td>Loader concurrency and chunk size at their defaults. Values with tuning were not measured</td></tr>
-<tr><td>Pods are often restarted on the same node</td><td>Keep the compile cache on a hostPath of the node (<code>VLLM_CACHE_ROOT</code>)</td><td>Engine initialization 95.6 s to 23.7 s</td><td>No cache when the node changes</td></tr>
-<tr><td>New nodes start often</td><td>Publish the compile cache to S3 and restore it in an initContainer, and pre-pull the image</td><td>Engine initialization 95.5 s to 23.7 s, image pull 111.1 s to 71.0 s</td><td>Publish again under a new prefix when the vLLM version, the model, the precision or the GPU changes</td></tr>
-<tr><td>Only the GPU memory has to be freed outside business hours</td><td>Keep the pod and use sleep and wake</td><td>Wake in 3.70 s and 3.67 s (a warm restart takes 123 s)</td><td>The node and the pod stay, so the node cannot be reclaimed</td></tr>
+<tr><td>TTFT median (p99)</td><td class="num">81.3 ms (86.6 ms)</td><td class="num">167.6 ms (210.4 ms)</td></tr>
+<tr><td>ITL median (p99)</td><td class="num">54.0 ms (57.7 ms)</td><td class="num">69.8 ms (74.3 ms)</td></tr>
+<tr><td>TPOT median</td><td class="num">53.9 ms</td><td class="num">26.6 ms</td></tr>
+<tr><td>Generation speed</td><td class="num">18.5 tokens/s</td><td class="num">32.5 tokens/s</td></tr>
+<tr><td>Total time for a 128-token response</td><td class="num">6,927.8 ms</td><td class="num">3,554.7 ms</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 12.</b> The action to consider first in each situation. The time saved was measured on Gemma 4 31B and the wake from sleep on Qwen3.8-27B</p>
-<p>Node provisioning and other do not shrink with these actions. In the optimized configuration the two make up 146.1 s of the 260 s, and node provisioning ranged from 55 s to 118 s on the same day. If the start-up time you are aiming for is shorter than that, waking from sleep without restarting the pod is the only alternative this post confirmed.</p>
-<p><a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> measures, against the SLOs, how many requests the two models started this way can process at the same time on a single L40S.</p>
+<p class="cap"><b>Table 8.</b> Inference time of a single request (November 14, 2026, 256 input tokens and 128 output tokens, concurrency 1, one run of 16 requests sent directly to the vLLM Service)</p>
+<p>The total time of a response follows from two of these metrics. With the values of Gemma 4 31B it matches the measured 6,927.8 ms.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>Total time ≒ TTFT + (output tokens - 1) × TPOT
+           = 81.3ms + 127 × 53.91ms ≒ 6,928ms</code></pre></div>
+<p>The longer the output, the more decode determines the total time. A longer input raises TTFT. The TTFT p99 of Gemma 4 31B was 86.6 ms with 256 input tokens and 1,093 ms with 4,096 input tokens.</p>
+<p>Qwen3.8-27B has a longer ITL and still generates faster. It runs with MTP (Multi-Token Prediction), which guesses several next tokens ahead, so one chunk carries several tokens. That is why the chunk interval is 69.8 ms while the time per token is 26.6 ms.</p>
+<p>The number of requests one GPU runs at the same time is bound by the size of the KV cache. The KV cache is what is left of the GPU memory of the L40S after the weights are loaded. With the workload of Table 8 at higher concurrency, Gemma 4 31B ran up to 45 requests at the same time and Qwen3.8-27B up to 3. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> covers the cause of this limit and how to adjust it.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Post-processing and the Web Search tool (stage 6)</h2></header><div class="prose">
+<h3>Text and parsers</h3>
+<p>vLLM turns the generated token IDs back into text (detokenize) and separates two things from the answer. The reasoning parser moves the reasoning into <code>reasoning_content</code>, and the tool-call parser extracts tool calls into <code>tool_calls</code>. Gemma 4 31B uses the <code>gemma4</code> parsers, and Qwen3.8-27B uses <code>qwen3</code> and <code>qwen3_coder</code>. While streaming, this runs for every chunk. A response whose <code>finish_reason</code> is <code>tool_calls</code> means that the model asked for a tool to be run instead of answering. This environment has no output safety filter.</p>
+<h3>How the Web Search tool runs</h3>
+<p>Web search is not one of the 8 stages. It is an optional path that goes from stage 6 back to stage 5, only when the request turns it on. Gemma 4 31B and Qwen3.8-27B still do the inference, and <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/web-search-api.html" target="_blank" rel="noopener">Amazon Bedrock AgentCore Web Search</a> only does the search.</p>
+<figure class="fig"><div class="canvas wide"><img src="eks-vllm-two-models-part-1-assets/fig03-web-search-flow-en.png" alt="An infographic that draws the order in which the web search tool runs as 4 lanes: browser, BFF, model and AgentCore Web Search. When a request sends x-web-search: on, the BFF adds the tool definition and an instruction. When the model calls web_search, the BFF runs InvokeWebSearch in us-east-1 and returns 5 results with source numbers. The model answers with the numbers, and the page shows the source list with the answer. The figure also lists when the tool is attached, the search time, the input tokens and the price" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> How the Web Search tool runs. The left side shows when the tool is attached and the measured values, and the right side shows the order of events inside one request.</figcaption></figure>
+<ol>
+<li>When a request sends the header <code>x-web-search: on</code>, the BFF adds the <code>web_search</code> tool definition and an instruction (today's date and the rule for source numbers) to the model request.</li>
+<li>The model decides whether to search and what to search for. When it calls <code>web_search(query)</code>, that response ends with <code>finish_reason: tool_calls</code>.</li>
+<li>The BFF calls the <code>InvokeWebSearch</code> API. If the query has the format of a resident registration number or a card number, the BFF does not send that search.</li>
+<li>The BFF numbers the 5 results as sources, cuts each text to 1,200 characters and returns them to the model. Results without a URL are dropped.</li>
+<li>The model reads the results and answers with numbers such as <code>[1]</code> and <code>[2]</code>. The engine processes the request with the results added again from prefill.</li>
+<li>The model gets 3 rounds of tool calls. After the third, the BFF sends <code>tool_choice: none</code>, so the model answers with the results it has.</li>
+</ol>
+<p>For every search, the BFF reports the query and the source list in an SSE comment line. OpenAI-style clients ignore comment lines, and the check page shows the list as links under the answer. The terms of use require output that uses search results to show the sources and links, so the list is always shown even when the model leaves out a number.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>: bff {"event":"tool_call","name":"web_search","ms":&lt;ms&gt;,"query":"...","search_ms":&lt;ms&gt;,"sources":[{"n":1,"title":"...","url":"https://...","published_at":"..."}]}</code></pre></div>
+<p>The conditions in Table 9 decide whether the tool is attached, and the response header <code>x-bff-search</code> carries the result.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th><code>x-bff-search</code></th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>on</code></td><td>The web search tool was attached to the model request</td></tr>
+<tr><td><code>off</code></td><td>The request did not turn it on, or it is a benchmark request, or it brought its own <code>tools</code></td></tr>
+<tr><td><code>sensitive</code></td><td>Not attached because the request is sensitive</td></tr>
+<tr><td><code>fallback</code></td><td>Not attached to a default request that has no judgment that personal data is absent</td></tr>
+<tr><td><code>disabled</code></td><td>Web search is not configured in this environment</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 9.</b> Values of the response header <code>x-bff-search</code></p>
+<p>Sensitive requests do not get the tool because of the Region. The API is not offered in the Seoul Region, so the BFF calls the API in us-east-1, and the search query leaves the Seoul Region. The permission to call it is a single action, <code>bedrock-agentcore:InvokeWebSearch</code>, on the IAM role attached to the BFF pods through EKS Pod Identity, and the code holds no credentials.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value</th><th>Condition</th></tr>
+</thead>
+<tbody>
+<tr><td>Time of one search (called from the work machine)</td><td>481 ms to 1,065 ms</td><td>6 calls to us-east-1 from the work machine in Seoul</td></tr>
+<tr><td>Time of one search (called from a BFF pod)</td><td>547.9 ms, 594.9 ms</td><td>November 17, 2026, 2 requests</td></tr>
+<tr><td>Input with the search results added</td><td>2,606 tokens for Gemma 4 31B, 4,328 tokens for Qwen3.8-27B</td><td>After 1 and 2 searches, 5 results per search</td></tr>
+<tr><td>Price and default quota</td><td>7.00 USD per 1,000 queries, 10 per second</td><td>Per account and Region</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 10.</b> Measured values and limits of web search. The price is the public rate checked on November 15, 2026.</p>
+<p>A request that uses search gets its first content later. The time the model takes to generate the tool call, the search, and the prefill of the second inference with the results all come before the first content. Running the same flow by hand with Qwen3.8-27B, the first round took 2.6 s and the second round, which read 10 results and answered, took 12.1 s.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Delivering the response, and cost (stage 7)</h2></header><div class="prose">
+<p>The BFF does not collect the SSE chunks it gets from the gateway. It passes each one on as it arrives. If a response is collected somewhere in between, the text appears all at once and streaming loses its point. That is why caching and compression are off for the <code>/v1/*</code> behavior in CloudFront. On November 15, 2026, a support request sent to the CloudFront address returned 53 events with content, one at a time, at a median interval of 53.5 ms. No two events arrived within 1 ms of each other. This interval is at the level of the Gemma 4 31B ITL in Table 8.</p>
+<p>A streaming response may carry nothing for several seconds before the first token, and after that chunks follow at intervals of tens of milliseconds. The timeouts on the path have to fit these 2 phases.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Setting</th><th>Value</th><th>Reason</th></tr>
+</thead>
+<tbody>
+<tr><td>CloudFront origin response timeout</td><td>60 s (default 30 s)</td><td>The wait until the first byte and between packets</td></tr>
+<tr><td>ALB idle timeout</td><td>120 s (default 60 s)</td><td>Longer than CloudFront, so that CloudFront closes first</td></tr>
+<tr><td>HTTPRoute request timeout</td><td>300 s</td><td>An output of 4,096 tokens finishes within it (about 3 minutes for Gemma 4 31B)</td></tr>
+<tr><td>Decider 2B call</td><td>2 s</td><td>Past that, the default applies</td></tr>
+<tr><td>Wake API call</td><td>60 s</td><td>The measured wake time is 3.66 s</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 11.</b> Timeout settings on the streaming path</p>
+<p>Usage comes with the response. With <code>stream_options.include_usage</code> in the request, the <code>usage</code> of the last chunk carries the input and output token counts. This environment has no price per token, though. Cost accrues for the time the GPU nodes are up, and the fixed cost of this environment is estimated at about 10.05 USD per hour. A longer output does not raise the bill, but it lengthens the time that request occupies the GPU.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Logs and metrics (stage 8)</h2></header><div class="prose">
+<p>Every segment a request passes leaves a record. Joining the records in Table 12 by the request ID (<code>x-request-id</code>) and <code>X-Amzn-Trace-Id</code> gives the time per segment of one request.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Segment</th><th>Record</th><th>How to look</th></tr>
+</thead>
+<tbody>
+<tr><td>CloudFront</td><td>Response header <code>Server-Timing</code></td><td>Read the edge and origin times in the response header</td></tr>
+<tr><td>Internal ALB</td><td>Access logs</td><td>Log files in an Amazon S3 bucket</td></tr>
+<tr><td>BFF</td><td>Standard output of the pods (<code>chat</code> and <code>chat_end</code> events)</td><td><code>kubectl -n app logs -l app.kubernetes.io/name=bff</code></td></tr>
+<tr><td>Gateway, EPP</td><td>Prometheus metrics</td><td>Amazon Managed Service for Prometheus</td></tr>
+<tr><td>vLLM</td><td>Prometheus metrics</td><td><code>vllm:time_to_first_token_seconds</code>, <code>vllm:inter_token_latency_seconds</code>, <code>vllm:num_requests_waiting</code>, <code>vllm:kv_cache_usage_perc</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 12.</b> Records per segment and how to look at them</p>
+<p>One Prometheus v3.16.0 in agent mode collects the metrics. It scrapes the 2 vLLM pods every 5 seconds and the 4 EPP pods and 2 gateway pods every 15 seconds, and writes to Amazon Managed Service for Prometheus.</p>
+<p>A browser or client sees some of this and not the rest. The client sees the arrival time of the response headers, <code>x-bff-timing</code>, <code>Server-Timing</code>, the time to the first chunk, the chunk intervals, the total time and <code>usage</code>. Queueing, prefill and post-processing times are not visible to the client, so you look them up in the vLLM metrics.</p>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>vLLM takes 77% and 83% of the time to first content</h2></header><div class="prose">
+<p>The time each segment takes was measured on requests that passed all 8 stages. The requests went one at a time from an Amazon EC2 instance in the Seoul Region to the CloudFront address, 20 per model. Gemma 4 31B got a short support question and Qwen3.8-27B a short coding question.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Segment</th><th>Gemma 4 31B median</th><th>Gemma 4 31B max</th><th>Qwen3.8-27B median</th><th>Qwen3.8-27B max</th></tr>
+</thead>
+<tbody>
+<tr><td>User to edge</td><td class="num">1.8 ms</td><td class="num">3.2 ms</td><td class="num">1.9 ms</td><td class="num">5.0 ms</td></tr>
+<tr><td>CloudFront</td><td class="num">5.0 ms</td><td class="num">79.0 ms</td><td class="num">5.0 ms</td><td class="num">9.0 ms</td></tr>
+<tr><td>ALB</td><td class="num">1.6 ms</td><td class="num">4.2 ms</td><td class="num">1.6 ms</td><td class="num">12.7 ms</td></tr>
+<tr><td>BFF</td><td class="num">0.1 ms</td><td class="num">0.1 ms</td><td class="num">12.8 ms</td><td class="num">21.9 ms</td></tr>
+<tr><td>Gateway (agentgateway, EPP)</td><td class="num">9.7 ms</td><td class="num">16.4 ms</td><td class="num">8.4 ms</td><td class="num">78.0 ms</td></tr>
+<tr><td>vLLM</td><td class="num">63.2 ms</td><td class="num">66.6 ms</td><td class="num">147.6 ms</td><td class="num">160.0 ms</td></tr>
+<tr><td>First content seen by the user</td><td class="num">81.9 ms</td><td class="num">153.6 ms</td><td class="num">177.5 ms</td><td class="num">253.1 ms</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 13.</b> Time to first content by segment (November 15, 2026, requests sent one at a time, 20 per model, at most 32 output tokens). The rows are medians per segment, so they do not add up exactly to the last row.</p>
+<p>vLLM takes most of the time to first content: 63.2 ms of 81.9 ms (77%) for Gemma 4 31B and 147.6 ms of 177.5 ms (83%) for Qwen3.8-27B. Almost all of that is prefill. The requests went one at a time, so the queue time was 0 ms, and prefill took 58.8 ms and 144.4 ms.</p>
+<p>The medians of the segments before vLLM add up to 18.2 ms for Gemma 4 31B and 29.7 ms for Qwen3.8-27B. The Qwen side is longer because the BFF calls the wake API on every request. The layers for authentication, the model decision and routing, all set up by hand, added less than 30 ms for both models.</p>
+<p>Three conditions apply to this table. The measuring machine was an instance in the same Region, so the time between the user and the edge is short. The requests used a connection that was already open, and opening a new TLS connection took 14.5 ms and 14.2 ms. The requests went one at a time, so the waiting time that load adds is not in these values.</p>
+</div></section>
+
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>The order for reading the response headers, and the stage to check first per symptom</h2></header><div class="prose">
+<p>When a response is not what you expected, reading the response headers in a fixed order narrows down the stage to look at.</p>
+<ol>
+<li>If there is an error code, Table 4 tells you how far the request got.</li>
+<li><code>x-bff-model</code> and <code>x-bff-decision</code> tell you which model was chosen and by what. If the value is <code>fallback</code>, look at the confidences in <code>x-bff-reason</code>.</li>
+<li>If the request turned web search on, check that <code>x-bff-search</code> is <code>on</code>.</li>
+<li>If the request is slow, split the time in <code>x-bff-timing</code> into deciding, waking and the wait for the gateway's response headers. If all 3 values are short, the rest is the queue and prefill in vLLM.</li>
+</ol>
+<p>Table 14 lists where to look first for each symptom.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Symptom</th><th>Look first at</th><th>Basis in this post</th></tr>
+</thead>
+<tbody>
+<tr><td>Every request gets 403 for a while</td><td>AWS WAF in stage 1</td><td>300 requests per 5 minutes per IP. 25.6 s until the first 403, 300.4 s until it is lifted</td></tr>
+<tr><td>401</td><td>The BFF in stage 1</td><td>Access tokens are valid for 60 minutes. ID tokens are not accepted</td></tr>
+<tr><td>A different model answers than expected</td><td><code>x-bff-decision</code>, <code>x-bff-reason</code></td><td>The sensitive data rule comes before the task type. A session reuses its decision for 30 minutes</td></tr>
+<tr><td>Web search is on but no search runs</td><td><code>x-bff-search</code></td><td>The conditions for <code>sensitive</code>, <code>fallback</code> and <code>off</code></td></tr>
+<tr><td>First content from Qwen3.8-27B is seconds late</td><td><code>woke</code> and <code>wake_ms</code> in <code>x-bff-timing</code></td><td>Waking from sleep took 3,662 ms, first content after 4.06 s</td></tr>
+<tr><td>First content is late under load</td><td><code>vllm:num_requests_waiting</code> and <code>vllm:kv_cache_usage_perc</code> in stage 8</td><td>The number of requests running at once is bound by the KV cache</td></tr>
+<tr><td>Text appears all at once</td><td>The path settings in stage 7</td><td>Event interval of 53.5 ms on a path with caching and compression off</td></tr>
+<tr><td>A long response is cut off</td><td>The timeouts in stage 7</td><td>CloudFront 60 s, ALB 120 s, HTTPRoute 300 s</td></tr>
+<tr><td>A batch request gets 429</td><td>The gateway in stage 4</td><td>A saturated pool rejects low-priority requests</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 14.</b> The stage to check first for each symptom, and the basis</p>
+<p>The basis of this table has limits. The times of tokenization and post-processing were not measured separately. That cookie stickiness makes a session reuse its decision on the same pod is described from the settings and was not checked separately. What happens when a response carries nothing for more than 60 seconds was not reproduced either. Most values were measured once, so they do not show run-to-run variation. <a href="https://whchoi98.github.io/docs/techblog/container/eks-vllm-two-models-part-2/" target="_blank" rel="noopener">Part 2</a> continues with how the components are arranged and how start-up time and concurrent throughput were tuned.</p>
 </div></section>
 </div>
 <section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
 <div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
 <tbody>
-<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html" target="_blank" rel="noopener">Learn how EKS Pod Identity grants pods access to AWS services</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/pod-id-association.html" target="_blank" rel="noopener">Assign an IAM role to a Kubernetes service account</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-inference-fast-model-loading.html" target="_blank" rel="noopener">Accelerate model loading on Amazon EKS</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/ml-eks-optimized-ami.html" target="_blank" rel="noopener">Use EKS-optimized accelerated Linux AMIs for GPU instances</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/s3-csi.html" target="_blank" rel="noopener">Access Amazon S3 objects with Mountpoint for Amazon S3 CSI driver</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://aws.amazon.com/ko/ec2/instance-types/g6e/" target="_blank" rel="noopener">Amazon EC2 G6e Instances</a></td><td class="nowrap"><span class="l-ko">제품 페이지</span><span class="l-en">Product page</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://karpenter.sh/docs/concepts/nodepools/" target="_blank" rel="noopener">NodePools</a></td><td class="nowrap"><span class="l-ko">Karpenter 문서</span><span class="l-en">Karpenter docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://karpenter.sh/docs/concepts/nodeclasses/" target="_blank" rel="noopener">NodeClasses</a></td><td class="nowrap"><span class="l-ko">Karpenter 문서</span><span class="l-en">Karpenter docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/models/extensions/runai_model_streamer/" target="_blank" rel="noopener">Loading models with Run:ai Model Streamer</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/design/torch_compile/" target="_blank" rel="noopener">torch.compile integration</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/features/quantization/" target="_blank" rel="noopener">Quantization</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/features/sleep_mode/" target="_blank" rel="noopener">Sleep Mode</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://github.com/vllm-project/vllm/blob/v0.33.0/csrc/quantization/w8a8/cutlass/scaled_mm_entry.cu" target="_blank" rel="noopener">scaled_mm_entry.cu (v0.33.0)</a></td><td class="nowrap"><span class="l-ko">vLLM 소스</span><span class="l-en">vLLM source</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://github.com/vllm-project/vllm/issues/58241" target="_blank" rel="noopener">cutlass_scaled_mm_supports_block_fp8 excludes SM89 (Ada Lovelace) despite native FP8 tensor core support (issue #58241)</a></td><td class="nowrap"><span class="l-ko">vLLM 이슈</span><span class="l-en">vLLM issue</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://github.com/dsx-ai-factory/model-streamer/blob/master/docs/src/usage.md" target="_blank" rel="noopener">Using Model Streamer</a></td><td class="nowrap"><span class="l-ko">Run:ai Model Streamer 문서</span><span class="l-en">Run:ai Model Streamer docs</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://huggingface.co/RedHatAI/gemma-4-31B-it-FP8-dynamic" target="_blank" rel="noopener">RedHatAI/gemma-4-31B-it-FP8-dynamic</a></td><td class="nowrap"><span class="l-ko">Hugging Face 모델 카드</span><span class="l-en">Hugging Face model card</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://huggingface.co/AzatAI/Qwen3.8-27B-FP8-dynamic" target="_blank" rel="noopener">AzatAI/Qwen3.8-27B-FP8-dynamic</a></td><td class="nowrap"><span class="l-ko">Hugging Face 모델 카드</span><span class="l-en">Hugging Face model card</span></td><td class="nowrap num">2026-11-21</td></tr>
-<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://huggingface.co/Qwen/Qwen3.8-27B-FP8" target="_blank" rel="noopener">Qwen/Qwen3.8-27B-FP8</a></td><td class="nowrap"><span class="l-ko">Hugging Face 모델 카드</span><span class="l-en">Hugging Face model card</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://github.com/whchoi98/ow-on-gpu" target="_blank" rel="noopener">ow-on-gpu</a></td><td class="nowrap"><span class="l-ko">GitHub 저장소</span><span class="l-en">GitHub repository</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/design/metrics/" target="_blank" rel="noopener">Metrics</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/api/vllm/config/scheduler/" target="_blank" rel="noopener">vllm.config.scheduler</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/features/sleep_mode/" target="_blank" rel="noopener">Sleep Mode</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://gateway-api-inference-extension.sigs.k8s.io/" target="_blank" rel="noopener">Introduction</a></td><td class="nowrap"><span class="l-ko">Gateway API Inference Extension 문서</span><span class="l-en">Gateway API Inference Extension docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://gateway-api-inference-extension.sigs.k8s.io/api-types/inferencepool/" target="_blank" rel="noopener">InferencePool</a></td><td class="nowrap"><span class="l-ko">Gateway API Inference Extension 문서</span><span class="l-en">Gateway API Inference Extension docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://github.com/llm-d/llm-d/blob/v1.0.0/docs/architecture/router/flow-control.md" target="_blank" rel="noopener">Flow Control (llm-d v1.0.0)</a></td><td class="nowrap"><span class="l-ko">llm-d 문서</span><span class="l-en">llm-d docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://agentgateway.dev/docs/kubernetes/latest/documentation/llm/inference/multiple-inference-pools/" target="_blank" rel="noopener">Multiple inference pools</a></td><td class="nowrap"><span class="l-ko">agentgateway 문서</span><span class="l-en">agentgateway docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://github.com/strands-labs/strands-decider" target="_blank" rel="noopener">strands-decider</a></td><td class="nowrap"><span class="l-ko">GitHub 저장소</span><span class="l-en">GitHub repository</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/web-search-api.html" target="_blank" rel="noopener">Search the web using Amazon Bedrock AgentCore Web Search</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://aws.amazon.com/ko/blogs/machine-learning/introducing-the-web-search-api-on-amazon-bedrock-agentcore/" target="_blank" rel="noopener">Introducing the Web Search API on Amazon Bedrock AgentCore (2026-11-11)</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://aws.amazon.com/ko/bedrock/agentcore/pricing/" target="_blank" rel="noopener">Amazon Bedrock AgentCore pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html" target="_blank" rel="noopener">Restrict access with VPC origins</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html" target="_blank" rel="noopener">Origin settings</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-response-headers-policies.html" target="_blank" rel="noopener">Understand response headers policies</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based-caveats.html" target="_blank" rel="noopener">Rate-based rule caveats in AWS WAF</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-tokens-verifying-a-jwt.html" target="_blank" rel="noopener">Verifying JSON web tokens</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-authentication-flow-methods.html" target="_blank" rel="noopener">Authentication flows</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-19"><td class="num"><b>19</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-target-group-attributes.html" target="_blank" rel="noopener">Edit target group attributes for your Application Load Balancer</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
+<tr id="src-20"><td class="num"><b>20</b></td><td class="t"><a href="https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html" target="_blank" rel="noopener">Learn how EKS Pod Identity grants pods access to AWS services</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-21</td></tr>
 </tbody></table></div>
 </div></section>
 <footer class="foot">
@@ -1110,7 +944,7 @@ resource "aws_eks_pod_identity_association" "model_reader" {
 <ul>
 <li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
 </ul>
-<p><span class="l-ko">이 글의 시간과 크기는 2026년 11월 14일 서울 리전(ap-northeast-2)의 g6e.4xlarge에서 vLLM v0.33.0으로 시나리오마다 한 번 잰 값입니다. compile 캐시가 맞지 않은 사례 한 건만 11월 15일의 값입니다. 반복했을 때의 편차는 재지 않았고 인스턴스 유형, 체크포인트, 버전, 측정 시점에 따라 결과는 달라집니다. 참고 자료의 링크는 2026년 11월 21일에 다시 확인했습니다.</span><span class="l-en">The times and sizes in this post were measured once per scenario on November 14, 2026, on g6e.4xlarge in the Seoul Region (ap-northeast-2) with vLLM v0.33.0. Only the one case of a compile cache miss is from November 15. Run-to-run variation was not measured, and results change with instance type, checkpoint, version and time of measurement. The links in the references were checked again on November 21, 2026.</span></p>
+<p><span class="l-ko">이 글의 값은 2026년 11월 14일부터 17일 사이에 서울 리전(ap-northeast-2)의 한 환경에서 측정했고 날짜와 횟수는 표와 문장마다 적었습니다. 대부분 한 번씩 측정한 값이어서 반복했을 때의 편차는 담겨 있지 않습니다. 금액은 2026년 11월 15일에 확인한 공개 단가를 바탕으로 한 세전 USD 추정치입니다. 참고 자료의 링크는 2026년 11월 21일에 확인했습니다.</span><span class="l-en">The values in this post were measured in one environment in the Seoul Region (ap-northeast-2) between November 14 and 17, 2026, and each table and sentence gives its date and number of runs. Most values come from a single run, so they do not show run-to-run variation. Amounts are pre-tax USD estimates based on public rates checked on November 15, 2026. The links in the references were checked on November 21, 2026.</span></p>
 </footer>
 
 </div>
