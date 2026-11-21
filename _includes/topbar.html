@@ -4,9 +4,9 @@
     <a href="/" {% if page.layout == 'home' %}class="active"{% endif %}><span class="l-ko">홈</span><span class="l-en">Home</span></a>
     <a href="/tags/" {% if page.layout == 'tags' %}class="active"{% endif %}><span class="l-ko">태그</span><span class="l-en">Tags</span></a>
     <a href="/docs/workshop/" {% if page.section == 'workshop' %}class="active"{% endif %}>Workshop</a>
-    <a href="/about/" {% if page.url == '/about/' %}class="active"{% endif %}>About</a>
     <a href="https://code-pulse.whchoi.net/" target="_blank" rel="noopener">Code Pulse</a>
     <a href="https://llm-monitor.whchoi.net/" target="_blank" rel="noopener">LLM Monitor</a>
+    <a href="/about/" {% if page.url == '/about/' %}class="active"{% endif %}>About</a>
   </nav>
   <div class="topbar-spacer"></div>
   {% if page.layout == 'home' %}
