@@ -1,0 +1,1109 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amazon Aurora 클러스터의 VPC 이동과 중단 시간</title>
+<meta name="description" content="Amazon Aurora 클러스터를 다른 VPC로 옮기는 기능을 서울 리전에서 38회 테스트했습니다. 쓰기 중단은 중앙값 24.7초였고 타임아웃이 없는 클라이언트의 연결은 963초 멈췄으며 서버에는 끊긴 세션의 잠금이 약 6분 남았습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/database/aurora-move-cluster-to-different-vpc/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-22</span><span class="l-en">Published 2026-11-22</span></span><span>Database</span><span><span class="l-ko">읽는 시간 17분</span><span class="l-en">17 min read</span></span></div>
+<h1><span class="l-ko">Amazon Aurora 클러스터의 VPC 이동과 중단 시간</span><span class="l-en">The interruption when an Amazon Aurora cluster moves to another VPC</span></h1>
+<p class="thesis"><span class="l-ko">Amazon Aurora가 2026년 11월 19일에 발표한 클러스터 VPC 이동 기능을 서울 리전에서 직접 테스트해 보았습니다. Aurora PostgreSQL, Aurora MySQL, Serverless v2 클러스터를 38회 옮긴 결과 데이터와 엔드포인트 이름은 그대로였습니다. 쓰기 중단은 VPC 간 이동 30회의 중앙값으로 24.7초였습니다. 하지만 엔진이 재시작하지 않고 연결이 오류 없이 끊기기 때문에 타임아웃이 없는 클라이언트는 963초 동안 멈췄고 서버에는 끊긴 세션의 잠금이 약 6분 동안 남았습니다.</span><span class="l-en">I tested the feature Amazon Aurora announced on November 19, 2026 for moving a cluster to a different VPC, in the Seoul Region. Over 38 moves of Aurora PostgreSQL, Aurora MySQL and Serverless v2 clusters the data and the endpoint names stayed. Writes were interrupted for a median of 24.7 s across 30 cross-VPC moves. But the engine does not restart and connections are cut without an error, so a client without timeouts stalled for 963 s and the locks of cut sessions stayed on the server for about six minutes.</span></p>
+<div class="tags"><span>#Amazon Aurora</span><span>#Aurora PostgreSQL</span><span>#Aurora MySQL</span><span>#Amazon VPC</span><span>#ModifyDBCluster</span></div>
+<ul class="facts"><li><span class="l-ko"><b>중단 시간</b>: 유지 중이던 연결의 쓰기 중단은 VPC 간 이동 30회의 중앙값으로 24.7초(최소 18.1초, 최대 31.3초)였습니다. 엔진, 데이터 크기(0.2GB와 23GB), 같은 VPC 안의 이동 여부에 따른 차이는 없었습니다.</span><span class="l-en"><b>Interruption</b>: writes on an open connection were interrupted for a median of 24.7 s (18.1 s to 31.3 s) over 30 cross-VPC moves. The engine, the data size (0.2 GB and 23 GB) and a move inside one VPC made no difference.</span></li><li><span class="l-ko"><b>시간 순서</b>: API 호출 후 10.9초에 연결이 끊기고 27.8초에 완료 이벤트가 기록되며 34.6초에 DNS 응답이 새 IP로 바뀝니다. writer와 reader는 함께 끊깁니다.</span><span class="l-en"><b>Timeline</b>: connections are cut 10.9 s after the API call, the completion event is logged at 27.8 s, and the DNS answer switches to the new IP at 34.6 s. The writer and the reader are cut together.</span></li><li><span class="l-ko"><b>클라이언트 타임아웃</b>: 타임아웃이 없는 클라이언트는 새 연결을 25초 만에 맺었지만 유지 중이던 연결은 963초 동안 응답을 기다렸습니다.</span><span class="l-en"><b>Client timeouts</b>: a client without timeouts opened new connections after 25 s, but its open connection waited 963 s for an answer.</span></li><li><span class="l-ko"><b>서버에 남는 세션</b>: 엔진이 재시작하지 않아 끊긴 클라이언트의 세션과 행 잠금이 약 360초 남았습니다. 이동 직후에 이동 전 세션을 종료하면 10초 안에 풀립니다.</span><span class="l-en"><b>Sessions left on the server</b>: the engine does not restart, so the sessions and row locks of cut clients stayed for about 360 s. Terminating the old sessions right after the move released the locks within 10 s.</span></li><li><span class="l-ko"><b>사전 검증</b>: 가용 영역이 빠진 서브넷 그룹, 다른 VPC의 보안 그룹, RDS Proxy 대상 등록은 호출 시점에 거부됩니다. 보안 그룹을 생략한 요청은 거부되지 않고 이동 뒤에 접속이 막힙니다.</span><span class="l-en"><b>Checks at call time</b>: a subnet group that lacks an Availability Zone, a security group of another VPC and an RDS Proxy target registration are rejected at call time. A request without security groups is not rejected and leaves clients unable to connect after the move.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">Aurora 클러스터의 VPC를 바꾸던 기존 방식</a><a href="#ko-s2">쓰기 중단 24.7초, 타임아웃이 없으면 16분</a><a href="#ko-s3">새 클러스터를 만들지 않고 서브넷 그룹만 바꾸는 방식</a><a href="#ko-s4">서울 리전 테스트 환경과 측정 방법</a><a href="#ko-s5">호출부터 복구까지 35.7초, 그중 쓰기 중단 24.7초</a><a href="#ko-s6">엔진과 데이터 크기가 달라도 같은 25초</a><a href="#ko-s7">타임아웃이 없는 클라이언트의 963초 중단</a><a href="#ko-s8">서버에 약 6분 동안 남는 세션과 잠금</a><a href="#ko-s9">호출 시점에 거부되는 요청과 거부되지 않는 실수</a><a href="#ko-s10">클러스터 VPC 이동을 활용하는 경우</a><a href="#ko-s11">테스트하지 못한 구성과 다시 확인할 항목</a><a href="#ko-s12">이동 전, 이동 중, 이동 후에 할 일</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">How an Aurora cluster's VPC was changed until now</a><a href="#en-s2">Writes stop for 24.7 s, or 16 minutes without timeouts</a><a href="#en-s3">Changing only the subnet group instead of creating a new cluster</a><a href="#en-s4">The test environment in the Seoul Region and the method</a><a href="#en-s5">35.7 s from the call to recovery, 24.7 s of it without writes</a><a href="#en-s6">The same 25 s whatever the engine or the data size</a><a href="#en-s7">The 963 s stall of a client without timeouts</a><a href="#en-s8">Sessions and locks that stay on the server for about six minutes</a><a href="#en-s9">Requests rejected at call time, and the mistake that is not rejected</a><a href="#en-s10">Where a cluster VPC move fits</a><a href="#en-s11">What I did not test and what to check again</a><a href="#en-s12">What to do before, during and after the move</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>Aurora 클러스터의 VPC를 바꾸던 기존 방식</h2></header><div class="prose">
+<p>Aurora 클러스터를 다른 VPC로 옮겨야 하는 경우는 드물지 않습니다. 서브넷의 IP 주소가 부족해 더 넓은 대역의 VPC가 필요한 경우와 다른 네트워크와 연결하려는데 CIDR이 겹치는 경우가 대표적입니다. 여러 VPC에 흩어진 클러스터를 공유 VPC로 모으는 경우와 보안과 규정 요구가 바뀐 경우도 여기에 해당합니다. <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/11/aurora-move-clusters-to-different-vpc/" target="_blank" rel="noopener">발표문</a>과 <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html" target="_blank" rel="noopener">Aurora 사용 설명서</a>도 같은 예를 듭니다.</p>
+<p>클러스터가 어느 VPC에 속하는지는 DB 서브넷 그룹이 정합니다. 지금까지는 클러스터를 만든 뒤에 이 값을 바꿀 수 없었습니다. 그래서 VPC를 바꾸려면 대상 VPC에 새 클러스터를 만들어 데이터를 옮겨야 했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig01-legacy.png" alt="Aurora 클러스터의 VPC를 옮기게 되는 경우 다섯 가지, 새 클러스터를 만들어 데이터를 복제하고 엔드포인트를 전환하던 기존 절차 다섯 단계, 그 어려움 네 가지를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 새 클러스터를 만들어 옮기던 기존 절차와 어려웠던 점</figcaption></figure>
+<p>기존 절차는 대상 VPC에 서브넷 그룹과 보안 그룹을 준비하는 일에서 시작합니다. 다음으로 <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Managing.Clone.html" target="_blank" rel="noopener">클론</a>이나 스냅샷 복원으로 새 클러스터를 만들고 복제 시점 이후의 변경분을 새 클러스터에 맞춥니다. 그 뒤 애플리케이션의 접속 문자열을 새 엔드포인트로 수정하고 기존 클러스터를 삭제합니다.</p>
+<p>이 방식이 어려웠던 이유는 새 클러스터가 기존 클러스터와 다른 리소스이기 때문입니다. 엔드포인트 이름이 달라지므로 접속하는 모든 애플리케이션의 설정을 수정해야 합니다. ARN과 리소스 ID도 새로 생겨서 이를 참조하는 설정을 함께 수정합니다. 클론과 스냅샷은 특정 시점의 사본이므로 그 뒤의 변경분을 맞추려면 쓰기를 멈추거나 복제를 구성해야 합니다. 전환이 끝날 때까지는 클러스터 두 개를 함께 운영합니다.</p>
+<p>클론은 다른 VPC에 만들 수 있지만 문서에 따르면 두 VPC의 서브넷이 같은 가용 영역에 대응해야 합니다. 2026년 11월 19일의 발표는 이 작업을 API 호출 한 번으로 바꿨습니다. 이 글은 그 호출 한 번 동안 일어나는 일을 서울 리전에서 테스트한 기록입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>쓰기 중단 24.7초, 타임아웃이 없으면 16분</h2></header><div class="prose">
+<p>Amazon Aurora가 2026년 11월 19일에 발표한 클러스터 VPC 이동 기능을 서울 리전(ap-northeast-2)에서 테스트했습니다. Aurora PostgreSQL, Aurora MySQL, Aurora PostgreSQL Serverless v2 클러스터를 VPC 두 개 사이에서 38회 옮겼습니다. 유지 중이던 연결에서 쓰기가 멈춘 시간은 VPC 간 이동 30회의 중앙값으로 24.7초였습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig02-setup.png" alt="VPC A(10.61.0.0/16)의 Aurora writer와 reader가 VPC Peering으로 연결된 VPC B(10.62.0.0/16)의 DB 서브넷 그룹으로 이동하는 테스트 구성, 측정 항목 여섯 가지, 이동 38회와 장애 조치 3회의 테스트 순서" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 전체 테스트 구성, 측정 항목, 테스트 순서</figcaption></figure>
+<p>테스트 전에는 엔드포인트 이름이 바뀌지 않으므로 애플리케이션은 한 번 재접속하면 된다고 예상했습니다. 이 예상은 클라이언트에 타임아웃을 설정했을 때만 맞았습니다. 타임아웃을 설정하지 않은 클라이언트는 새 연결을 25초 만에 맺었지만 유지 중이던 연결은 963초 동안 응답을 기다렸습니다. 서버에는 끊긴 클라이언트의 세션이 약 6분 동안 남아 행 잠금을 쥐고 있었습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>확인할 항목</th><th>발표와 문서의 설명</th><th>테스트 결과</th></tr>
+</thead>
+<tbody>
+<tr><td>데이터 이동과 엔드포인트</td><td>데이터는 그대로 두고 클러스터 엔드포인트도 유지</td><td>엔드포인트 이름, ARN, 리소스 ID 유지. 23GB를 적재한 뒤에도 소요 시간이 같음</td></tr>
+<tr><td>중단 시간</td><td>이동 중 연결이 잠시 중단됨. 시간은 적혀 있지 않음</td><td>쓰기 중단 중앙값 24.7초, 최소 18.1초, 최대 31.3초 (30회)</td></tr>
+<tr><td>지원 엔진</td><td>Aurora PostgreSQL과 Aurora MySQL</td><td>두 엔진과 Aurora PostgreSQL Serverless v2에서 38회 모두 성공</td></tr>
+<tr><td>애플리케이션이 겪는 중단</td><td>이동 후 IP가 바뀌므로 DNS 이름으로 접속할 것</td><td>타임아웃 2초에서는 약 25초. 드라이버 기본값에서는 유지 중이던 연결이 963초 멈춤</td></tr>
+<tr><td>이동 후 서버의 상태</td><td>설명 없음</td><td>엔진 재시작 없음. 끊긴 클라이언트의 세션과 잠금이 약 360초 남음</td></tr>
+<tr><td>사전 조건을 어긴 요청</td><td>요청이 실패함</td><td>다섯 가지 모두 호출 시점에 거부. 서비스 영향 없음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 테스트 전에 세운 확인 항목과 결과. 2026년 11월 22일 서울 리전 기준</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>새 클러스터를 만들지 않고 서브넷 그룹만 바꾸는 방식</h2></header><div class="prose">
+<p>이번 발표로 <code>ModifyDBCluster</code> API가 <code>DBSubnetGroupName</code> 파라미터를 받습니다. 대상 VPC에 만들어 둔 DB 서브넷 그룹을 지정하면 Aurora가 클러스터의 모든 인스턴스를 그 서브넷 그룹으로 옮깁니다. AWS CLI에서는 <code>modify-db-cluster</code>의 <code>--db-subnet-group-name</code> 옵션입니다. 발표문은 Aurora PostgreSQL의 <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_GettingStartedAurora.AuroraPostgreSQL.ExpressConfig.html" target="_blank" rel="noopener">express configuration</a>을 제공하는 리전에서 이 기능을 사용할 수 있다고 안내합니다. 서울 리전이 여기에 포함됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>aws rds modify-db-cluster \
+    --db-cluster-identifier mycluster \
+    --db-subnet-group-name my-subnet-group-vpc-b \
+    --vpc-security-group-ids sg-0123456789abcdef0 \
+    --apply-immediately</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>새 클러스터로 옮기는 방식</th><th>클러스터 VPC 이동</th></tr>
+</thead>
+<tbody>
+<tr><td>절차</td><td>대상 VPC에 클론이나 복원으로 새 클러스터를 만들고 데이터를 맞춘 뒤 전환</td><td><code>modify-db-cluster</code> 한 번</td></tr>
+<tr><td>데이터</td><td>새 클러스터로 복제하거나 복원</td><td>옮기지 않음</td></tr>
+<tr><td>엔드포인트</td><td>새 이름. 애플리케이션 설정 수정</td><td>이름 유지. 가리키는 IP만 변경</td></tr>
+<tr><td>ARN과 리소스 ID</td><td>새로 생김</td><td>유지</td></tr>
+<tr><td>중단</td><td>전환 방식에 따라 다름</td><td>이번 테스트에서 약 25초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 기존 방식과 클러스터 VPC 이동의 차이. 오른쪽 열의 중단 시간은 이 글의 테스트 결과</p>
+<p>인스턴스 단위 명령으로는 여전히 바꿀 수 없습니다. <code>modify-db-instance</code>에 <code>--db-subnet-group-name</code>을 지정하면 오류가 반환됩니다. 메시지는 <code>You can't modify the subnet group of the DB instance because it is a member of a cluster.</code>입니다. 같은 VPC의 다른 서브넷 그룹으로 바꾸는 경우에도 클러스터 단위의 같은 절차를 사용합니다.</p>
+<p>가게 이전에 비유하면 이해하기 쉽습니다. 클러스터 엔드포인트 이름은 가게의 대표 전화번호이고 인스턴스의 IP는 건물 주소입니다. 이사를 해도 전화번호는 그대로이고 주소만 바뀝니다. 물건은 처음부터 별도 창고인 클러스터 볼륨에 보관돼 있으므로 옮길 것이 없습니다. 직원인 DB 엔진 프로세스는 일을 멈추지 않고 자리만 새 건물로 옮깁니다.</p>
+<p>이사하는 순간 통화 중이던 손님은 끊겼다는 안내를 받지 못합니다. 손님이 스스로 끊고 다시 걸어야 하며 이것이 클라이언트 타임아웃입니다. 직원은 통화가 끊긴 줄 모르고 그 손님의 주문서를 한동안 들고 있습니다. 이것이 서버에 남는 세션과 잠금입니다.</p>
+<p>비유가 실제와 다른 점도 있습니다. 가게는 이사하는 동안 창구 하나를 열어 둘 수 있지만 Aurora는 writer와 reader가 같은 순간에 끊깁니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>서울 리전 테스트 환경과 측정 방법</h2></header><div class="prose">
+<p>테스트는 2026년 11월 22일 서울 리전의 한 계정에서 진행했습니다. 기존 VPC에 영향을 주지 않도록 실험용 VPC 두 개를 새로 만들어 VPC Peering으로 연결했습니다. 인터넷 게이트웨이와 NAT 게이트웨이는 두지 않았습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>구성</th></tr>
+</thead>
+<tbody>
+<tr><td>VPC</td><td>VPC A <code>10.61.0.0/16</code>, VPC B <code>10.62.0.0/16</code>. 각각 DB 서브넷 3개(ap-northeast-2a, 2b, 2c)</td></tr>
+<tr><td>Aurora PostgreSQL</td><td>17.9, db.r7g.large, writer(2a)와 reader(2b)</td></tr>
+<tr><td>Aurora MySQL</td><td>3.10.3(MySQL 8.0 호환), db.r7g.large, writer(2a)와 reader(2c)</td></tr>
+<tr><td>Aurora PostgreSQL Serverless v2</td><td>17.9, 0.5~4 ACU, 인스턴스 1개(2c)</td></tr>
+<tr><td>측정 호스트</td><td>VPC A 프라이빗 서브넷의 t4g.small, Amazon Linux 2023, Python 3.9, psycopg2 2.9.12, PyMySQL 1.2.4</td></tr>
+<tr><td>호출 도구</td><td>AWS CLI 2.42.1</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 테스트 환경. 클러스터는 모두 스토리지를 암호화했고 퍼블릭 액세스를 비활성화함</p>
+<p>대상 VPC에는 DB 서브넷 그룹과 보안 그룹을 미리 만들었습니다. 서브넷 그룹에는 클러스터의 인스턴스가 있는 가용 영역마다 서브넷이 필요합니다. 아래는 준비에 사용한 명령이며 ID는 가렸습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 클러스터의 인스턴스가 있는 가용 영역
+aws rds describe-db-instances --filters Name=db-cluster-id,Values=avm-lab-pg \
+    --query "DBInstances[].[DBInstanceIdentifier,AvailabilityZone]" --output text
+# avm-lab-pg-1    ap-northeast-2a
+# avm-lab-pg-2    ap-northeast-2b
+
+# 대상 VPC(VPC B)의 DB 서브넷 그룹: 2a, 2b, 2c의 서브넷
+aws rds create-db-subnet-group --db-subnet-group-name avm-lab-sng-b \
+    --db-subnet-group-description "VPC B, three AZs" \
+    --subnet-ids subnet-0b1b1b1b1b1b1b1b1 subnet-0b2b2b2b2b2b2b2b2 subnet-0b3b3b3b3b3b3b3b3
+
+# 대상 VPC의 보안 그룹: 클라이언트가 있는 VPC A 대역에서 DB 포트 허용
+aws ec2 create-security-group --group-name avm-lab-db-sg-b --vpc-id vpc-0bbbbbbbbbbbbbbbb \
+    --description "avm-lab DB access in VPC B"
+aws ec2 authorize-security-group-ingress --group-id sg-0bbbbbbbbbbbbbbbb \
+    --protocol tcp --port 5432 --cidr 10.61.0.0/16</code></pre></div>
+<p>측정 프로그램은 VPC A에 고정한 EC2 인스턴스에서 실행했습니다. 클러스터가 VPC B로 옮겨 간 뒤에는 VPC Peering을 거쳐 접속합니다. 프로그램은 그림 2의 여섯 가지를 동시에 기록합니다.</p>
+<ul>
+<li>쓰기: 클러스터 엔드포인트에 연결을 유지한 채 0.1초마다 일련번호가 든 행을 <code>INSERT</code></li>
+<li>읽기: reader 엔드포인트에 연결을 유지한 채 0.1초마다 <code>SELECT</code></li>
+<li>새 연결: 두 엔드포인트에 1초마다 새로 접속해 질의 한 번 실행</li>
+<li>인스턴스별 연결: 인스턴스 엔드포인트마다 응답한 인스턴스와 엔진 시작 시각을 0.2초 간격으로 조회</li>
+<li>DNS: VPC 리졸버에 0.5초마다 직접 질의해 A 레코드와 TTL을 기록</li>
+<li>컨트롤 플레인: 클러스터와 인스턴스의 상태, 서브넷 그룹, RDS가 만든 네트워크 인터페이스를 1초마다 조회</li>
+</ul>
+<p>이동은 모두 38회 실행했습니다. 중단 시간 통계에는 타임아웃 2초 클라이언트로 측정한 VPC 간 이동 30회를 사용했습니다. 나머지는 같은 VPC 안의 이동 2회, 드라이버 기본값 클라이언트 2회, 보안 그룹을 생략한 1회, 서버에 남는 세션을 추가로 확인한 3회입니다.</p>
+<p>중단 시간은 연결별로 마지막 성공부터 다음 성공까지의 시간으로 계산했습니다. 기본 측정에서는 연결, 읽기, 쓰기 타임아웃을 2초로 두고 실패하면 0.2초 뒤에 다시 접속합니다. 그래서 중단 시간의 해상도는 약 2.2초이고 값이 22.5초, 24.7초, 26.9초 근처에 모입니다.</p>
+<p>쓰기마다 일련번호를 붙였으므로 실행이 끝난 뒤 테이블의 번호 전체를 읽어 성공 응답을 받은 번호와 대조했습니다. 엔진 재시작 여부는 PostgreSQL의 <code>pg_postmaster_start_time()</code>과 MySQL의 <code>Uptime</code> 값이 이동 전후로 이어지는지로 판단했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>호출부터 복구까지 35.7초, 그중 쓰기 중단 24.7초</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig03-timeline.png" alt="API 호출 뒤 8.0초에 시작 이벤트, 10.9초에 연결 끊김, 19.0초에 새 ENI 생성, 27.8초에 완료 이벤트, 34.6초에 DNS 전환, 35.7초에 복구되어 쓰기 중단이 24.7초인 30회 중앙값 타임라인" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 이동 한 번의 시간 순서. VPC 간 이동 30회의 중앙값</figcaption></figure>
+<p>API를 호출하면 8.0초 뒤에 이동 시작 이벤트가 기록되고 10.9초에 연결이 끊깁니다. 기존 네트워크 인터페이스는 16.5초에 삭제되고 대상 VPC의 새 네트워크 인터페이스는 19.0초에 생깁니다. 이동 완료 이벤트는 27.8초, DNS 응답이 새 IP로 바뀌는 시점은 34.6초, 쓰기가 다시 성공한 시점은 35.7초입니다. <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_Events.Messages.html" target="_blank" rel="noopener">이벤트 문서</a>에 따르면 시작 이벤트는 RDS-EVENT-0673, 완료 이벤트는 RDS-EVENT-0674입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>시점</th><th>중앙값</th><th>최소</th><th>최대</th></tr>
+</thead>
+<tbody>
+<tr><td>이동 시작 이벤트</td><td class="num">8.0</td><td class="num">3.1</td><td class="num">13.1</td></tr>
+<tr><td>연결 끊김(마지막으로 성공한 쓰기)</td><td class="num">10.9</td><td class="num">5.5</td><td class="num">17.3</td></tr>
+<tr><td>기존 네트워크 인터페이스 삭제</td><td class="num">16.5</td><td class="num">11.0</td><td class="num">24.0</td></tr>
+<tr><td>새 네트워크 인터페이스 생성</td><td class="num">19.0</td><td class="num">13.0</td><td class="num">25.0</td></tr>
+<tr><td>이동 완료 이벤트</td><td class="num">27.8</td><td class="num">22.6</td><td class="num">35.8</td></tr>
+<tr><td>DNS 응답이 새 IP로 전환</td><td class="num">34.6</td><td class="num">27.3</td><td class="num">42.4</td></tr>
+<tr><td>쓰기 복구</td><td class="num">35.7</td><td class="num">28.4</td><td class="num">42.0</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> API 호출 시각을 0으로 둔 각 시점(초). VPC 간 이동 30회. 이벤트 메시지는 <code>The VPC configuration modification for DB cluster ... has started.</code>와 <code>... has completed.</code></p>
+<p>아래는 첫 번째 이동에서 실행한 명령과 응답입니다. 응답은 관련 필드만 추렸고 보안 그룹 ID는 가렸습니다. 호출 응답에는 이동 전의 서브넷 그룹이 그대로 표시되고 대기 중인 변경으로 <code>VPCNetworkingEnabled</code>만 나타납니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 이동 전 상태
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-pg \
+    --query "DBClusters[0].[Status,DBSubnetGroup,VpcSecurityGroups[].VpcSecurityGroupId]"
+# ["available", "avm-lab-sng-a", ["sg-0aaaaaaaaaaaaaaaa"]]
+
+# 이동 호출 (03:50:11 UTC)
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-pg \
+    --db-subnet-group-name avm-lab-sng-b \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately \
+    --query "DBCluster.[Status,DBSubnetGroup,PendingModifiedValues]"
+# ["available", "avm-lab-sng-a", {"VPCNetworkingEnabled": true}]
+
+# 이벤트
+aws rds describe-events --source-type db-cluster --source-identifier avm-lab-pg --duration 10 \
+    --query "Events[].[Date,Message]" --output text
+# 2026-11-22T03:50:18.483000+00:00  The VPC configuration modification for DB cluster avm-lab-pg has started.
+# 2026-11-22T03:50:35.026000+00:00  The VPC configuration modification for DB cluster avm-lab-pg has completed.
+
+# 이동 후 상태
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-pg \
+    --query "DBClusters[0].[Status,DBSubnetGroup,VpcSecurityGroups[].VpcSecurityGroupId]"
+# ["available", "avm-lab-sng-b", ["sg-0bbbbbbbbbbbbbbbb"]]</code></pre></div>
+<p>같은 이동을 측정 프로그램은 아래처럼 기록했습니다. 559번 쓰기까지 성공하고 560번 쓰기가 2.5초 뒤 타임아웃으로 실패한 다음 기존 IP로 재접속을 시도합니다. DNS 응답이 바뀐 뒤에는 새 IP에서 561번부터 이어집니다. 오류 문구는 앞부분만 실었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 쓰기 연결 (시각은 UTC, ms는 걸린 시간)
+03:50:19.466 {"ev": "q", "ok": true, "ms": 2.9, "ip": "10.61.1.143", "inst": "avm-lab-pg-1", "seq": 559}
+03:50:19.566 {"ev": "q", "ok": false, "ms": 2491.0, "seq": 560, "err": "could not receive data from server: Connection timed out"}
+03:50:22.057 {"ev": "connect", "ok": false, "ms": 2005.5, "ip": "10.61.1.143", "err": "connection to server at \"10.61.1.143\", port 5432 failed: timeout expired"}
+... (같은 실패 8회)
+03:50:41.917 {"ev": "connect", "ok": false, "ms": 2003.9, "ip": "10.61.1.143", "err": "connection to server at \"10.61.1.143\", port 5432 failed: timeout expired"}
+03:50:44.121 {"ev": "connect", "ok": true, "ms": 21.7, "ip": "10.62.1.133"}
+03:50:44.221 {"ev": "q", "ok": true, "ms": 5.2, "ip": "10.62.1.133", "inst": "avm-lab-pg-1", "seq": 561}
+
+# 클러스터 엔드포인트의 A 레코드와 TTL (값이 바뀐 시점만)
+03:49:23.567 ['10.61.1.143'] ttl 5
+03:50:42.076 ['10.62.1.133'] ttl 4
+03:50:42.587 ['10.61.1.143'] ttl 2
+03:50:44.117 ['10.62.1.133'] ttl 4</code></pre></div>
+<p>완료 이벤트는 복구 시점이 아닙니다. 완료 이벤트가 기록된 뒤 DNS 응답이 바뀔 때까지 중앙값으로 7.0초(최소 3.7초, 최대 9.9초)가 더 걸렸습니다. 그동안 클라이언트는 기존 IP로 접속을 시도합니다. 엔드포인트 레코드의 TTL은 5초였습니다. 이동을 자동화할 때 완료 이벤트 직후의 접속 검사에는 재시도를 두는 것을 권고합니다.</p>
+<p>writer와 reader는 함께 끊깁니다. 컨트롤 플레인 로그에서 두 인스턴스의 네트워크 인터페이스는 같은 초에 분리됐고 같은 초에 새로 생겼습니다. reader 엔드포인트로 읽기를 분산한 애플리케이션도 이동 중에는 읽기와 쓰기가 함께 멈춥니다.</p>
+<p>끊기는 순간 클라이언트는 오류를 받지 않습니다. 유지 중이던 연결은 2초 타임아웃이 지난 뒤에야 실패했습니다. 오류는 PostgreSQL에서 <code>Connection timed out</code>, MySQL에서 <code>Lost connection to MySQL server during query</code>였습니다. 서버가 연결을 닫은 것이 아니라 응답이 사라진 것입니다.</p>
+<p>30회 가운데 첫 실행에서만 DNS 응답이 약 4초 동안 기존 IP와 새 IP를 오갔고 그 사이 새 연결 한 번이 기존 IP로 향해 실패했습니다. 나머지 실행에서는 응답이 한 번에 바뀌었습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>엔진과 데이터 크기가 달라도 같은 25초</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig04-runs.png" alt="구성별 쓰기 중단 중앙값이 PostgreSQL 24.8초, 23GB 적재 후 25.8초, MySQL 24.4초, Serverless v2 25.8초, 같은 VPC 안 23.7초이고 장애 조치는 2.1초이며 성공 응답 27,691건 중 유실이 0건임을 보여 주는 점 그래프" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 구성별 쓰기 중단 시간, 이동 전후로 유지된 속성과 바뀐 속성, 쓰기 검증 결과</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>구성</th><th>횟수</th><th>중앙값</th><th>최소</th><th>최대</th></tr>
+</thead>
+<tbody>
+<tr><td>Aurora PostgreSQL 17.9, 데이터 0.2GB</td><td class="num">6</td><td class="num">24.8</td><td class="num">22.5</td><td class="num">27.0</td></tr>
+<tr><td>Aurora PostgreSQL 17.9, 데이터 23GB</td><td class="num">4</td><td class="num">25.8</td><td class="num">22.5</td><td class="num">27.0</td></tr>
+<tr><td>Aurora MySQL 3.10.3</td><td class="num">6</td><td class="num">24.4</td><td class="num">22.1</td><td class="num">31.0</td></tr>
+<tr><td>Aurora PostgreSQL Serverless v2</td><td class="num">6</td><td class="num">25.8</td><td class="num">24.7</td><td class="num">26.9</td></tr>
+<tr><td>같은 VPC 안에서 서브넷 그룹만 변경</td><td class="num">2</td><td class="num">23.7</td><td class="num">22.6</td><td class="num">24.8</td></tr>
+<tr><td>비교용 장애 조치(같은 PostgreSQL 클러스터)</td><td class="num">3</td><td class="num">2.1</td><td class="num">1.5</td><td class="num">4.5</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 구성별 쓰기 중단 시간(초). 유지 중인 연결, 타임아웃 2초 조건. VPC 간 이동 30회에는 위의 22회와 잠금 실험에서 실행한 8회가 포함됨</p>
+<p>구성에 따른 차이는 측정 해상도인 약 2.2초 안에 있습니다. PostgreSQL 클러스터에 4,000만 행(23GB)을 적재한 뒤에도 중앙값은 25.8초였습니다. 이동하는 대상이 네트워크 인터페이스이고 데이터는 옮기지 않기 때문입니다.</p>
+<p>같은 VPC 안에서 서브넷 그룹만 바꿔도 22.6초와 24.8초가 걸렸습니다. 서브넷을 정리하려고 서브넷 그룹을 바꾸는 경우에도 VPC를 옮길 때와 같은 중단을 계획해야 합니다.</p>
+<p>같은 PostgreSQL 클러스터에서 장애 조치를 3회 실행해 같은 방법으로 측정한 쓰기 중단은 1.5초, 2.1초, 4.5초였습니다. VPC 이동의 중단은 장애 조치보다 5배 이상 깁니다. 장애 조치를 기준으로 재시도 횟수나 대기 시간을 정한 애플리케이션은 VPC 이동을 버티지 못할 가능성이 있습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>구분</th><th>속성</th></tr>
+</thead>
+<tbody>
+<tr><td>유지</td><td>클러스터, reader, 인스턴스 엔드포인트 이름. 클러스터와 인스턴스의 ARN과 리소스 ID. 인스턴스의 가용 영역과 생성 시각. 파라미터 그룹과 인증서. 엔진 프로세스</td></tr>
+<tr><td>변경</td><td>DB 서브넷 그룹, VPC 보안 그룹, 인스턴스의 프라이빗 IP와 네트워크 인터페이스</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 이동 전후의 <code>describe-db-clusters</code>와 <code>describe-db-instances</code> 결과를 비교한 내용. 클러스터 속성 56개 가운데 서브넷 그룹과 보안 그룹 두 개만 바뀜</p>
+<p>쓰기 검증에서는 유실이 없었습니다. 이동 32회 동안 성공 응답을 받은 쓰기 27,691건이 모두 테이블에 있었습니다. 클라이언트가 실패로 처리한 쓰기는 이동마다 1건씩 32건이었고 그중 2건은 서버에 커밋돼 있었습니다. 응답을 받지 못한 쓰기는 성공했을 수도 있으므로 다시 보낼 때는 중복 반영을 방지해야 합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>타임아웃이 없는 클라이언트의 963초 중단</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig05-client.png" alt="타임아웃 2초 클라이언트는 유지 연결 24.7초, 새 연결 25.2초 중단됐고 드라이버 기본값 클라이언트의 유지 연결은 PostgreSQL 963.8초, MySQL 963.0초 동안 멈췄음을 보여 주는 막대 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> 클라이언트 설정에 따른 중단 시간과 장애 조치와의 차이</figcaption></figure>
+<p>같은 이동을 타임아웃 설정이 없는 클라이언트로 반복했습니다. 연결 타임아웃만 2초로 두고 나머지는 드라이버 기본값으로 둔 조건입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>클라이언트</th><th>유지 중이던 연결</th><th>새 연결</th><th>유지 중이던 연결이 받은 오류</th></tr>
+</thead>
+<tbody>
+<tr><td>타임아웃 2초 (30회 중앙값)</td><td class="num">24.7초</td><td class="num">25.2초</td><td>2초 뒤 <code>Connection timed out</code></td></tr>
+<tr><td>드라이버 기본값, PostgreSQL(psycopg2)</td><td class="num">963.8초</td><td class="num">25.1초</td><td><code>could not receive data from server: Connection timed out</code></td></tr>
+<tr><td>드라이버 기본값, MySQL(PyMySQL)</td><td class="num">963.0초</td><td class="num">25.2초</td><td><code>Lost connection to MySQL server during query ([Errno 110] Connection timed out)</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 7.</b> 클라이언트 설정별 중단 시간. 드라이버 기본값 실행은 엔진별 1회이며 PostgreSQL은 Serverless v2 클러스터에서 측정</p>
+<p>드라이버 기본값 실행에서 PostgreSQL 쓰기 연결이 남긴 기록입니다. 355번 쓰기 한 건이 963.5초 동안 돌아오지 않았고 재접속까지 포함한 중단은 963.7초였습니다. 같은 실행의 인스턴스 엔드포인트 연결은 963.8초 동안 멈췄습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>04:16:36.184 {"ev": "q", "ok": true, "ms": 3.6, "ip": "10.61.3.54", "inst": "avm-lab-sv2-1", "seq": 354}
+04:16:36.284 {"ev": "q", "ok": false, "ms": 963532.7, "seq": 355, "err": "could not receive data from server: Connection timed out"}
+04:32:39.817 {"ev": "connect", "ok": true, "ms": 29.7, "ip": "10.62.3.201"}
+04:32:39.917 {"ev": "q", "ok": true, "ms": 9.8, "ip": "10.62.3.201", "inst": "avm-lab-sv2-1", "seq": 356}</code></pre></div>
+<p>새 연결은 DNS가 새 IP로 바뀌자 바로 맺어졌습니다. 유지 중이던 연결은 질의를 보낸 채 16분 동안 돌아오지 않았습니다. 그동안 클러스터는 정상이었고 다른 연결은 질의를 처리하고 있었습니다.</p>
+<p>원인은 끊기는 방식에 있습니다. 장애 조치에서는 엔진이 재시작하면서 연결을 닫으므로 클라이언트가 <code>server closed the connection unexpectedly</code> 같은 오류를 바로 받습니다. VPC 이동에서는 엔진이 그대로이고 네트워크 인터페이스만 사라집니다. 클라이언트는 보낸 질의의 응답도 오류도 받지 못하고 운영체제가 재전송을 포기할 때까지 기다립니다.</p>
+<p>963초는 Linux의 TCP 재전송 한도와 맞는 값입니다. <a href="https://docs.kernel.org/networking/ip-sysctl.html" target="_blank" rel="noopener">커널 문서</a>에 따르면 <code>tcp_retries2</code>의 기본값 15는 924.6초 이상의 대기에 해당합니다. 측정 호스트는 이 값을 수정하지 않은 Amazon Linux 2023입니다. 재전송 한도가 원인이라는 것은 관측한 시간에서 추정한 내용입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># PostgreSQL (psycopg2, libpq 파라미터). 2초는 테스트용 값
+psycopg2.connect(
+    host=endpoint, dbname="labdb", user=user, password=password,
+    connect_timeout=2,
+    tcp_user_timeout=2000,      # 밀리초. 응답 확인이 없으면 2초 뒤 연결 종료
+    keepalives=1, keepalives_idle=1, keepalives_interval=1, keepalives_count=2,
+)
+
+# MySQL (PyMySQL)
+pymysql.connect(
+    host=endpoint, database="labdb", user=user, password=password,
+    connect_timeout=2, read_timeout=2, write_timeout=2,
+)</code></pre></div>
+<p>위는 테스트에 사용한 설정입니다. 2초는 중단 시간을 촘촘하게 측정하려고 고른 값입니다. 운영 환경에서는 가장 긴 질의의 실행 시간보다 길게 정해야 정상 질의가 끊기지 않습니다. PostgreSQL 쪽 옵션은 <a href="https://www.postgresql.org/docs/current/libpq-connect.html" target="_blank" rel="noopener">libpq 연결 파라미터</a>입니다. 드라이버마다 옵션 이름이 다르며 이 글에서는 psycopg2와 PyMySQL만 테스트했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>서버에 약 6분 동안 남는 세션과 잠금</h2></header><div class="prose">
+<p>엔진이 재시작하지 않는다는 점에는 대가가 있습니다. 서버는 클라이언트가 사라진 것을 바로 알지 못하므로 끊긴 연결의 세션이 서버에 그대로 남습니다. 트랜잭션을 연 채 끊긴 세션은 행 잠금도 계속 쥐고 있습니다.</p>
+<p>이를 확인하려고 트랜잭션 안에서 행 하나를 <code>UPDATE</code>하고 커밋하지 않는 세션을 만든 뒤 클러스터를 옮겼습니다. 세션의 한 종류는 <code>UPDATE</code> 한 번 뒤에 가만히 있는 유휴 트랜잭션이고 다른 종류는 같은 트랜잭션 안에서 0.05초마다 <code>UPDATE</code>를 반복하는 트랜잭션입니다. 이동이 끝난 뒤 새 연결에서 10초마다 같은 행의 잠금을 시도했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig06-sessions.png" alt="잠금을 쥔 세션 82개가 모두 약 360초에 정리됐고 측정 프로그램의 연결은 10회 중 5회가 360초를 넘겨 남았으며(끝까지 관측한 3회는 924초 이상) 이동 직후 세션을 종료하면 10초 안에 잠금이 풀림을 보여 주는 시간 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 6.</b> 이동 후 서버에 남은 세션이 정리되기까지의 시간</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>세션</th><th>PostgreSQL</th><th>MySQL</th><th>잠금이 풀린 시점</th></tr>
+</thead>
+<tbody>
+<tr><td>유휴 트랜잭션</td><td class="num">5개</td><td class="num">5개</td><td>마지막 활동 후 약 360초</td></tr>
+<tr><td>문장을 실행 중이던 트랜잭션</td><td class="num">36개</td><td class="num">36개</td><td>마지막 활동 후 약 360초</td></tr>
+<tr><td>이동 직후에 종료한 트랜잭션 세션</td><td class="num">8개</td><td class="num">16개</td><td>종료 후 10초 안</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 8.</b> 이동 전에 행 잠금을 쥐고 있던 세션과 잠금이 풀린 시점. 잠금 확인 간격은 10초</p>
+<p>아래는 이동이 완료되고 약 2분 뒤 PostgreSQL의 세션 목록입니다. 트랜잭션 세션 8개와 측정 프로그램의 연결 2개가 이동 전 상태 그대로 남아 있습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>SELECT pid, application_name, state,
+       round(extract(epoch FROM now() - state_change)) AS idle_sec, left(query, 40) AS query
+FROM pg_stat_activity
+WHERE backend_type = 'client backend' AND pid &lt;&gt; pg_backend_pid();
+
+--  pid  | application_name        | state               | idle_sec | query
+--  4533 | holders-pg-10-ghost-b2a | idle in transaction |      179 | UPDATE lock_t SET v = v + 1, note = 'pg-1
+--  4536 | holders-pg-10-ghost-b2a | idle in transaction |      138 | UPDATE lock_t SET v = v + 1 WHERE id = 6
+--  4551 |                         | idle                |      138 | SELECT host(inet_server_addr()), aurora_
+--  4553 |                         | idle                |      138 | INSERT INTO probe_w (run, seq, cts) VALU
+--  (이동 전 세션 10개 가운데 4개만 표시)
+
+-- 다른 세션에서 같은 행을 수정
+SET lock_timeout = '2s';
+UPDATE lock_t SET note = 'watch' WHERE id = 1;
+-- ERROR:  canceling statement due to lock timeout</code></pre></div>
+<p>잠금을 쥔 세션 82개는 엔진과 종류에 관계없이 모두 약 360초에 정리됐습니다. 그 6분 동안 다른 세션이 같은 행을 수정하려 하면 실패했습니다. PostgreSQL에서는 <code>lock_timeout</code> 2초 조건에서 <code>LockNotAvailable</code>, MySQL에서는 <code>Lock wait timeout exceeded</code>가 반환됐습니다. 이동이 완료됐고 새 연결도 정상인데 특정 행에서만 대기가 걸리는 증상입니다.</p>
+<p>360초는 서버의 TCP keepalive 설정과 일치합니다. Aurora PostgreSQL 17.9 세션에서 조회한 값은 <code>tcp_keepalives_idle</code> 300초, <code>tcp_keepalives_interval</code> 30초, <code>tcp_keepalives_count</code> 2회입니다. 합하면 360초입니다. Aurora MySQL은 <code>wait_timeout</code>이 28,800초인데도 같은 시점에 세션이 정리됐습니다.</p>
+<p>잠금 없이 세션만 더 오래 남은 경우도 있었습니다. 측정 프로그램이 자동 커밋으로 질의를 반복하던 연결의 세션은 관측한 10회 가운데 5회에서 하나씩 360초를 넘겨 남았습니다. 끝까지 지켜본 3회에서는 세션이 924초, 958초, 969초 시점까지 보였습니다. 클라이언트 쪽의 963초와 같은 범위이므로 서버가 보낸 마지막 응답의 수신 확인을 받지 못한 연결이 TCP 재전송 한도까지 남은 것으로 추정합니다. 이런 세션은 잠금을 쥐지 않지만 연결 수 한도는 차지합니다.</p>
+<p>테스트에서 확인한 대응은 이동이 완료된 직후에 이동 전 세션을 종료하는 것입니다. 이동 전에 맺은 연결은 모두 끊겼으므로 완료 시각보다 먼저 시작된 세션은 종료해도 됩니다. PostgreSQL에서는 아래 문장 하나로 이동 전 세션 11개(잠금을 쥔 8개 포함)가 종료됐고 10초 안에 행 8개의 잠금이 모두 풀렸습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>-- Aurora PostgreSQL: 이동 완료 이벤트 시각보다 먼저 시작된 세션을 종료
+SELECT pid, usename, state, pg_terminate_backend(pid) AS terminated
+FROM pg_stat_activity
+WHERE backend_type = 'client backend'
+  AND pid &lt;&gt; pg_backend_pid()
+  AND usename &lt;&gt; 'rdsadmin'
+  AND backend_start &lt; timestamptz '2026-11-22T05:20:24Z';
+--  pid  | usename  | state               | terminated
+--  1473 | labadmin | idle in transaction | t
+--  1474 | labadmin | idle in transaction | t
+--  ... (모두 11행, 이후 같은 조건의 세션 수는 0)</code></pre></div>
+<p>MySQL에서는 유휴 시간이 이동 완료 후 지난 시간보다 긴 세션을 조회하고 <code>mysql.rds_kill</code>로 종료했습니다. 완료 31초 뒤에 조회된 10개를 종료하자 다음 확인에서 행 8개의 잠금이 모두 풀려 있었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>-- Aurora MySQL: TIME(마지막 명령 후 지난 초)이 이동 완료 후 지난 시간보다 큰 세션을 조회
+SELECT ID, USER, HOST, COMMAND, TIME
+FROM information_schema.PROCESSLIST
+WHERE USER NOT IN ('rdsadmin', 'system user', 'event_scheduler')
+  AND ID &lt;&gt; CONNECTION_ID()
+  AND TIME &gt; 31;
+
+-- 조회된 ID마다 실행
+CALL mysql.rds_kill(3191);</code></pre></div>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>호출 시점에 거부되는 요청과 거부되지 않는 실수</h2></header><div class="prose">
+<p>사전 조건을 어긴 요청 다섯 가지는 모두 API 호출 시점에 거부됐습니다. 거부된 요청은 클러스터에 영향을 주지 않았고 측정 중이던 연결은 한 번도 실패하지 않았습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>조건</th><th>오류 코드</th><th>메시지 요지</th></tr>
+</thead>
+<tbody>
+<tr><td>인스턴스가 있는 가용 영역의 서브넷이 없는 서브넷 그룹</td><td><code>InvalidVPCNetworkStateFault</code></td><td>해당 가용 영역에 사용할 수 있는 IP가 있는 서브넷이 없음</td></tr>
+<tr><td>대상 VPC가 아닌 보안 그룹</td><td><code>InvalidParameterCombination</code></td><td>DB 인스턴스와 보안 그룹의 VPC가 다름</td></tr>
+<tr><td>RDS Proxy 대상으로 등록된 클러스터</td><td><code>InvalidDBClusterStateFault</code></td><td>프록시 대상 등록을 먼저 해제할 것</td></tr>
+<tr><td><code>--no-enable-vpc-networking</code>과 서브넷 그룹을 함께 지정</td><td><code>InvalidParameterCombination</code></td><td>VPC 네트워킹을 비활성화하면 접속 경로가 없어짐</td></tr>
+<tr><td>이동 중이거나 예약된 상태에서 보낸 다른 이동 요청</td><td><code>InvalidDBClusterStateFault</code></td><td>이미 대기 중인 변경이 있음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 9.</b> 호출 시점에 거부된 요청 다섯 가지. 현재와 같은 서브넷 그룹을 지정한 요청은 성공으로 반환되지만 이동도 이벤트도 일어나지 않음</p>
+<p>거부된 요청 가운데 두 가지의 명령과 오류 원문입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 인스턴스가 있는 가용 영역(2a)의 서브넷이 없는 서브넷 그룹
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-my \
+    --db-subnet-group-name avm-lab-sng-b-no-az1 \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately
+# An error occurred (InvalidVPCNetworkStateFault) when calling the ModifyDBCluster operation: You can't enable VPC networking. Your database subnet group has no subnet with available IP addresses in Availability Zone ap-northeast-2a, where one of your cluster's database instances is located. Add a subnet, or free up IP addresses on an existing subnet, in that zone, then try again.
+
+# RDS Proxy 대상으로 등록된 클러스터
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --db-subnet-group-name avm-lab-sng-b \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately
+# An error occurred (InvalidDBClusterStateFault) when calling the ModifyDBCluster operation: Aurora can't disable VPC networking on a DB cluster with an associated RDS Proxy. Deregister the proxy target before disabling VPC networking.</code></pre></div>
+<p>RDS Proxy의 대상 등록을 해제하자 클러스터가 바로 이동됐습니다. <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html" target="_blank" rel="noopener">문서</a>에 따르면 Aurora Global Database, Blue/Green 배포, 제로 ETL 통합, Babelfish, 데이터베이스 활동 스트림도 이동 전에 해제해야 하는 기능입니다. 이 기능들은 이번에 테스트하지 않았습니다.</p>
+<p>보안 그룹을 생략한 요청은 거부되지 않습니다. 이동은 정상으로 완료되지만 대상 VPC의 기본 보안 그룹이 연결됩니다. 기본 보안 그룹은 자기 자신에서 오는 트래픽만 허용하므로 클라이언트는 접속하지 못합니다. 테스트에서는 이동이 완료된 뒤에도 성공한 요청이 없었고 <code>--vpc-security-group-ids</code>로 보안 그룹을 다시 지정하자 3.4~4.0초 뒤에 접속됐습니다.</p>
+<p>문서에 따르면 같은 VPC 안에서 서브넷 그룹만 바꿀 때도 보안 그룹을 생략하면 기본 보안 그룹으로 바뀝니다. 보안 그룹은 항상 지정하는 것을 권고합니다.</p>
+<p>이동을 유지 관리 기간으로 미루려면 <code>--no-apply-immediately</code>를 사용합니다. 이때 <code>PendingModifiedValues</code>에는 <code>VPCNetworkingEnabled: true</code>만 보이고 대상 서브넷 그룹은 보이지 않습니다. 예약된 이동을 바로 적용할 때는 아래처럼 세 옵션만 지정합니다. 서브넷 그룹을 함께 지정하면 거부됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 유지 관리 기간으로 예약
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --db-subnet-group-name avm-lab-sng-a \
+    --vpc-security-group-ids sg-0aaaaaaaaaaaaaaaa --no-apply-immediately
+
+# 예약된 상태 조회
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-sv2 \
+    --query "DBClusters[0].{Status:Status,DBSubnetGroup:DBSubnetGroup,Pending:PendingModifiedValues,Window:PreferredMaintenanceWindow}"
+# {"Status": "available", "DBSubnetGroup": "avm-lab-sng-b", "Pending": {"VPCNetworkingEnabled": true}, "Window": "sun:14:20-sun:14:50"}
+
+# 예약해 둔 이동을 바로 적용
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --enable-vpc-networking --apply-immediately</code></pre></div>
+<p>누가 언제 옮겼는지는 CloudTrail의 <code>ModifyDBCluster</code> 기록에서 확인합니다. 요청 파라미터에 <code>dBSubnetGroupName</code>이 남고 응답의 서브넷 그룹은 이동 전 값입니다.</p>
+<p>첫 번째 이동의 CloudTrail 기록에서 관련 필드만 옮기면 아래와 같은 형태입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "eventTime": "2026-11-22T03:50:12Z",
+  "eventSource": "rds.amazonaws.com",
+  "eventName": "ModifyDBCluster",
+  "requestParameters": {
+    "dBClusterIdentifier": "avm-lab-pg",
+    "applyImmediately": true,
+    "vpcSecurityGroupIds": ["sg-0bbbbbbbbbbbbbbbb"],
+    "dBSubnetGroupName": "avm-lab-sng-b"
+  },
+  "responseElements": {
+    "dBSubnetGroup": "avm-lab-sng-a",
+    "status": "available",
+    "pendingModifiedValues": {"vPCNetworkingEnabled": true}
+  }
+}</code></pre></div>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>클러스터 VPC 이동을 활용하는 경우</h2></header><div class="prose">
+<p>발표문과 사용 설명서가 든 예에 테스트에서 확인한 근거를 붙이면 이 기능이 맞는 경우는 네 가지로 나뉩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig07-usecases.png" alt="클러스터 VPC 이동의 활용 사례 네 가지와 테스트 근거(23GB에서 쓰기 중단 25.8초, 같은 VPC 안 22.6초와 24.8초), 먼저 확인할 조건 세 가지, 맞지 않는 경우 세 가지" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 7.</b> 클러스터 VPC 이동의 활용 사례와 맞지 않는 경우</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>사례</th><th>상황</th><th>테스트에서 확인한 근거</th></tr>
+</thead>
+<tbody>
+<tr><td>IP 주소가 부족한 VPC에서 더 넓은 VPC로</td><td>서브넷의 IP가 모자라 인스턴스를 늘릴 수 없을 때</td><td>데이터 23GB에서도 쓰기 중단 25.8초. 엔드포인트 이름 유지</td></tr>
+<tr><td>CIDR이 겹치는 VPC 정리</td><td>다른 VPC나 온프레미스와 연결하기 전에 겹치지 않는 대역으로 옮길 때</td><td>대상 VPC에 서브넷 그룹과 보안 그룹을 준비하면 호출 한 번</td></tr>
+<tr><td>여러 VPC의 클러스터를 한 VPC로 통합</td><td>계정이나 팀별로 흩어진 클러스터를 공유 VPC로 모을 때</td><td>PostgreSQL, MySQL, Serverless v2 모두 같은 절차. ARN과 리소스 ID 유지</td></tr>
+<tr><td>같은 VPC 안에서 서브넷 재배치</td><td>서브넷 구조를 바꾸거나 정리할 때</td><td>같은 절차. 쓰기 중단 22.6초와 24.8초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 10.</b> 활용 사례와 테스트에서 확인한 근거. 다른 계정이 공유한 VPC와 온프레미스 경로는 테스트하지 않음</p>
+<p>네 경우 모두 애플리케이션의 접속 문자열을 수정하지 않는다는 점이 기존 방식과 다릅니다. ARN과 리소스 ID도 그대로이므로 이를 참조하는 설정도 수정하지 않습니다. 클라이언트가 대상 VPC에 도달하는 경로와 보안 그룹 규칙은 이동 전에 준비해야 합니다.</p>
+<p>이 기능은 세 조건이 모두 맞을 때 적용하기 좋습니다. writer와 reader가 함께 30초 안팎 멈춰도 되는 시간대가 있고 클라이언트에 타임아웃이 설정돼 있으며 이동 전에 해제해야 하는 기능을 잠시 내려놓을 수 있어야 합니다.</p>
+<p>약 30초의 중단을 받아들일 수 없는 서비스에는 맞지 않습니다. 같은 클러스터의 장애 조치는 1.5초에서 4.5초였으므로 장애 조치 수준의 중단만 허용하는 서비스라면 다른 방법을 검토해야 합니다. Aurora Global Database처럼 해제하기 어려운 기능을 사용 중이라면 새 클러스터를 만들어 전환하는 기존 방식이 여전히 필요합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>테스트하지 못한 구성과 다시 확인할 항목</h2></header><div class="prose">
+<p>이 글의 수치는 한 계정에서 하루 동안 얻은 값입니다. 아래 조건은 테스트하지 않았으므로 적용 전에 같은 방법으로 확인하는 것을 권고합니다.</p>
+<ul>
+<li>연결 수와 부하: 측정 연결 6개와 잠금 세션 최대 32개만 사용했습니다. 연결이 수백 개이거나 초당 트랜잭션이 많은 클러스터에서는 확인하지 않았습니다.</li>
+<li>인스턴스 구성: db.r7g.large와 Serverless v2, 클러스터당 인스턴스 1~2개만 사용했습니다.</li>
+<li>클라이언트 경로: VPC Peering만 사용했습니다. Transit Gateway, 다른 계정이 공유한 VPC, 온프레미스 경로는 확인하지 않았습니다.</li>
+<li>커넥션 풀: 풀에 남아 있던 유휴 연결을 이동 후에 다시 사용하는 경우는 테스트하지 않았습니다. 유지 중이던 연결과 같은 방식으로 멈출 것으로 예상합니다.</li>
+<li>다른 드라이버: JDBC, Go, Node.js 드라이버의 타임아웃 옵션은 확인하지 않았습니다.</li>
+<li>퍼블릭 액세스와 듀얼 스택: 두 구성 모두 테스트하지 않았습니다. 문서에 따르면 퍼블릭 인스턴스는 대상 VPC에 인터넷 게이트웨이가 없으면 이동이 실패하고 인스턴스를 사용할 수 없게 됩니다.</li>
+<li>이동 실패와 되돌리기: 이동이 중간에 실패해 원래 VPC로 복귀하는 경우(RDS-EVENT-0675)와 <code>incompatible-network</code> 상태(RDS-EVENT-0676)는 재현하지 못했습니다. 이번에 본 실패는 모두 호출 시점의 거부였습니다.</li>
+<li>드라이버 기본값 측정: 엔진별로 한 번씩만 실행했습니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>이동 전, 이동 중, 이동 후에 할 일</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig08-runsheet.png" alt="이동 전 5가지, 이동 중 4가지(약 25~35초), 이동 후 5가지 작업과 호출 시점에 거부되는 요청 네 가지, 보안 그룹을 생략하면 접속하지 못하고 다시 지정하면 3.4~4.0초 뒤 접속됨을 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 8.</b> 테스트에서 확인한 작업 순서와 호출 시점에 거부되는 요청</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>시점</th><th>할 일</th><th>근거가 된 결과</th></tr>
+</thead>
+<tbody>
+<tr><td>이동 전</td><td>대상 VPC의 DB 서브넷 그룹에 인스턴스가 있는 가용 영역을 모두 포함</td><td>빠지면 <code>InvalidVPCNetworkStateFault</code>로 거부</td></tr>
+<tr><td>이동 전</td><td>대상 VPC의 보안 그룹을 만들고 요청에 지정</td><td>생략하면 기본 보안 그룹이 연결되어 접속 불가</td></tr>
+<tr><td>이동 전</td><td>클라이언트에서 대상 VPC로 가는 경로와 보안 그룹 규칙 확인</td><td>테스트에서는 VPC Peering 경유</td></tr>
+<tr><td>이동 전</td><td>RDS Proxy 대상 등록 해제</td><td>등록된 상태에서는 <code>InvalidDBClusterStateFault</code>로 거부</td></tr>
+<tr><td>이동 전</td><td>클라이언트의 타임아웃 설정 확인</td><td>없으면 유지 중이던 연결이 963초 멈춤</td></tr>
+<tr><td>이동 중</td><td><code>modify-db-cluster</code> 호출 후 시작과 완료 이벤트 확인</td><td>호출 후 8.0초와 27.8초</td></tr>
+<tr><td>이동 중</td><td>writer와 reader의 동시 중단을 전제로 공지</td><td>쓰기 중단 24.7초, 최대 31.3초</td></tr>
+<tr><td>이동 후</td><td>완료 시각보다 먼저 시작된 세션 종료</td><td>두면 잠금이 약 360초 남음</td></tr>
+<tr><td>이동 후</td><td><code>describe-db-clusters</code>로 서브넷 그룹과 보안 그룹 확인, 접속 검사에는 재시도 적용</td><td>완료 이벤트 후 DNS 전환까지 7.0초</td></tr>
+<tr><td>이동 후</td><td>실패로 처리된 쓰기를 대조하고 중복 없이 재시도</td><td>실패 32건 가운데 2건은 커밋됨</td></tr>
+<tr><td>이동 후</td><td>원래 VPC의 서브넷과 보안 그룹은 완료를 확인한 뒤에 정리</td><td>문서: 실패하면 원래 VPC로 되돌리는 데 필요</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 11.</b> 이동 전후에 할 일과 근거. db.r7g.large와 Serverless v2, 클러스터당 인스턴스 1~2개 조건의 결과</p>
+<p>중단 시간은 인스턴스 수와 부하에 따라 달라질 가능성이 있습니다. 운영 클러스터에 적용하기 전에 같은 구성의 복제본으로 먼저 측정하는 것을 권고합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>How an Aurora cluster's VPC was changed until now</h2></header><div class="prose">
+<p>Having to move an Aurora cluster to another VPC is not rare. The subnets run out of IP addresses and a VPC with a wider range is needed, the CIDR overlaps with a network you want to connect, clusters spread over several VPCs are gathered into a shared VPC, or the security and compliance requirements change. The <a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/11/aurora-move-clusters-to-different-vpc/" target="_blank" rel="noopener">announcement</a> and the <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html" target="_blank" rel="noopener">Aurora User Guide</a> give the same examples.</p>
+<p>The DB subnet group decides which VPC a cluster belongs to. Until now it could not be changed after the cluster was created. So changing the VPC meant creating a new cluster in the destination VPC and moving the data.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig01-legacy-en.png" alt="Five reasons an Aurora cluster changes VPC, the earlier five-step procedure of creating a new cluster, copying data and switching the endpoint, and four things that made it hard" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The earlier procedure of moving to a new cluster, and what made it hard</figcaption></figure>
+<p>The procedure started with a subnet group and security groups in the destination VPC. Next you created a new cluster by <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Managing.Clone.html" target="_blank" rel="noopener">cloning</a> or restoring a snapshot and brought it in line with the changes made after that point in time. Then you changed the connection strings of the applications to the new endpoint and deleted the old cluster.</p>
+<p>This was hard because the new cluster is a different resource from the old one. The endpoint name changes, so the settings of every application that connects have to change. The ARN and the resource ID are new as well, so settings that refer to them change too. A clone and a snapshot are copies as of one point in time, so catching up with later changes means stopping writes or setting up replication. Until the cutover is done, two clusters run side by side.</p>
+<p>A clone can be created in a different VPC, but according to the documentation the subnets of the two VPCs must map to the same Availability Zones. The announcement of November 19, 2026 turned this work into one API call. This post is a record of what happens during that one call, tested in the Seoul Region.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Writes stop for 24.7 s, or 16 minutes without timeouts</h2></header><div class="prose">
+<p>I tested the feature Amazon Aurora announced on November 19, 2026 for moving a cluster to a different VPC, in the Seoul Region (ap-northeast-2). I moved Aurora PostgreSQL, Aurora MySQL and Aurora PostgreSQL Serverless v2 clusters between two VPCs 38 times. Writes on an open connection stopped for a median of 24.7 s over 30 cross-VPC moves.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig02-setup-en.png" alt="Test setup where the Aurora writer and reader in VPC A (10.61.0.0/16) move to a DB subnet group in peered VPC B (10.62.0.0/16), the six probes, and the order of the 38 moves and 3 failovers" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> The whole test setup, what was measured, and the order of the tests</figcaption></figure>
+<p>Before the test I expected that an application would only need to reconnect once, because the endpoint name does not change. That held only when the client had timeouts set. A client without timeouts opened new connections after 25 s, but its open connection waited 963 s for an answer. On the server, the sessions of the cut clients stayed for about six minutes and kept their row locks.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>What to check</th><th>What the announcement and the docs say</th><th>Test result</th></tr>
+</thead>
+<tbody>
+<tr><td>Data and endpoint</td><td>Data stays in place and the cluster endpoint stays the same</td><td>Endpoint names, ARNs and resource IDs stayed. The time did not change after loading 23 GB</td></tr>
+<tr><td>Interruption</td><td>Connectivity is interrupted briefly during the move. No duration is given</td><td>Writes interrupted for a median of 24.7 s, minimum 18.1 s, maximum 31.3 s (30 moves)</td></tr>
+<tr><td>Supported engines</td><td>Aurora PostgreSQL and Aurora MySQL</td><td>All 38 moves succeeded on both engines and on Aurora PostgreSQL Serverless v2</td></tr>
+<tr><td>What the application sees</td><td>IP addresses change after the move, so connect by DNS name</td><td>About 25 s with 2 s timeouts. With driver defaults an open connection stalled for 963 s</td></tr>
+<tr><td>State of the server after the move</td><td>Not described</td><td>No engine restart. Sessions and locks of the cut clients stayed for about 360 s</td></tr>
+<tr><td>Requests that break a prerequisite</td><td>The request fails</td><td>All five were rejected at call time, with no service impact</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> What I set out to check and what the test showed. Seoul Region, November 22, 2026</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Changing only the subnet group instead of creating a new cluster</h2></header><div class="prose">
+<p>With this launch the <code>ModifyDBCluster</code> API accepts a <code>DBSubnetGroupName</code> parameter. When you name a DB subnet group that you created in the destination VPC, Aurora moves every instance of the cluster to it. In the AWS CLI it is the <code>--db-subnet-group-name</code> option of <code>modify-db-cluster</code>. The announcement says the feature is available in the Regions that offer the <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_GettingStartedAurora.AuroraPostgreSQL.ExpressConfig.html" target="_blank" rel="noopener">express configuration</a> of Aurora PostgreSQL, and the Seoul Region is one of them.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>aws rds modify-db-cluster \
+    --db-cluster-identifier mycluster \
+    --db-subnet-group-name my-subnet-group-vpc-b \
+    --vpc-security-group-ids sg-0123456789abcdef0 \
+    --apply-immediately</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Moving to a new cluster</th><th>Moving the cluster to another VPC</th></tr>
+</thead>
+<tbody>
+<tr><td>Procedure</td><td>Create a new cluster in the destination VPC by cloning or restoring, bring the data in line, then cut over</td><td>One <code>modify-db-cluster</code> call</td></tr>
+<tr><td>Data</td><td>Copied or restored into the new cluster</td><td>Not moved</td></tr>
+<tr><td>Endpoint</td><td>A new name. Application settings must change</td><td>The name stays. Only the IP behind it changes</td></tr>
+<tr><td>ARN and resource ID</td><td>New</td><td>Kept</td></tr>
+<tr><td>Interruption</td><td>Depends on how the cutover is done</td><td>About 25 s in this test</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> The earlier way and the cluster VPC move. The interruption in the right column is the result of this test</p>
+<p>The instance-level command still cannot do it. <code>modify-db-instance</code> with <code>--db-subnet-group-name</code> returns an error. The message is <code>You can't modify the subnet group of the DB instance because it is a member of a cluster.</code> A change to another subnet group inside the same VPC goes through the same cluster-level procedure.</p>
+<p>A shop moving to a new building is a helpful picture. The cluster endpoint name is the shop's main phone number and the instance IP is the street address. After the move the phone number is the same and only the address is new. The goods were in a separate warehouse, the cluster volume, from the start, so there is nothing to carry. The staff, the DB engine process, do not stop working and only change desks.</p>
+<p>A customer who was on the phone at the moment of the move is not told that the line went dead. The customer has to hang up and call again, and that is the client timeout. The staff do not know that the call dropped and keep holding that customer's order form for a while. Those are the sessions and locks left on the server.</p>
+<p>The picture also differs from the real thing in one way. A shop can keep one counter open while it moves, but in Aurora the writer and the reader are cut at the same moment.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>The test environment in the Seoul Region and the method</h2></header><div class="prose">
+<p>The test ran in one account in the Seoul Region on November 22, 2026. To leave existing VPCs untouched I created two new VPCs for the test and joined them with VPC peering. There is no internet gateway and no NAT gateway.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Configuration</th></tr>
+</thead>
+<tbody>
+<tr><td>VPCs</td><td>VPC A <code>10.61.0.0/16</code>, VPC B <code>10.62.0.0/16</code>. Three DB subnets each (ap-northeast-2a, 2b, 2c)</td></tr>
+<tr><td>Aurora PostgreSQL</td><td>17.9, db.r7g.large, writer (2a) and reader (2b)</td></tr>
+<tr><td>Aurora MySQL</td><td>3.10.3 (MySQL 8.0 compatible), db.r7g.large, writer (2a) and reader (2c)</td></tr>
+<tr><td>Aurora PostgreSQL Serverless v2</td><td>17.9, 0.5 to 4 ACUs, one instance (2c)</td></tr>
+<tr><td>Probe host</td><td>t4g.small in a private subnet of VPC A, Amazon Linux 2023, Python 3.9, psycopg2 2.9.12, PyMySQL 1.2.4</td></tr>
+<tr><td>Calling tool</td><td>AWS CLI 2.42.1</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> The test environment. Every cluster had storage encryption on and public access off</p>
+<p>I created the DB subnet group and the security group in the destination VPC beforehand. The subnet group needs a subnet in every Availability Zone that holds an instance of the cluster. These are the commands used, with the IDs masked.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Availability Zones that hold the cluster's instances
+aws rds describe-db-instances --filters Name=db-cluster-id,Values=avm-lab-pg \
+    --query "DBInstances[].[DBInstanceIdentifier,AvailabilityZone]" --output text
+# avm-lab-pg-1    ap-northeast-2a
+# avm-lab-pg-2    ap-northeast-2b
+
+# DB subnet group in the destination VPC (VPC B): subnets in 2a, 2b and 2c
+aws rds create-db-subnet-group --db-subnet-group-name avm-lab-sng-b \
+    --db-subnet-group-description "VPC B, three AZs" \
+    --subnet-ids subnet-0b1b1b1b1b1b1b1b1 subnet-0b2b2b2b2b2b2b2b2 subnet-0b3b3b3b3b3b3b3b3
+
+# Security group in the destination VPC: allow the DB port from the VPC A range where the client is
+aws ec2 create-security-group --group-name avm-lab-db-sg-b --vpc-id vpc-0bbbbbbbbbbbbbbbb \
+    --description "avm-lab DB access in VPC B"
+aws ec2 authorize-security-group-ingress --group-id sg-0bbbbbbbbbbbbbbbb \
+    --protocol tcp --port 5432 --cidr 10.61.0.0/16</code></pre></div>
+<p>The probe program ran on an EC2 instance that stayed in VPC A. After a cluster moved to VPC B the probe reached it through the VPC peering connection. The program records the six things in Figure 2 at the same time.</p>
+<ul>
+<li>Writes: an open connection to the cluster endpoint that runs an <code>INSERT</code> of a row with a sequence number every 0.1 s</li>
+<li>Reads: an open connection to the reader endpoint that runs a <code>SELECT</code> every 0.1 s</li>
+<li>New connections: a fresh connection to each of the two endpoints every second, one query each</li>
+<li>Per-instance connections: for every instance endpoint, a query every 0.2 s that returns the answering instance and the engine start time</li>
+<li>DNS: a direct query to the VPC resolver every 0.5 s, recording the A records and the TTL</li>
+<li>Control plane: the status of the cluster and its instances, the subnet group, and the network interfaces RDS created, polled every second</li>
+</ul>
+<p>I ran 38 moves in total. The interruption statistics use the 30 cross-VPC moves measured with the client that has 2 s timeouts. The rest are 2 moves inside one VPC, 2 with a driver-default client, 1 without security groups, and 3 more that looked again at the sessions left on the server.</p>
+<p>An interruption is the time from the last success to the next success on each connection. In the standard runs the connect, read and write timeouts are 2 s and the probe reconnects 0.2 s after a failure. So the resolution of the interruption is about 2.2 s, and the values gather near 22.5 s, 24.7 s and 26.9 s.</p>
+<p>Every write carried a sequence number, so after each run I read all the numbers in the table and compared them with the numbers that had been acknowledged. Whether the engine restarted was judged from PostgreSQL's <code>pg_postmaster_start_time()</code> and MySQL's <code>Uptime</code> carrying on across the move.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>35.7 s from the call to recovery, 24.7 s of it without writes</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig03-timeline-en.png" alt="Timeline of the medians of 30 moves: start event at 8.0 s, connections cut at 10.9 s, new ENI at 19.0 s, completion event at 27.8 s, DNS switch at 34.6 s, recovery at 35.7 s, writes interrupted 24.7 s" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> One move on a timeline. Medians of 30 cross-VPC moves</figcaption></figure>
+<p>The start event is logged 8.0 s after the API call and connections are cut at 10.9 s. The old network interface is deleted at 16.5 s and the new one in the destination VPC appears at 19.0 s. The completion event comes at 27.8 s, the DNS answer switches to the new IP at 34.6 s, and writes succeed again at 35.7 s. According to the <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_Events.Messages.html" target="_blank" rel="noopener">event documentation</a> the start event is RDS-EVENT-0673 and the completion event is RDS-EVENT-0674.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Point in time</th><th>Median</th><th>Minimum</th><th>Maximum</th></tr>
+</thead>
+<tbody>
+<tr><td>Start event</td><td class="num">8.0</td><td class="num">3.1</td><td class="num">13.1</td></tr>
+<tr><td>Connections cut (last successful write)</td><td class="num">10.9</td><td class="num">5.5</td><td class="num">17.3</td></tr>
+<tr><td>Old network interface deleted</td><td class="num">16.5</td><td class="num">11.0</td><td class="num">24.0</td></tr>
+<tr><td>New network interface created</td><td class="num">19.0</td><td class="num">13.0</td><td class="num">25.0</td></tr>
+<tr><td>Completion event</td><td class="num">27.8</td><td class="num">22.6</td><td class="num">35.8</td></tr>
+<tr><td>DNS answer switches to the new IP</td><td class="num">34.6</td><td class="num">27.3</td><td class="num">42.4</td></tr>
+<tr><td>Writes recover</td><td class="num">35.7</td><td class="num">28.4</td><td class="num">42.0</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Each point in seconds after the API call. 30 cross-VPC moves. The event messages are <code>The VPC configuration modification for DB cluster ... has started.</code> and <code>... has completed.</code></p>
+<p>These are the commands and responses of the first move. The responses show only the relevant fields and the security group IDs are masked. The response to the call still shows the subnet group from before the move, and only <code>VPCNetworkingEnabled</code> appears as a pending change.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># State before the move
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-pg \
+    --query "DBClusters[0].[Status,DBSubnetGroup,VpcSecurityGroups[].VpcSecurityGroupId]"
+# ["available", "avm-lab-sng-a", ["sg-0aaaaaaaaaaaaaaaa"]]
+
+# The move call (03:50:11 UTC)
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-pg \
+    --db-subnet-group-name avm-lab-sng-b \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately \
+    --query "DBCluster.[Status,DBSubnetGroup,PendingModifiedValues]"
+# ["available", "avm-lab-sng-a", {"VPCNetworkingEnabled": true}]
+
+# Events
+aws rds describe-events --source-type db-cluster --source-identifier avm-lab-pg --duration 10 \
+    --query "Events[].[Date,Message]" --output text
+# 2026-11-22T03:50:18.483000+00:00  The VPC configuration modification for DB cluster avm-lab-pg has started.
+# 2026-11-22T03:50:35.026000+00:00  The VPC configuration modification for DB cluster avm-lab-pg has completed.
+
+# State after the move
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-pg \
+    --query "DBClusters[0].[Status,DBSubnetGroup,VpcSecurityGroups[].VpcSecurityGroupId]"
+# ["available", "avm-lab-sng-b", ["sg-0bbbbbbbbbbbbbbbb"]]</code></pre></div>
+<p>The probe recorded the same move as follows. Write 559 succeeds, write 560 fails on a timeout 2.5 s later, and the probe then tries to reconnect to the old IP. After the DNS answer changes, it carries on from write 561 on the new IP. The error texts are shortened.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Write connection (times in UTC, ms is the duration)
+03:50:19.466 {"ev": "q", "ok": true, "ms": 2.9, "ip": "10.61.1.143", "inst": "avm-lab-pg-1", "seq": 559}
+03:50:19.566 {"ev": "q", "ok": false, "ms": 2491.0, "seq": 560, "err": "could not receive data from server: Connection timed out"}
+03:50:22.057 {"ev": "connect", "ok": false, "ms": 2005.5, "ip": "10.61.1.143", "err": "connection to server at \"10.61.1.143\", port 5432 failed: timeout expired"}
+... (the same failure 8 more times)
+03:50:41.917 {"ev": "connect", "ok": false, "ms": 2003.9, "ip": "10.61.1.143", "err": "connection to server at \"10.61.1.143\", port 5432 failed: timeout expired"}
+03:50:44.121 {"ev": "connect", "ok": true, "ms": 21.7, "ip": "10.62.1.133"}
+03:50:44.221 {"ev": "q", "ok": true, "ms": 5.2, "ip": "10.62.1.133", "inst": "avm-lab-pg-1", "seq": 561}
+
+# A record and TTL of the cluster endpoint (only where the value changed)
+03:49:23.567 ['10.61.1.143'] ttl 5
+03:50:42.076 ['10.62.1.133'] ttl 4
+03:50:42.587 ['10.61.1.143'] ttl 2
+03:50:44.117 ['10.62.1.133'] ttl 4</code></pre></div>
+<p>The completion event is not the moment of recovery. After the completion event it took a median of 7.0 s (minimum 3.7 s, maximum 9.9 s) for the DNS answer to change. During that time clients keep trying the old IP. The TTL of the endpoint record was 5 s. When you automate a move, I recommend a retry on the connection check that follows the completion event.</p>
+<p>The writer and the reader are cut together. In the control-plane log the network interfaces of both instances were detached in the same second and created again in the same second. An application that spreads reads over the reader endpoint also loses reads and writes together during the move.</p>
+<p>At the moment of the cut the client gets no error. An open connection failed only after its 2 s timeout. The error was <code>Connection timed out</code> on PostgreSQL and <code>Lost connection to MySQL server during query</code> on MySQL. The server did not close the connection; the answers simply stopped coming.</p>
+<p>Only in the first of the 30 moves did the DNS answer go back and forth between the old IP and the new IP for about 4 s, and one new connection in that window went to the old IP and failed. In the other runs the answer switched once.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>The same 25 s whatever the engine or the data size</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig04-runs-en.png" alt="Dot plot of write interruption medians: PostgreSQL 24.8 s, after loading 23 GB 25.8 s, MySQL 24.4 s, Serverless v2 25.8 s, inside one VPC 23.7 s, failover 2.1 s, with 27,691 acknowledged writes and none missing" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> Write interruption by configuration, the attributes that stayed and changed, and the write check</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Configuration</th><th>Moves</th><th>Median</th><th>Minimum</th><th>Maximum</th></tr>
+</thead>
+<tbody>
+<tr><td>Aurora PostgreSQL 17.9, 0.2 GB of data</td><td class="num">6</td><td class="num">24.8</td><td class="num">22.5</td><td class="num">27.0</td></tr>
+<tr><td>Aurora PostgreSQL 17.9, 23 GB of data</td><td class="num">4</td><td class="num">25.8</td><td class="num">22.5</td><td class="num">27.0</td></tr>
+<tr><td>Aurora MySQL 3.10.3</td><td class="num">6</td><td class="num">24.4</td><td class="num">22.1</td><td class="num">31.0</td></tr>
+<tr><td>Aurora PostgreSQL Serverless v2</td><td class="num">6</td><td class="num">25.8</td><td class="num">24.7</td><td class="num">26.9</td></tr>
+<tr><td>Subnet group change inside one VPC</td><td class="num">2</td><td class="num">23.7</td><td class="num">22.6</td><td class="num">24.8</td></tr>
+<tr><td>Failover for comparison (the same PostgreSQL cluster)</td><td class="num">3</td><td class="num">2.1</td><td class="num">1.5</td><td class="num">4.5</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Write interruption by configuration, in seconds. Open connection, 2 s timeouts. The 30 cross-VPC moves are the 22 above plus 8 run during the lock experiments</p>
+<p>The differences between configurations are within the measurement resolution of about 2.2 s. After loading 40 million rows (23 GB) into the PostgreSQL cluster the median was still 25.8 s. What moves is the network interface, not the data.</p>
+<p>A subnet group change inside one VPC also took 22.6 s and 24.8 s. If you change the subnet group only to tidy up subnets, plan for the same interruption as a move to another VPC.</p>
+<p>On the same PostgreSQL cluster I ran three failovers and measured them the same way: writes were interrupted for 1.5 s, 2.1 s and 4.5 s. The interruption of a VPC move is more than five times that of a failover. An application whose retry count or wait time was sized for a failover may not ride through a VPC move.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Outcome</th><th>Attributes</th></tr>
+</thead>
+<tbody>
+<tr><td>Kept</td><td>Cluster, reader and instance endpoint names. ARNs and resource IDs of the cluster and instances. Availability Zone and creation time of each instance. Parameter groups and certificate. The engine process</td></tr>
+<tr><td>Changed</td><td>DB subnet group, VPC security groups, the private IP and network interface of each instance</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> A comparison of <code>describe-db-clusters</code> and <code>describe-db-instances</code> before and after a move. Of 56 cluster attributes only two changed, the subnet group and the security group</p>
+<p>The write check found nothing missing. Over 32 moves all 27,691 acknowledged writes were in the table. The client counted 32 writes as failed, one per move, and 2 of those had been committed on the server. A write that got no answer may have succeeded, so a retry has to be safe against duplicates.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>The 963 s stall of a client without timeouts</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig05-client-en.png" alt="Bars showing that with 2 s timeouts an open connection stalled 24.7 s and new connections 25.2 s, while with driver defaults an open connection stalled 963.8 s on PostgreSQL and 963.0 s on MySQL" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> Interruption by client settings, and how it differs from a failover</figcaption></figure>
+<p>I repeated the same move with a client that has no timeouts. Only the connect timeout was 2 s and everything else was left at the driver defaults.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Client</th><th>Open connection</th><th>New connections</th><th>Error on the open connection</th></tr>
+</thead>
+<tbody>
+<tr><td>2 s timeouts (median of 30)</td><td class="num">24.7 s</td><td class="num">25.2 s</td><td><code>Connection timed out</code> after 2 s</td></tr>
+<tr><td>Driver defaults, PostgreSQL (psycopg2)</td><td class="num">963.8 s</td><td class="num">25.1 s</td><td><code>could not receive data from server: Connection timed out</code></td></tr>
+<tr><td>Driver defaults, MySQL (PyMySQL)</td><td class="num">963.0 s</td><td class="num">25.2 s</td><td><code>Lost connection to MySQL server during query ([Errno 110] Connection timed out)</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 7.</b> Interruption by client settings. The driver-default runs are one per engine, and the PostgreSQL one was measured on the Serverless v2 cluster</p>
+<p>This is the record of the PostgreSQL write connection in the driver-default run. Write 355 did not come back for 963.5 s, and the interruption including the reconnect was 963.7 s. The instance endpoint connection of the same run stalled for 963.8 s.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>04:16:36.184 {"ev": "q", "ok": true, "ms": 3.6, "ip": "10.61.3.54", "inst": "avm-lab-sv2-1", "seq": 354}
+04:16:36.284 {"ev": "q", "ok": false, "ms": 963532.7, "seq": 355, "err": "could not receive data from server: Connection timed out"}
+04:32:39.817 {"ev": "connect", "ok": true, "ms": 29.7, "ip": "10.62.3.201"}
+04:32:39.917 {"ev": "q", "ok": true, "ms": 9.8, "ip": "10.62.3.201", "inst": "avm-lab-sv2-1", "seq": 356}</code></pre></div>
+<p>New connections were made as soon as DNS switched to the new IP. The open connection had sent a query and did not come back for 16 minutes. All that time the cluster was healthy and other connections were being served.</p>
+<p>The cause is the way the connection ends. In a failover the engine restarts and closes its connections, so the client gets an error such as <code>server closed the connection unexpectedly</code> at once. In a VPC move the engine stays up and only the network interface goes away. The query the client sent gets neither an answer nor an error, and the client waits until the operating system gives up retransmitting.</p>
+<p>963 s fits the TCP retransmission limit of Linux. According to the <a href="https://docs.kernel.org/networking/ip-sysctl.html" target="_blank" rel="noopener">kernel documentation</a> the default <code>tcp_retries2</code> of 15 corresponds to a wait of 924.6 s or more. The probe host is an Amazon Linux 2023 instance that leaves this value unchanged. That the retransmission limit is the cause is inferred from the observed time.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># PostgreSQL (psycopg2, libpq parameters). 2 s is a test value
+psycopg2.connect(
+    host=endpoint, dbname="labdb", user=user, password=password,
+    connect_timeout=2,
+    tcp_user_timeout=2000,      # milliseconds. Close the connection after 2 s without an acknowledgement
+    keepalives=1, keepalives_idle=1, keepalives_interval=1, keepalives_count=2,
+)
+
+# MySQL (PyMySQL)
+pymysql.connect(
+    host=endpoint, database="labdb", user=user, password=password,
+    connect_timeout=2, read_timeout=2, write_timeout=2,
+)</code></pre></div>
+<p>These are the settings used in the test. I chose 2 s to measure the interruption finely. In production the value has to be longer than the longest query, or normal queries will be cut. The PostgreSQL options are <a href="https://www.postgresql.org/docs/current/libpq-connect.html" target="_blank" rel="noopener">libpq connection parameters</a>. Option names differ by driver, and this post tested only psycopg2 and PyMySQL.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Sessions and locks that stay on the server for about six minutes</h2></header><div class="prose">
+<p>The fact that the engine does not restart has a price. The server does not learn right away that a client is gone, so the session of a cut connection stays on the server. A session that was cut with a transaction open also keeps its row locks.</p>
+<p>To check this I created sessions that run an <code>UPDATE</code> on one row inside a transaction and do not commit, and then moved the cluster. There were two kinds of session. One runs a single <code>UPDATE</code> and then sits idle in the transaction. The other repeats the <code>UPDATE</code> every 0.05 s inside the same transaction. After the move a new connection tried to lock the same rows every 10 s.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig06-sessions-en.png" alt="A timeline showing all 82 lock-holding sessions removed at about 360 s, a probe connection outliving 360 s in 5 of 10 moves (the 3 watched to the end lasted 924 s or more), and locks released within 10 s when old sessions are terminated" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 6.</b> Time until the sessions left on the server after a move were removed</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Session</th><th>PostgreSQL</th><th>MySQL</th><th>When the lock was released</th></tr>
+</thead>
+<tbody>
+<tr><td>Idle in a transaction</td><td class="num">5</td><td class="num">5</td><td>About 360 s after the last activity</td></tr>
+<tr><td>Running statements in a transaction</td><td class="num">36</td><td class="num">36</td><td>About 360 s after the last activity</td></tr>
+<tr><td>Transaction sessions terminated right after the move</td><td class="num">8</td><td class="num">16</td><td>Within 10 s of the termination</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 8.</b> Sessions that held a row lock before the move and when the lock was released. The lock was checked every 10 s</p>
+<p>This is the session list of PostgreSQL about two minutes after the move completed. The eight transaction sessions and the two probe connections are still there, in the state they had before the move.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>SELECT pid, application_name, state,
+       round(extract(epoch FROM now() - state_change)) AS idle_sec, left(query, 40) AS query
+FROM pg_stat_activity
+WHERE backend_type = 'client backend' AND pid &lt;&gt; pg_backend_pid();
+
+--  pid  | application_name        | state               | idle_sec | query
+--  4533 | holders-pg-10-ghost-b2a | idle in transaction |      179 | UPDATE lock_t SET v = v + 1, note = 'pg-1
+--  4536 | holders-pg-10-ghost-b2a | idle in transaction |      138 | UPDATE lock_t SET v = v + 1 WHERE id = 6
+--  4551 |                         | idle                |      138 | SELECT host(inet_server_addr()), aurora_
+--  4553 |                         | idle                |      138 | INSERT INTO probe_w (run, seq, cts) VALU
+--  (4 of the 10 sessions from before the move)
+
+-- another session modifies the same row
+SET lock_timeout = '2s';
+UPDATE lock_t SET note = 'watch' WHERE id = 1;
+-- ERROR:  canceling statement due to lock timeout</code></pre></div>
+<p>All 82 lock-holding sessions were removed at about 360 s, whatever the engine or the kind of session. During those six minutes another session that tried to modify the same row failed. PostgreSQL returned <code>LockNotAvailable</code> with <code>lock_timeout</code> at 2 s, and MySQL returned <code>Lock wait timeout exceeded</code>. The symptom is that the move has completed and new connections work, yet a statement waits on particular rows.</p>
+<p>360 s matches the TCP keepalive settings of the server. An Aurora PostgreSQL 17.9 session reports three values. <code>tcp_keepalives_idle</code> is 300 s, <code>tcp_keepalives_interval</code> is 30 s and <code>tcp_keepalives_count</code> is 2, which adds up to 360 s. Aurora MySQL removed its sessions at the same point although <code>wait_timeout</code> is 28,800 s.</p>
+<p>Some sessions stayed longer, without a lock. The session of a probe connection that repeated autocommit queries outlived 360 s in 5 of the 10 moves I observed, one session each time. In the 3 I watched to the end, the session was still visible at 924 s, 958 s and 969 s. That is the same range as the 963 s on the client side, so I infer that a connection whose last server response was never acknowledged stays until the TCP retransmission limit. Such a session holds no lock, but it does count against the connection limit.</p>
+<p>The surest fix is to terminate the sessions from before the move right after the move completes. Every connection made before the move has been cut, so a session that started before the completion time can be terminated. On PostgreSQL the single statement below terminated the 11 sessions from before the move (8 of them holding locks), and all eight row locks were released within 10 s.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>-- Aurora PostgreSQL: terminate sessions that started before the completion event
+SELECT pid, usename, state, pg_terminate_backend(pid) AS terminated
+FROM pg_stat_activity
+WHERE backend_type = 'client backend'
+  AND pid &lt;&gt; pg_backend_pid()
+  AND usename &lt;&gt; 'rdsadmin'
+  AND backend_start &lt; timestamptz '2026-11-22T05:20:24Z';
+--  pid  | usename  | state               | terminated
+--  1473 | labadmin | idle in transaction | t
+--  1474 | labadmin | idle in transaction | t
+--  ... (11 rows in all, then no session matched the same condition)</code></pre></div>
+<p>On MySQL I listed the sessions that had been idle for longer than the time since the move completed and terminated them with <code>mysql.rds_kill</code>. Thirty-one seconds after completion the query returned 10 sessions, and at the next check after terminating them all eight row locks were free.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">sql</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>-- Aurora MySQL: list sessions whose TIME (seconds since the last command) exceeds the time since the move completed
+SELECT ID, USER, HOST, COMMAND, TIME
+FROM information_schema.PROCESSLIST
+WHERE USER NOT IN ('rdsadmin', 'system user', 'event_scheduler')
+  AND ID &lt;&gt; CONNECTION_ID()
+  AND TIME &gt; 31;
+
+-- run for each ID returned
+CALL mysql.rds_kill(3191);</code></pre></div>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Requests rejected at call time, and the mistake that is not rejected</h2></header><div class="prose">
+<p>The five requests that broke a prerequisite were all rejected at the API call. A rejected request did not touch the cluster, and the connections being measured never failed.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Condition</th><th>Error code</th><th>Gist of the message</th></tr>
+</thead>
+<tbody>
+<tr><td>A subnet group with no subnet in an Availability Zone that has an instance</td><td><code>InvalidVPCNetworkStateFault</code></td><td>No subnet with available IP addresses in that Availability Zone</td></tr>
+<tr><td>A security group that is not in the destination VPC</td><td><code>InvalidParameterCombination</code></td><td>The DB instance and the security group are in different VPCs</td></tr>
+<tr><td>A cluster registered as an RDS Proxy target</td><td><code>InvalidDBClusterStateFault</code></td><td>Deregister the proxy target first</td></tr>
+<tr><td><code>--no-enable-vpc-networking</code> together with a subnet group</td><td><code>InvalidParameterCombination</code></td><td>Turning off VPC networking would leave no connectivity</td></tr>
+<tr><td>Another move request while one is in progress or scheduled</td><td><code>InvalidDBClusterStateFault</code></td><td>A change is already pending</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 9.</b> The five requests rejected at call time. A request that names the current subnet group returns success, but no move and no event follow</p>
+<p>These are the commands and the error texts of two of the rejected requests.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># A subnet group with no subnet in an Availability Zone (2a) that holds an instance
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-my \
+    --db-subnet-group-name avm-lab-sng-b-no-az1 \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately
+# An error occurred (InvalidVPCNetworkStateFault) when calling the ModifyDBCluster operation: You can't enable VPC networking. Your database subnet group has no subnet with available IP addresses in Availability Zone ap-northeast-2a, where one of your cluster's database instances is located. Add a subnet, or free up IP addresses on an existing subnet, in that zone, then try again.
+
+# A cluster registered as an RDS Proxy target
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --db-subnet-group-name avm-lab-sng-b \
+    --vpc-security-group-ids sg-0bbbbbbbbbbbbbbbb --apply-immediately
+# An error occurred (InvalidDBClusterStateFault) when calling the ModifyDBCluster operation: Aurora can't disable VPC networking on a DB cluster with an associated RDS Proxy. Deregister the proxy target before disabling VPC networking.</code></pre></div>
+<p>With RDS Proxy, the move went through as soon as the target was deregistered. The <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html" target="_blank" rel="noopener">documentation</a> also lists Aurora Global Database, blue/green deployments, zero-ETL integrations, Babelfish and database activity streams as features to remove before a move. I did not test those.</p>
+<p>A request that leaves out the security groups is not rejected. The move completes normally, but the default security group of the destination VPC is attached. The default security group allows traffic only from itself, so clients cannot connect. In the test no request succeeded after the move completed, and clients connected 3.4 to 4.0 s after I set the security group again with <code>--vpc-security-group-ids</code>.</p>
+<p>According to the documentation the default security group also replaces the current ones when you leave them out of a subnet group change inside one VPC. I recommend always naming the security groups.</p>
+<p>To leave the move for the maintenance window, use <code>--no-apply-immediately</code>. <code>PendingModifiedValues</code> then shows only <code>VPCNetworkingEnabled: true</code> and not the destination subnet group. To apply a scheduled move right away, pass only the three options below. Adding the subnet group makes the request fail.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># Schedule the move for the maintenance window
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --db-subnet-group-name avm-lab-sng-a \
+    --vpc-security-group-ids sg-0aaaaaaaaaaaaaaaa --no-apply-immediately
+
+# Read the scheduled state
+aws rds describe-db-clusters --db-cluster-identifier avm-lab-sv2 \
+    --query "DBClusters[0].{Status:Status,DBSubnetGroup:DBSubnetGroup,Pending:PendingModifiedValues,Window:PreferredMaintenanceWindow}"
+# {"Status": "available", "DBSubnetGroup": "avm-lab-sng-b", "Pending": {"VPCNetworkingEnabled": true}, "Window": "sun:14:20-sun:14:50"}
+
+# Apply the scheduled move right away
+aws rds modify-db-cluster --db-cluster-identifier avm-lab-sv2 \
+    --enable-vpc-networking --apply-immediately</code></pre></div>
+<p>Who moved a cluster and when is in the CloudTrail record of <code>ModifyDBCluster</code>. The request parameters carry <code>dBSubnetGroupName</code>, and the subnet group in the response is the one before the move.</p>
+<p>The CloudTrail record of the first move looks like this when reduced to the relevant fields.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "eventTime": "2026-11-22T03:50:12Z",
+  "eventSource": "rds.amazonaws.com",
+  "eventName": "ModifyDBCluster",
+  "requestParameters": {
+    "dBClusterIdentifier": "avm-lab-pg",
+    "applyImmediately": true,
+    "vpcSecurityGroupIds": ["sg-0bbbbbbbbbbbbbbbb"],
+    "dBSubnetGroupName": "avm-lab-sng-b"
+  },
+  "responseElements": {
+    "dBSubnetGroup": "avm-lab-sng-a",
+    "status": "available",
+    "pendingModifiedValues": {"vPCNetworkingEnabled": true}
+  }
+}</code></pre></div>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Where a cluster VPC move fits</h2></header><div class="prose">
+<p>Putting the evidence from the test next to the examples in the announcement and the User Guide gives four cases where the feature fits.</p>
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig07-usecases-en.png" alt="Four use cases of a cluster VPC move with test evidence (25.8 s with 23 GB, 22.6 s and 24.8 s inside one VPC), three conditions to check first, and three cases where it does not fit" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 7.</b> Use cases of a cluster VPC move and where it does not fit</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Case</th><th>Situation</th><th>Evidence from the test</th></tr>
+</thead>
+<tbody>
+<tr><td>From a VPC short of IP addresses to a wider one</td><td>The subnets have too few IP addresses to add instances</td><td>Writes interrupted 25.8 s even with 23 GB of data. The endpoint name stays</td></tr>
+<tr><td>Clearing an overlapping CIDR</td><td>Moving to a non-overlapping range before connecting another VPC or an on-premises network</td><td>One call once the subnet group and security groups exist in the destination VPC</td></tr>
+<tr><td>Consolidating clusters from several VPCs into one</td><td>Gathering clusters spread over accounts or teams into a shared VPC</td><td>The same procedure on PostgreSQL, MySQL and Serverless v2. ARNs and resource IDs stay</td></tr>
+<tr><td>Rearranging subnets inside one VPC</td><td>Changing or tidying up the subnet layout</td><td>The same procedure. Writes interrupted 22.6 s and 24.8 s</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 10.</b> Use cases and the evidence from the test. A VPC shared by another account and an on-premises path were not tested</p>
+<p>In all four cases the connection strings of the applications stay as they are, which is the difference from the earlier way. The ARNs and resource IDs stay too, so settings that refer to them need no change. The path from the clients to the destination VPC and the security group rules have to be ready before the move.</p>
+<p>The feature fits when three conditions all hold. There is a window in which the writer and the reader may stop together for about 30 s, the clients have timeouts set, and the features that must be removed before a move can be set aside for a while.</p>
+<p>It does not fit a service that cannot accept an interruption of about 30 s. A failover of the same cluster took 1.5 s to 4.5 s, so a service that tolerates only a failover-sized interruption needs another way. If the cluster uses a feature that is hard to remove, such as Aurora Global Database, the earlier way of creating a new cluster and cutting over is still needed.</p>
+</div></section>
+
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>What I did not test and what to check again</h2></header><div class="prose">
+<p>The figures in this post come from one day in one account. I did not test the conditions below, so I recommend checking them the same way before you apply the feature.</p>
+<ul>
+<li>Connections and load: I used six probe connections and at most 32 lock sessions. I did not test a cluster with hundreds of connections or many transactions per second.</li>
+<li>Instances: only db.r7g.large and Serverless v2, with one or two instances per cluster.</li>
+<li>Client path: only VPC peering. I did not test Transit Gateway, a VPC shared by another account, or an on-premises path.</li>
+<li>Connection pools: I did not test using an idle pooled connection again after the move. I expect it to stall in the same way as an open connection.</li>
+<li>Other drivers: I did not check the timeout options of JDBC, Go or Node.js drivers.</li>
+<li>Public access and dual-stack: I tested neither. According to the documentation, a move of a publicly accessible instance fails and leaves the instances unavailable when the destination VPC has no internet gateway.</li>
+<li>A failed move and its rollback: I could not produce a move that fails midway and returns to the original VPC (RDS-EVENT-0675), nor the <code>incompatible-network</code> state (RDS-EVENT-0676). Every failure I saw was a rejection at call time.</li>
+<li>Driver-default runs: one run per engine.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>What to do before, during and after the move</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="aurora-move-cluster-to-different-vpc-assets/fig08-runsheet-en.png" alt="A run sheet with 5 steps before, 4 during (about 25 to 35 s) and 5 after the move, four requests rejected at call time, and the unrejected mistake of omitting security groups, fixed 3.4 to 4.0 s after setting them again" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 8.</b> The order of work confirmed in the test and the requests rejected at call time</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>When</th><th>What to do</th><th>The result behind it</th></tr>
+</thead>
+<tbody>
+<tr><td>Before</td><td>Give the DB subnet group in the destination VPC a subnet in every Availability Zone that has an instance</td><td>Rejected with <code>InvalidVPCNetworkStateFault</code> otherwise</td></tr>
+<tr><td>Before</td><td>Create security groups in the destination VPC and name them in the request</td><td>Without them the default security group is attached and clients cannot connect</td></tr>
+<tr><td>Before</td><td>Check the path and the security group rules from the clients to the destination VPC</td><td>The test went through VPC peering</td></tr>
+<tr><td>Before</td><td>Deregister the RDS Proxy target</td><td>Rejected with <code>InvalidDBClusterStateFault</code> while registered</td></tr>
+<tr><td>Before</td><td>Check the timeout settings of the clients</td><td>Without them an open connection stalled for 963 s</td></tr>
+<tr><td>During</td><td>Call <code>modify-db-cluster</code> and watch for the start and completion events</td><td>8.0 s and 27.8 s after the call</td></tr>
+<tr><td>During</td><td>Announce the window on the basis that the writer and reader stop together</td><td>Writes interrupted 24.7 s, 31.3 s at most</td></tr>
+<tr><td>After</td><td>Terminate the sessions that started before the completion time</td><td>Otherwise locks stay for about 360 s</td></tr>
+<tr><td>After</td><td>Check the subnet group and security groups with <code>describe-db-clusters</code>, with a retry on the connection check</td><td>7.0 s from the completion event to the DNS switch</td></tr>
+<tr><td>After</td><td>Reconcile the writes counted as failed and retry without duplicates</td><td>2 of 32 failed writes had been committed</td></tr>
+<tr><td>After</td><td>Clean up the subnets and security groups of the old VPC only after the move is confirmed</td><td>Docs: Aurora needs them to return to the original VPC if the move fails</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 11.</b> What to do around a move and the result behind each item. Results for db.r7g.large and Serverless v2 with one or two instances per cluster</p>
+<p>The interruption may change with the number of instances and the load. I recommend measuring it first on a copy with the same configuration before applying it to a production cluster.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/11/aurora-move-clusters-to-different-vpc/" target="_blank" rel="noopener">Amazon Aurora now supports moving clusters to a different VPC</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html" target="_blank" rel="noopener">Working with a DB cluster in a VPC</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/CHAP_GettingStartedAurora.AuroraPostgreSQL.ExpressConfig.html" target="_blank" rel="noopener">Create with express configuration</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/USER_Events.Messages.html" target="_blank" rel="noopener">Amazon RDS event categories and event messages for Aurora</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Aurora.Managing.Clone.html" target="_blank" rel="noopener">Cloning a volume for an Amazon Aurora DB cluster</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/cli/latest/reference/rds/modify-db-cluster.html" target="_blank" rel="noopener">modify-db-cluster</a></td><td class="nowrap"><span class="l-ko">AWS CLI 참조</span><span class="l-en">AWS CLI reference</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.kernel.org/networking/ip-sysctl.html" target="_blank" rel="noopener">IP Sysctl</a></td><td class="nowrap"><span class="l-ko">Linux 커널 문서</span><span class="l-en">Linux kernel docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://www.postgresql.org/docs/current/libpq-connect.html" target="_blank" rel="noopener">Database Connection Control Functions</a></td><td class="nowrap"><span class="l-ko">PostgreSQL 문서</span><span class="l-en">PostgreSQL docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 22일 서울 리전(ap-northeast-2)의 한 계정에서 직접 테스트한 결과입니다. 조건은 Aurora PostgreSQL 17.9, Aurora MySQL 3.10.3, db.r7g.large와 Serverless v2, 클러스터당 인스턴스 1~2개, 측정 연결 6개입니다. 수치는 인스턴스 수, 부하, 클라이언트 설정에 따라 달라집니다. 963초와 360초의 원인으로 든 TCP 재전송 한도와 keepalive는 관측한 시간에서 추정한 내용입니다. AWS의 설명은 같은 날 확인한 What's New 게시물과 Aurora User Guide를 기준으로 합니다. 테스트에 사용한 리소스는 모두 삭제했습니다.</span><span class="l-en">The figures in this post come from my own tests in one account in the Seoul Region (ap-northeast-2) on November 22, 2026. The conditions are Aurora PostgreSQL 17.9, Aurora MySQL 3.10.3, db.r7g.large and Serverless v2, one or two instances per cluster and six probe connections. The figures change with the number of instances, the load and the client settings. The TCP retransmission limit and keepalive given as the causes of the 963 s and 360 s are inferred from the observed times. What AWS says is taken from the What's New post and the Aurora User Guide as checked the same day. All resources used in the tests have been deleted.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
