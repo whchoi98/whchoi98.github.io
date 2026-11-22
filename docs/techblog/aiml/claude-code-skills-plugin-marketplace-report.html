@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code Skills 관리 모범사례</title>
+<meta name="description" content="EC2와 맥북, Desktop 앱에서 사용하는 Claude Code의 skill을 plugin 하나로 묶어 GitHub marketplace로 관리하는 방법과 원칙 여섯 가지를 정리했습니다. Claude Code 공식 문서의 안내와 맞는지도 항목별로 확인했습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-skills-plugin-marketplace/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-22</span><span class="l-en">Published 2026-11-22</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 6분</span><span class="l-en">6 min read</span></span></div>
+<h1><span class="l-ko">Claude Code Skills 관리 모범사례</span><span class="l-en">Best practices for managing Claude Code skills</span></h1>
+<p class="thesis"><span class="l-ko">EC2의 Claude Code CLI, 맥북의 CLI와 Desktop 앱에서 같은 skill을 사용하려고 직접 만든 skill을 plugin 하나로 묶어 GitHub marketplace로 관리하는 방법을 정리했습니다. 수정은 저장소 한 곳에서 하고 version을 올리면 장비마다 명령 한 줄로 같은 판을 받습니다. 이 방식을 Claude Code 공식 문서와 대조해 보니 plugin의 용도, marketplace 게시 방법, version 관리 방법이 문서의 안내와 일치했습니다.</span><span class="l-en">To use the same skills in the Claude Code CLI on EC2 and in the CLI and the desktop app on a MacBook, I bundle the skills I wrote into one plugin and use a GitHub repository as the marketplace. Edits happen in that one repository, and once the version is raised each machine gets the same release with one command. Checked against the Claude Code documentation, the use of a plugin, the way the marketplace is published and the way versions are handled all match what the documentation says.</span></p>
+<div class="tags"><span>#Claude Code</span><span>#Skills</span><span>#Plugins</span><span>#Marketplace</span><span>#Claude Code Desktop</span></div>
+<ul class="facts"><li><span class="l-ko"><b>구성</b>: 장비는 둘이고 사용하는 화면은 셋입니다. 맥북은 한 번 설치하면 CLI와 Desktop 앱의 로컬 세션에 함께 적용됩니다.</span><span class="l-en"><b>Setup</b>: two machines and three surfaces. On the MacBook one install serves both the CLI and the desktop app's local sessions.</span></li><li><span class="l-ko"><b>배포</b>: 저장소에서 수정하고 <code>plugin.json</code>의 version을 올려 push한 뒤 장비마다 <code>claude plugin update</code>를 실행합니다.</span><span class="l-en"><b>Release</b>: edit in the repository, raise the version in <code>plugin.json</code>, push, then run <code>claude plugin update</code> on each machine.</span></li><li><span class="l-ko"><b>주의</b>: version을 올리지 않으면 갱신되지 않고 실행 중인 세션은 <code>/reload-plugins</code> 전까지 이전 version을 사용합니다.</span><span class="l-en"><b>Watch out</b>: nothing updates unless the version changes, and a running session keeps the previous version until <code>/reload-plugins</code>.</span></li><li><span class="l-ko"><b>비용</b>: 제 plugin의 skill과 command 17개는 세션마다 약 6,841토큰을 차지하므로 설명을 짧게 쓰고 사용하지 않는 skill을 정리합니다.</span><span class="l-en"><b>Cost</b>: the 17 skills and commands of my plugin take about 6,841 tokens per session, so descriptions stay short and unused skills go.</span></li><li><span class="l-ko"><b>문서 대조</b>: 여섯 항목 가운데 다섯이 공식 문서의 안내와 일치했고 한 사람이 여러 장비에 설치하는 용도는 문서에 따로 언급되지 않았습니다.</span><span class="l-en"><b>Documentation check</b>: five of six items match the documentation, and the documentation does not mention one person installing on several machines.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">세 환경이 같은 Skills를 받는 구성</a><a href="#ko-s2">Skill이 놓이는 위치와 Plugin을 고른 이유</a><a href="#ko-s3">저장소 하나를 Plugin이자 Marketplace로 만들기</a><a href="#ko-s4">두 장비에 설치하기</a><a href="#ko-s5">수정하고 배포하는 순서</a><a href="#ko-s6">관리하면서 지키는 원칙 여섯 가지</a><a href="#ko-s7">Anthropic 공식 문서와의 대조</a><a href="#ko-s8">비활성화와 제거, 다음에 덧붙일 것</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Three environments that get the same skills</a><a href="#en-s2">Where a skill can live, and why I chose a plugin</a><a href="#en-s3">One repository as both the plugin and the marketplace</a><a href="#en-s4">Installing on the two machines</a><a href="#en-s5">The order of an edit and a release</a><a href="#en-s6">Six rules I keep</a><a href="#en-s7">Checked against the Anthropic documentation</a><a href="#en-s8">Disabling, removing, and what to add next</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>세 환경이 같은 Skills를 받는 구성</h2></header><div class="prose">
+<p>Claude Code를 여러 장비에서 사용하면 직접 만든 skill을 장비마다 복사해 두게 되고 한 곳에서 수정한 내용이 다른 곳에는 반영되지 않습니다. skill이 늘어날수록 어느 장비의 사본이 최신인지 알기 어려워지므로 한 곳에서 관리하는 방법이 필요합니다.</p>
+<p>저는 Claude Code를 세 곳에서 사용합니다. EC2의 Claude Code CLI, 맥북의 Claude Code CLI, 맥북의 Claude Code Desktop 앱입니다. 맥북을 들고 외근하는 일이 잦아 주 작업 환경은 EC2에 두었습니다. EC2에는 VS Code Server를 띄워 두거나 <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a>를 서버로 다시 패키징해 띄워 두고 브라우저로 접속합니다. Orca는 여러 코딩 에이전트를 병렬로 실행하는 오픈 소스 앱입니다. 외근 중에도 브라우저만 열면 작업하던 환경에 바로 접속하고 사용성도 맥북에서 직접 쓸 때와 같습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>환경</th><th>사용하는 방법</th><th>plugin 설치</th></tr>
+</thead>
+<tbody>
+<tr><td>EC2의 Claude Code CLI</td><td>브라우저로 VS Code Server나 Orca 서버에 접속해 실행</td><td>EC2에서 한 번</td></tr>
+<tr><td>맥북의 Claude Code CLI</td><td>맥북의 터미널에서 실행</td><td>맥북에서 한 번</td></tr>
+<tr><td>맥북의 Claude Code Desktop 앱</td><td>앱의 로컬 세션에서 실행</td><td>CLI와 같은 설정 파일을 읽으므로 따로 설치하지 않음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> Claude Code를 사용하는 세 환경</p>
+<p>직접 만든 skill은 plugin 하나로 묶어 GitHub 저장소에 두고 그 저장소를 marketplace로 등록했습니다. 그림 1이 완성된 구성입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-three-environments.png" alt="세 부분으로 된 그림. 왼쪽은 plugin이자 marketplace인 GitHub 저장소로 plugin.json, marketplace.json, skills 폴더, commands 폴더, 테스트와 CHANGELOG가 있고 version은 1.9.1이다. 오른쪽은 이 저장소에서 설치하는 환경으로 EC2의 Claude Code CLI와 맥북의 Claude Code CLI, Claude Code Desktop 앱이 있으며 EC2는 VS Code Server와 Orca 서버에 브라우저로 접속해 사용하고 맥북은 한 번 설치하면 CLI와 Desktop 앱에 모두 적용된다. 아래는 장비마다 skill 폴더를 손으로 복사하던 이전 방식과 지금 방식의 비교이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> GitHub 저장소 하나에서 EC2와 맥북이 같은 plugin을 설치하는 구성</figcaption></figure>
+<p>장비는 둘이고 사용하는 화면은 셋입니다. 공식 문서에 따르면 한 컴퓨터의 터미널, Desktop 앱의 로컬 세션, VS Code 확장은 같은 설정 파일을 읽습니다. 그래서 맥북에서는 한 번 설치하면 CLI와 Desktop 앱에 함께 적용됩니다. 설치와 갱신은 장비마다 명령 한 줄입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Skill이 놓이는 위치와 Plugin을 고른 이유</h2></header><div class="prose">
+<p>skill은 저장하는 위치에 따라 적용되는 범위가 달라집니다. 한 사람이 여러 장비에서 쓸 때 고를 수 있는 위치는 네 가지입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>위치</th><th>경로</th><th>적용 범위</th><th>다른 장비에 반영하는 방법</th></tr>
+</thead>
+<tbody>
+<tr><td>개인</td><td><code>~/.claude/skills/</code></td><td>그 장비의 모든 프로젝트</td><td>폴더를 직접 복사</td></tr>
+<tr><td>프로젝트</td><td><code>.claude/skills/</code></td><td>그 저장소에서 시작한 세션</td><td>저장소에 커밋하고 다른 장비에서 pull</td></tr>
+<tr><td>claude.ai 계정</td><td>claude.ai 설정에서 활성화</td><td>claude.ai 계정으로 로그인한 세션</td><td>자동 동기화. Amazon Bedrock이나 API 키로 인증한 세션에는 동기화되지 않음</td></tr>
+<tr><td>Plugin</td><td><code>&lt;plugin&gt;/skills/</code></td><td>plugin을 활성화한 모든 세션</td><td>marketplace에서 설치하고 갱신</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 개인이 skill을 둘 수 있는 위치. Claude Code 공식 문서 기준이며 조직이 배포하는 위치는 제외</p>
+<p>plugin을 고른 이유는 세 가지입니다.</p>
+<ul>
+<li>장비가 달라도 설치와 갱신 명령이 같습니다. 인증 방식이 달라도 동작합니다.</li>
+<li>version이 있어 어느 장비가 어느 판을 쓰는지 <code>claude plugin list</code>로 확인됩니다.</li>
+<li>Git 저장소이므로 변경 이력이 남고 테스트를 붙일 수 있으며 이전 판으로 되돌릴 수 있습니다.</li>
+</ul>
+<blockquote><p>요리법 노트에 비유하면 이해하기 쉽습니다. 집과 사무실의 주방에 손으로 적은 노트를 따로 두면 한쪽에서 수정한 요리법이 다른 쪽에는 옛 내용으로 남습니다. 요리법을 책 한 권으로 묶어 서점의 목록에 올려 두면 판이 바뀔 때마다 두 주방이 같은 판을 받아 옵니다. skill이 요리법, plugin이 책, marketplace가 서점의 목록, version이 책의 판입니다. 주방에 꽂힌 책에 직접 적은 메모는 새 판을 받으면 사라지므로 수정은 원고에서 합니다.</p></blockquote>
+<p>비유와 다른 점이 하나 있습니다. 새 판을 받아도 이미 실행 중인 세션은 다시 불러오기 전까지 이전 판을 계속 사용합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>저장소 하나를 Plugin이자 Marketplace로 만들기</h2></header><div class="prose">
+<p>plugin은 <code>.claude-plugin/plugin.json</code>이 있는 폴더이고 marketplace는 <code>.claude-plugin/marketplace.json</code>이 있는 저장소입니다. 두 파일을 한 저장소에 두면 저장소 하나가 plugin이자 marketplace가 됩니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>my-plugins/
+  .claude-plugin/
+    plugin.json
+    marketplace.json
+  skills/
+    techblogs/SKILL.md
+    kor-deslop/SKILL.md
+    ...
+  commands/
+  tests/
+  CHANGELOG.md</code></pre></div>
+<p><code>plugin.json</code>에는 이름과 version을 적습니다. 이름은 설치한 사람이 <code>이름@marketplace</code>로 계속 사용하므로 바꾸지 않습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "name": "my-plugins",
+  "version": "1.9.1",
+  "description": "...",
+  "repository": "https://github.com/whchoi98/my-plugins"
+}</code></pre></div>
+<p><code>marketplace.json</code>에는 plugin 목록을 적습니다. <code>source</code>의 <code>./</code>는 plugin이 저장소 루트에 있다는 뜻입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "name": "my-plugins",
+  "owner": { "name": "WooHyung Choi" },
+  "plugins": [
+    { "name": "my-plugins", "source": "./" }
+  ]
+}</code></pre></div>
+<p>plugin 안의 skill은 <code>/my-plugins:techblogs</code>처럼 plugin 이름이 앞에 붙으므로 다른 위치에 있는 같은 이름의 skill과 충돌하지 않습니다. push하기 전에 구조를 검증합니다. 제 저장소는 아이콘이 없다는 경고 하나와 함께 통과했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ claude plugin validate .
+...
+✔ Validation passed with warnings</code></pre></div>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>두 장비에 설치하기</h2></header><div class="prose">
+<p>EC2와 맥북에서 한 번씩 실행합니다. marketplace를 추가한 뒤 plugin을 설치합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude plugin marketplace add whchoi98/my-plugins
+claude plugin install my-plugins@my-plugins</code></pre></div>
+<p>v2.1.292 이상에서는 <code>claude plugin install my-plugins --marketplace whchoi98/my-plugins</code> 한 줄로 두 단계를 함께 실행합니다. 설치 범위는 모든 프로젝트에서 사용하도록 user로 둡니다. 설치된 version은 다음 명령으로 확인합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ claude plugin list
+  ❯ my-plugins@my-plugins
+    Version: 1.9.1
+    Scope: user
+    Status: ✔ enabled</code></pre></div>
+<p>맥북에서는 터미널에서 설치한 plugin이 Desktop 앱의 로컬 세션에도 적용됩니다. Desktop 앱에서 직접 설치하려면 입력창 옆의 + 버튼에서 plugin 메뉴를 엽니다. 클라우드 세션은 로컬에 설치한 plugin을 불러오지 않습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>수정하고 배포하는 순서</h2></header><div class="prose">
+<p>skill을 수정해 각 환경에 반영하기까지 여섯 단계를 거칩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-release-flow.png" alt="세 부분으로 된 그림. 위쪽은 배포 순서 여섯 단계로 클론에서 수정, 테스트와 검증, version 올림, push, 환경마다 갱신, 세션에 반영 순서이다. 아래 왼쪽은 장비에 저장되는 모습으로 plugins 폴더 아래 marketplace 사본과 version마다 따로 생기는 cache 폴더, 설치 기록 파일이 있다. 아래 오른쪽은 자주 겪는 문제 세 가지로 version을 그대로 두고 push한 경우, 설치본을 직접 수정한 경우, 갱신했는데 이전 내용으로 동작하는 경우와 각각의 조치이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> skill 수정에서 세션 반영까지의 순서와 자주 겪는 문제</figcaption></figure>
+<ol>
+<li>저장소의 클론에서 skill을 수정합니다. 설치본이 있는 <code>~/.claude/plugins/cache/</code>는 수정하지 않습니다.</li>
+<li>테스트와 <code>claude plugin validate .</code>를 실행합니다.</li>
+<li><code>plugin.json</code>의 <code>version</code>을 올리고 CHANGELOG에 바뀐 내용을 적습니다.</li>
+<li>push합니다.</li>
+<li>장비마다 갱신 명령을 실행합니다.</li>
+<li>실행 중인 세션에는 <code>/reload-plugins</code>로 반영합니다. 실행하지 않아도 다음에 시작하는 세션부터 반영됩니다.</li>
+</ol>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude plugin update my-plugins@my-plugins</code></pre></div>
+<p>version을 올리지 않고 push하면 갱신 명령이 <code>is already at the latest version</code>을 출력하고 설치본은 그대로입니다. Claude Code가 <code>plugin.json</code>의 <code>version</code>으로 갱신 여부를 판단하기 때문입니다. <code>version</code>을 아예 적지 않으면 커밋 SHA가 version이 되어 커밋마다 갱신됩니다. 저는 판을 구분하려고 version을 직접 올립니다.</p>
+<p>설치본은 version마다 <code>cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code> 폴더에 따로 저장됩니다. 실행 중인 세션이 이전 version을 계속 읽을 수 있도록 이전 폴더는 갱신 14일 뒤에 정리됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>관리하면서 지키는 원칙 여섯 가지</h2></header><div class="prose">
+<ul>
+<li><b>출처는 저장소 하나입니다.</b> 설치본과 개인 폴더의 사본은 수정하지 않습니다. 설치본은 다음 version에서 새 폴더로 바뀌므로 그 안에서 수정한 내용은 사라집니다.</li>
+<li><b>같은 skill을 여러 위치에 두지 않습니다.</b> plugin으로 옮긴 skill은 <code>~/.claude/skills/</code>와 claude.ai 계정에서 지웁니다. 제 EC2에는 개인 폴더에 7개, claude.ai 동기화로 28개의 skill이 따로 있었고 plugin과 이름이 같은 skill도 남아 있었습니다. 이름이 같으면 둘 다 목록에 실려 어느 쪽이 호출되는지 헷갈립니다.</li>
+<li><b>설명은 짧게 쓰고 사용하지 않는 skill은 정리합니다.</b> 활성화한 plugin의 skill 이름과 설명은 모든 세션의 모든 턴에 실립니다. 제 plugin은 skill과 command 17개가 세션마다 약 6,841토큰을 차지합니다. <code>claude plugin details my-plugins</code>가 이 값을 보여 주고 <code>/skill-doctor</code>가 skill별 비용과 사용 횟수를 보여 줍니다. 비용 구조는 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/" target="_blank" rel="noopener">비용 절감 Tip 글</a>에 정리했습니다.</li>
+<li><b>릴리스 전에 검증합니다.</b> 저장소의 테스트와 <code>claude plugin validate</code>를 통과한 뒤에 version을 올립니다. skill의 동작까지 확인하려면 <code>claude plugin eval</code>로 평가 사례를 만듭니다.</li>
+<li><b>공개 저장소에는 비밀 정보를 넣지 않습니다.</b> 저장소를 clone할 수 있는 사람은 누구나 설치할 수 있습니다. 계정 ID, 내부 주소, 고객 이름이 필요한 skill은 private 저장소에 둡니다. 저장소가 private이면 marketplace도 private입니다.</li>
+<li><b>자동 갱신은 필요할 때 활성화합니다.</b> 직접 만든 marketplace는 자동 갱신의 기본값이 비활성화입니다. <code>/plugin</code>의 Marketplaces 탭에서 활성화하면 세션을 시작한 뒤 새 version을 받아 옵니다. 릴리스 직후에 바로 사용하려면 갱신 명령을 직접 실행합니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Anthropic 공식 문서와의 대조</h2></header><div class="prose">
+<p>이 방식이 Claude Code 공식 문서의 안내와 맞는지 항목별로 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>제 방식</th><th>공식 문서의 설명</th><th>판정</th></tr>
+</thead>
+<tbody>
+<tr><td>여러 skill을 plugin 하나로 묶음</td><td>같은 구성을 여러 저장소에서 다시 쓰거나 팀원에게 주거나 version을 붙여 배포하려면 plugin으로 만들라고 안내</td><td><span class="pill good">일치</span></td></tr>
+<tr><td>GitHub 저장소를 marketplace로 사용</td><td>저장소에 <code>marketplace.json</code>을 두면 게시가 끝나고 plugin의 저장소에 함께 둘 수 있다고 설명</td><td><span class="pill good">일치</span></td></tr>
+<tr><td>릴리스마다 version을 올림</td><td>릴리스마다 <code>version</code>을 올리는 방법과 아예 적지 않는 방법 두 가지를 제시</td><td><span class="pill good">일치</span></td></tr>
+<tr><td>push 전에 <code>claude plugin validate</code> 실행</td><td>릴리스 준비 단계로 안내하고 CI에서는 <code>--strict</code>를 붙이라고 설명</td><td><span class="pill good">일치</span></td></tr>
+<tr><td>맥북에서 한 번 설치해 CLI와 Desktop 앱에 적용</td><td>한 컴퓨터의 터미널, Desktop 앱의 로컬 세션, VS Code 확장이 같은 설정 파일을 읽는다고 설명</td><td><span class="pill good">일치</span></td></tr>
+<tr><td>한 사람이 여러 장비에 같은 plugin을 설치</td><td>여러 저장소와 팀 공유를 용도로 설명하고 개인의 여러 장비는 따로 언급하지 않음</td><td><span class="pill info">같은 구조를 적용</span></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 제 방식과 Claude Code 공식 문서의 대조. 2026년 11월 22일 확인</p>
+<p>문서가 알려 주는 한계도 있습니다. 클라우드 세션과 Cowork는 로컬에 설치한 plugin을 불러오지 않습니다. 이 환경에서는 claude.ai 계정에 활성화한 skill이나 저장소의 <code>.claude/skills/</code>를 사용합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>비활성화와 제거, 다음에 덧붙일 것</h2></header><div class="prose">
+<p>plugin을 잠시 사용하지 않으려면 비활성화하고 완전히 지우려면 제거합니다. 저장소는 그대로 남으므로 다시 설치하면 같은 version으로 돌아옵니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude plugin disable my-plugins@my-plugins
+claude plugin uninstall my-plugins@my-plugins</code></pre></div>
+<p>다음에 덧붙일 것은 두 가지입니다. skill이 늘어나면 <code>claude plugin eval</code>로 skill마다 평가 사례를 만들어 수정할 때마다 실행합니다. 장비가 늘어나면 marketplace의 자동 갱신을 활성화해 갱신 명령을 장비마다 실행하는 일을 줄입니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Three environments that get the same skills</h2></header><div class="prose">
+<p>When you use Claude Code on several machines, the skills you wrote end up copied to each one, and an edit made in one place does not reach the others. The more skills you have, the harder it is to tell which machine holds the latest copy, so you need one place to manage them.</p>
+<p>I use Claude Code in three places: the Claude Code CLI on EC2, the Claude Code CLI on my MacBook, and the Claude Code Desktop app on my MacBook. I often work away from the office with the MacBook, so my main working environment is on EC2. On EC2 I keep VS Code Server running, or <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a> repackaged to run as a server, and connect with a browser. Orca is an open-source app that runs several coding agents in parallel. Away from the office, opening a browser takes me straight back to the environment I was working in, and it is as easy to use as working on the MacBook itself.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Environment</th><th>How I use it</th><th>Plugin install</th></tr>
+</thead>
+<tbody>
+<tr><td>Claude Code CLI on EC2</td><td>Run from a browser connected to VS Code Server or the Orca server</td><td>Once on EC2</td></tr>
+<tr><td>Claude Code CLI on the MacBook</td><td>Run in the MacBook's terminal</td><td>Once on the MacBook</td></tr>
+<tr><td>Claude Code Desktop app on the MacBook</td><td>Run in the app's local sessions</td><td>No separate install: it reads the same settings files as the CLI</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> The three environments where I use Claude Code</p>
+<p>I put the skills I wrote into one plugin in a GitHub repository and registered that repository as a marketplace. Figure 1 shows the finished setup.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-three-environments-en.png" alt="A figure in three parts. On the left, a GitHub repository that is both a plugin and a marketplace, holding plugin.json, marketplace.json, a skills folder, a commands folder, tests and a CHANGELOG, at version 1.9.1. On the right, the environments that install from it: the Claude Code CLI on EC2, and the Claude Code CLI and the Claude Code Desktop app on the MacBook. EC2 is used from a browser connected to VS Code Server or the Orca server, and on the MacBook one install serves both the CLI and the desktop app. At the bottom, the earlier way of copying skill folders to each machine by hand compared with the current way" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> EC2 and the MacBook install the same plugin from one GitHub repository</figcaption></figure>
+<p>There are two machines and three surfaces. According to the documentation, the terminal, the desktop app's local sessions and the VS Code extension on one computer read the same settings files. So on the MacBook one install serves both the CLI and the desktop app. Installing and updating takes one command per machine.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Where a skill can live, and why I chose a plugin</h2></header><div class="prose">
+<p>Where you save a skill decides which sessions load it. One person working on several machines has four places to choose from.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Location</th><th>Path</th><th>Loads in</th><th>How it reaches another machine</th></tr>
+</thead>
+<tbody>
+<tr><td>Personal</td><td><code>~/.claude/skills/</code></td><td>Every project on that machine</td><td>Copy the folder yourself</td></tr>
+<tr><td>Project</td><td><code>.claude/skills/</code></td><td>Sessions started in that repository</td><td>Commit it and pull on the other machine</td></tr>
+<tr><td>claude.ai account</td><td>Enabled in the claude.ai settings</td><td>Sessions signed in with the claude.ai account</td><td>Synced automatically. Not synced to sessions that authenticate through Amazon Bedrock or an API key</td></tr>
+<tr><td>Plugin</td><td><code>&lt;plugin&gt;/skills/</code></td><td>Every session where the plugin is enabled</td><td>Install and update from a marketplace</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Where one person can keep a skill. From the Claude Code documentation; locations an organization deploys are left out</p>
+<p>I chose a plugin for three reasons.</p>
+<ul>
+<li>The install and update commands are the same on every machine, whatever the sign-in method.</li>
+<li>It has a version, so <code>claude plugin list</code> shows which release each machine runs.</li>
+<li>It is a Git repository, so it keeps a history, can carry tests and can go back to an earlier release.</li>
+</ul>
+<blockquote><p>A recipe notebook makes this easy to picture. If you keep a handwritten notebook in the kitchen at home and another at the office, a recipe corrected in one stays old in the other. Bind the recipes into one book and list it in a bookshop's catalog, and both kitchens get the same edition whenever a new one comes out. A skill is a recipe, the plugin is the book, the marketplace is the bookshop's catalog, and the version is the edition. A note written into the copy on the kitchen shelf is gone when the new edition arrives, so corrections go into the manuscript.</p></blockquote>
+<p>The picture differs from reality in one way. Even after the new edition arrives, a session that is already running keeps using the old one until it reloads.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>One repository as both the plugin and the marketplace</h2></header><div class="prose">
+<p>A plugin is a folder with <code>.claude-plugin/plugin.json</code>, and a marketplace is a repository with <code>.claude-plugin/marketplace.json</code>. With both files in one repository, that repository is the plugin and the marketplace at once.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>my-plugins/
+  .claude-plugin/
+    plugin.json
+    marketplace.json
+  skills/
+    techblogs/SKILL.md
+    kor-deslop/SKILL.md
+    ...
+  commands/
+  tests/
+  CHANGELOG.md</code></pre></div>
+<p><code>plugin.json</code> holds the name and the version. People who install the plugin keep using the name as <code>name@marketplace</code>, so do not change it.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "name": "my-plugins",
+  "version": "1.9.1",
+  "description": "...",
+  "repository": "https://github.com/whchoi98/my-plugins"
+}</code></pre></div>
+<p><code>marketplace.json</code> lists the plugins. A <code>source</code> of <code>./</code> means the plugin is at the root of the repository.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "name": "my-plugins",
+  "owner": { "name": "WooHyung Choi" },
+  "plugins": [
+    { "name": "my-plugins", "source": "./" }
+  ]
+}</code></pre></div>
+<p>A skill inside a plugin carries the plugin name in front, as in <code>/my-plugins:techblogs</code>, so it does not collide with a skill of the same name in another location. Validate the structure before you push. My repository passed with one warning, about a missing icon.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ claude plugin validate .
+...
+✔ Validation passed with warnings</code></pre></div>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Installing on the two machines</h2></header><div class="prose">
+<p>Run this once on EC2 and once on the MacBook. Add the marketplace, then install the plugin.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude plugin marketplace add whchoi98/my-plugins
+claude plugin install my-plugins@my-plugins</code></pre></div>
+<p>On v2.1.292 or later, the single line <code>claude plugin install my-plugins --marketplace whchoi98/my-plugins</code> does both steps. I install at user scope, so that every project gets the plugin. This command shows the installed version.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ claude plugin list
+  ❯ my-plugins@my-plugins
+    Version: 1.9.1
+    Scope: user
+    Status: ✔ enabled</code></pre></div>
+<p>On the MacBook, a plugin installed in the terminal also applies to the desktop app's local sessions. To install from the desktop app itself, open the plugin menu from the + button next to the prompt box. Cloud sessions do not load plugins installed locally.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>The order of an edit and a release</h2></header><div class="prose">
+<p>An edit to a skill reaches every environment in six steps.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-release-flow-en.png" alt="A figure in three parts. At the top, the six steps of a release: edit in the clone, test and validate, bump the version, push, update in each environment, apply to the session. At the lower left, what is stored on each machine: under the plugins folder, a copy of the marketplace, a cache folder for each version and the install record. At the lower right, three common problems, each with its fix: pushing without changing the version, editing the installed copy, and old content still running after an update" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> From a skill edit to the running session, and three common problems</figcaption></figure>
+<ol>
+<li>Edit the skill in a clone of the repository. Do not edit <code>~/.claude/plugins/cache/</code>, where the installed copy is.</li>
+<li>Run the tests and <code>claude plugin validate .</code>.</li>
+<li>Raise <code>version</code> in <code>plugin.json</code> and write what changed in the CHANGELOG.</li>
+<li>Push.</li>
+<li>Run the update command on each machine.</li>
+<li>Apply it to a running session with <code>/reload-plugins</code>. Without that, it applies from the next session you start.</li>
+</ol>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude plugin update my-plugins@my-plugins</code></pre></div>
+<p>If you push without raising the version, the update command prints <code>is already at the latest version</code> and the installed copy stays as it was. Claude Code decides whether to update from <code>version</code> in <code>plugin.json</code>. If you leave <code>version</code> out altogether, the commit SHA becomes the version and every commit is an update. I raise the version by hand so that releases can be told apart.</p>
+<p>The installed copy is stored per version, in <code>cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code>. The previous folder is removed 14 days after the update, so that a running session can keep reading the previous version.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Six rules I keep</h2></header><div class="prose">
+<ul>
+<li><b>One repository is the source.</b> I do not edit the installed copy or a copy in the personal folder. The installed copy becomes a new folder at the next version, so anything edited inside it is lost.</li>
+<li><b>The same skill does not live in several places.</b> Once a skill has moved into the plugin, I delete it from <code>~/.claude/skills/</code> and from the claude.ai account. On my EC2 there were 7 skills in the personal folder and 28 synced from claude.ai, and one had the same name as a skill in the plugin. With the same name in two places, both are listed and it is hard to tell which one gets invoked.</li>
+<li><b>Descriptions are short, and unused skills go.</b> The name and description of every skill in an enabled plugin ride on every turn of every session. In my plugin, 17 skills and commands take about 6,841 tokens per session. <code>claude plugin details my-plugins</code> shows that number, and <code>/skill-doctor</code> shows the cost and the use count of each skill. The cost structure is set out in <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/" target="_blank" rel="noopener">the post on cost tips</a>.</li>
+<li><b>Validate before a release.</b> I raise the version only after the repository's tests and <code>claude plugin validate</code> pass. To check how a skill behaves as well, write eval cases for <code>claude plugin eval</code>.</li>
+<li><b>No secrets in a public repository.</b> Anyone who can clone the repository can install from it. Skills that need account IDs, internal addresses or customer names go into a private repository. If the repository is private, the marketplace is private too.</li>
+<li><b>Auto-update is activated when needed.</b> Auto-update is off by default for a marketplace you made yourself. Activate it on the Marketplaces tab of <code>/plugin</code> and new versions arrive after a session starts. To use a release right away, run the update command yourself.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Checked against the Anthropic documentation</h2></header><div class="prose">
+<p>I checked item by item whether this way of working matches what the Claude Code documentation says.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>What I do</th><th>What the documentation says</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>Bundle several skills into one plugin</td><td>Make a plugin to reuse the same setup across repositories, to give it to teammates or to publish versioned releases</td><td><span class="pill good">Matches</span></td></tr>
+<tr><td>Use a GitHub repository as the marketplace</td><td>Once <code>marketplace.json</code> is in the repository the plugin is published, and the file can sit in the plugin's own repository</td><td><span class="pill good">Matches</span></td></tr>
+<tr><td>Raise the version on every release</td><td>Offers two ways: raise <code>version</code> on every release, or leave it out</td><td><span class="pill good">Matches</span></td></tr>
+<tr><td>Run <code>claude plugin validate</code> before pushing</td><td>Listed as a step of preparing a release, with <code>--strict</code> in CI</td><td><span class="pill good">Matches</span></td></tr>
+<tr><td>Install once on the MacBook for the CLI and the desktop app</td><td>The terminal, the desktop app's local sessions and the VS Code extension on one computer read the same settings files</td><td><span class="pill good">Matches</span></td></tr>
+<tr><td>One person installs the same plugin on several machines</td><td>Names several repositories and sharing with a team as the uses, and does not mention one person's several machines</td><td><span class="pill info">Same structure applied</span></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> My way of working checked against the Claude Code documentation, November 22, 2026</p>
+<p>The documentation also states a limit. Cloud sessions and Cowork do not load plugins installed locally. In those environments, use the skills enabled for your claude.ai account or the repository's <code>.claude/skills/</code>.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Disabling, removing, and what to add next</h2></header><div class="prose">
+<p>Disable the plugin to stop using it for a while, and uninstall it to remove it. The repository stays, so installing again brings back the same version.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude plugin disable my-plugins@my-plugins
+claude plugin uninstall my-plugins@my-plugins</code></pre></div>
+<p>There are two things to add next. As the skills grow in number, write eval cases for each skill with <code>claude plugin eval</code> and run them on every change. As the machines grow in number, activate auto-update for the marketplace so that the update command does not have to be run on each one.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://code.claude.com/docs/en/skills" target="_blank" rel="noopener">Extend Claude with skills</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/overview" target="_blank" rel="noopener">Plugins overview</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/install" target="_blank" rel="noopener">Install and manage plugins</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/create" target="_blank" rel="noopener">Create a Claude Code plugin</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/publish" target="_blank" rel="noopener">Publish and distribute a plugin</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/host-marketplace" target="_blank" rel="noopener">Host and maintain a marketplace</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/loading" target="_blank" rel="noopener">Plugin loading reference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://code.claude.com/docs/en/plugins/cli-reference" target="_blank" rel="noopener">Plugin commands reference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://code.claude.com/docs/en/features-overview" target="_blank" rel="noopener">Extend Claude Code</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://code.claude.com/docs/en/desktop" target="_blank" rel="noopener">Desktop application</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">stablyai/orca</a></td><td class="nowrap"><span class="l-ko">GitHub 저장소</span><span class="l-en">GitHub repository</span></td><td class="nowrap num">2026-11-22</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">명령 출력과 수치는 2026년 11월 22일 EC2의 Claude Code v2.1.330에서 확인한 것입니다. 맥북과 Desktop 앱의 동작은 같은 날 확인한 Claude Code 공식 문서를 기준으로 적었고 이 글을 작성하면서 따로 테스트하지 않았습니다. 공식 문서와의 대조는 문서의 문장을 읽고 내린 글쓴이의 판단이며 Anthropic이 이 방식을 검토한 것은 아닙니다.</span><span class="l-en">The command output and the numbers were checked on November 22, 2026 with Claude Code v2.1.330 on EC2. How the MacBook and the desktop app behave follows the Claude Code documentation checked the same day and was not tested separately for this post. The check against the documentation is the author's own reading of it; Anthropic has not reviewed this way of working.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
