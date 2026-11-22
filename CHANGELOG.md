@@ -39,13 +39,14 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add post (KO/EN): "AWS Transit Gateway 1:1 NAT" (`docs/techblog/networking/aws-transit-gateway-1-1-nat-seoul-test`), with four figures in a Korean and an English version
 - Add post (KO/EN): "The interruption when an Amazon Aurora cluster moves to another VPC" (`docs/techblog/database/aurora-move-cluster-to-different-vpc`), with eight figures in a Korean and an English version
 - Add post (KO/EN): "Seven tips for cutting Claude Code costs" (`docs/techblog/aiml/claude-code-cost-saving-tips`), with three figures in a Korean and an English version
-- Add post (KO/EN): "Best practices for managing Claude Code skills" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), with two figures in a Korean and an English version
+- Add post (KO/EN): "Best practices for managing Claude Code skills" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), with five figures in a Korean and an English version
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
 - Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
 - Add posts: MCP Tool Forge deep-dive, Claude Code advisor cost analysis, Gemma-4-31B vLLM serving benchmark, conntrack idle timeout Nitro v6 impact, project-init and harness-eval plugin deep-dives, model monitoring, seven project deep-dive posts, and the Claude Sonnet 5 Hangul output integrity investigation (1,200-run controlled experiment)
 
 ### Changed
+- Post "Best practices for managing Claude Code skills": the first chapter is now "My environment", with an infographic of the two machines and the three surfaces; three figures were added (my environment, the four places to keep a skill, the six rules), five in all, and the table of skill locations became a figure
 - Post "AWS Transit Gateway 1:1 NAT": the first chapter now opens with an infographic of the whole test setup (figure 1 in a Korean and an English version, replacing the setup diagram of chapter 02); chapter 03 shows the AWS CLI commands used before and after enabling NAT with their output, and chapter 06 the two flow log query commands with their output; the Korean page writes control plane as "컨트롤 플레인"; figures 2 to 4 (NAT on one side only, packet walkthrough, enable timeline) are rebuilt as infographics, so all four figures now share one style
 - Post "AWS Transit Gateway 1:1 NAT": a new opening chapter describes how networks with overlapping IP ranges were connected before 1:1 NAT (a private NAT gateway combined with a load balancer, the cases where ranges overlap, and five difficulties) with a new infographic as figure 1; a new chapter 10 covers where 1:1 NAT is used (figure 6, table 8); the former opening is now chapter 01, so the later chapters move by one or two, and the earlier figures 1 to 4 are now figures 2 to 5 with new file names
 - Post "The interruption when an Amazon Aurora cluster moves to another VPC": the first chapter now opens with a background paragraph of two sentences; the chapter on sessions left on the server says "트레이드 오프가 있습니다" where it said "대가가 있습니다" ("comes with a trade-off" in English); the last chapter, figure 8 (both versions) and table 11 name the phases "마이그레이션 전, 진행 중, 후" ("before, during and after the migration")
@@ -124,13 +125,14 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가(한영): "AWS Transit Gateway 1:1 NAT" (`docs/techblog/networking/aws-transit-gateway-1-1-nat-seoul-test`), 그림 4장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Amazon Aurora 클러스터의 VPC 이동과 중단 시간" (`docs/techblog/database/aurora-move-cluster-to-different-vpc`), 그림 8장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Claude Code 비용 절감 Tip 7가지" (`docs/techblog/aiml/claude-code-cost-saving-tips`), 그림 3장의 한국어판과 영어판 포함
-- 게시물 추가(한영): "Claude Code Skills 관리 모범사례" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), 그림 2장의 한국어판과 영어판 포함
+- 게시물 추가(한영): "Claude Code Skills 관리 모범사례" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), 그림 5장의 한국어판과 영어판 포함
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
 - 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)
 - 게시물 추가: MCP Tool Forge 심층 분석, Claude Code advisor 비용 분석, Gemma-4-31B vLLM 서빙 벤치마크, conntrack 유휴 타임아웃 Nitro v6 영향 분석, project-init 및 harness-eval 플러그인 심층 분석, 모델 모니터링, 프로젝트 심층 분석 7편, Claude Sonnet 5 한글 출력 무결성 조사(1,200런 통제 실험)
 
 ### Changed
+- 게시물 "Claude Code Skills 관리 모범사례": 첫 챕터를 "나의 환경"으로 바꾸고 두 장비와 세 가지 화면을 인포그래픽으로 추가. 그림 세 장(나의 환경, skill을 두는 위치 네 가지, 원칙 여섯 가지)을 더해 모두 다섯 장이고 skill 위치 표는 그림으로 대체
 - 게시물 "AWS Transit Gateway 1:1 NAT": 첫 챕터를 전체 테스트 구성 인포그래픽으로 시작(그림 1의 한국어판과 영어판, 챕터 02의 구성도를 대체). 챕터 03에 NAT 활성화 전과 후에 사용한 AWS CLI 명령과 출력, 챕터 06에 Flow Logs 조회 명령 두 개와 출력 추가. 한국어 페이지에서 control plane을 "컨트롤 플레인"으로 표기. 그림 2, 3, 4(한쪽만 활성화, 패킷의 주소 변환, 활성화 타임라인)를 인포그래픽으로 다시 제작해 그림 4장의 스타일을 통일
 - 게시물 "AWS Transit Gateway 1:1 NAT": 1:1 NAT 이전에 IP 대역이 겹치는 네트워크를 연결하던 방식(Private NAT Gateway와 로드 밸런서 조합, 중복이 생기는 경우, 어려움 다섯 가지)을 설명하는 여는 챕터와 새 인포그래픽(그림 1) 추가. 1:1 NAT를 활용하는 경우를 다룬 챕터 10(그림 6, 표 8) 추가. 이전 첫 챕터는 챕터 01이 되어 뒤 챕터 번호가 한두 칸씩 이동했고 기존 그림 1~4는 그림 2~5로 번호와 파일 이름 변경
 - 게시물 "Amazon Aurora 클러스터의 VPC 이동과 중단 시간": 첫 챕터를 두 문장의 배경 문단으로 시작. 서버에 남는 세션 챕터의 "대가가 있습니다"를 "트레이드 오프가 있습니다"로 수정. 마지막 챕터 제목, 그림 8(한국어판과 영어판), 표 11의 단계 이름을 "마이그레이션 전, 진행 중, 후"로 수정

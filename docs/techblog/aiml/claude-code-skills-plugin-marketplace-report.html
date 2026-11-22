@@ -196,18 +196,19 @@ html[data-lang="en"] .l-ko{display:none!important}
   </div>
 </nav>
 <header class="masthead">
-<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-22</span><span class="l-en">Published 2026-11-22</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 6분</span><span class="l-en">6 min read</span></span></div>
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-22</span><span class="l-en">Published 2026-11-22</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 7분</span><span class="l-en">7 min read</span></span></div>
 <h1><span class="l-ko">Claude Code Skills 관리 모범사례</span><span class="l-en">Best practices for managing Claude Code skills</span></h1>
 <p class="thesis"><span class="l-ko">EC2의 Claude Code CLI, 맥북의 CLI와 Desktop 앱에서 같은 skill을 사용하려고 직접 만든 skill을 plugin 하나로 묶어 GitHub marketplace로 관리하는 방법을 정리했습니다. 수정은 저장소 한 곳에서 하고 version을 올리면 장비마다 명령 한 줄로 같은 판을 받습니다. 이 방식을 Claude Code 공식 문서와 대조해 보니 plugin의 용도, marketplace 게시 방법, version 관리 방법이 문서의 안내와 일치했습니다.</span><span class="l-en">To use the same skills in the Claude Code CLI on EC2 and in the CLI and the desktop app on a MacBook, I bundle the skills I wrote into one plugin and use a GitHub repository as the marketplace. Edits happen in that one repository, and once the version is raised each machine gets the same release with one command. Checked against the Claude Code documentation, the use of a plugin, the way the marketplace is published and the way versions are handled all match what the documentation says.</span></p>
 <div class="tags"><span>#Claude Code</span><span>#Skills</span><span>#Plugins</span><span>#Marketplace</span><span>#Claude Code Desktop</span></div>
 <ul class="facts"><li><span class="l-ko"><b>구성</b>: 장비는 둘이고 사용하는 화면은 셋입니다. 맥북은 한 번 설치하면 CLI와 Desktop 앱의 로컬 세션에 함께 적용됩니다.</span><span class="l-en"><b>Setup</b>: two machines and three surfaces. On the MacBook one install serves both the CLI and the desktop app's local sessions.</span></li><li><span class="l-ko"><b>배포</b>: 저장소에서 수정하고 <code>plugin.json</code>의 version을 올려 push한 뒤 장비마다 <code>claude plugin update</code>를 실행합니다.</span><span class="l-en"><b>Release</b>: edit in the repository, raise the version in <code>plugin.json</code>, push, then run <code>claude plugin update</code> on each machine.</span></li><li><span class="l-ko"><b>주의</b>: version을 올리지 않으면 갱신되지 않고 실행 중인 세션은 <code>/reload-plugins</code> 전까지 이전 version을 사용합니다.</span><span class="l-en"><b>Watch out</b>: nothing updates unless the version changes, and a running session keeps the previous version until <code>/reload-plugins</code>.</span></li><li><span class="l-ko"><b>비용</b>: 제 plugin의 skill과 command 17개는 세션마다 약 6,841토큰을 차지하므로 설명을 짧게 쓰고 사용하지 않는 skill을 정리합니다.</span><span class="l-en"><b>Cost</b>: the 17 skills and commands of my plugin take about 6,841 tokens per session, so descriptions stay short and unused skills go.</span></li><li><span class="l-ko"><b>문서 대조</b>: 여섯 항목 가운데 다섯이 공식 문서의 안내와 일치했고 한 사람이 여러 장비에 설치하는 용도는 문서에 따로 언급되지 않았습니다.</span><span class="l-en"><b>Documentation check</b>: five of six items match the documentation, and the documentation does not mention one person installing on several machines.</span></li></ul>
 </header>
-<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">세 환경이 같은 Skills를 받는 구성</a><a href="#ko-s2">Skill이 놓이는 위치와 Plugin을 고른 이유</a><a href="#ko-s3">저장소 하나를 Plugin이자 Marketplace로 만들기</a><a href="#ko-s4">두 장비에 설치하기</a><a href="#ko-s5">수정하고 배포하는 순서</a><a href="#ko-s6">관리하면서 지키는 원칙 여섯 가지</a><a href="#ko-s7">Anthropic 공식 문서와의 대조</a><a href="#ko-s8">비활성화와 제거, 다음에 덧붙일 것</a><a href="#sources">참고 자료</a></nav>
-<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Three environments that get the same skills</a><a href="#en-s2">Where a skill can live, and why I chose a plugin</a><a href="#en-s3">One repository as both the plugin and the marketplace</a><a href="#en-s4">Installing on the two machines</a><a href="#en-s5">The order of an edit and a release</a><a href="#en-s6">Six rules I keep</a><a href="#en-s7">Checked against the Anthropic documentation</a><a href="#en-s8">Disabling, removing, and what to add next</a><a href="#sources">References</a></nav>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">나의 환경</a><a href="#ko-s2">Plugin과 Marketplace로 묶은 구성</a><a href="#ko-s3">Skill이 놓이는 위치와 Plugin을 고른 이유</a><a href="#ko-s4">저장소 하나를 Plugin이자 Marketplace로 만들기</a><a href="#ko-s5">두 장비에 설치하기</a><a href="#ko-s6">수정하고 배포하는 순서</a><a href="#ko-s7">관리하면서 지키는 원칙 여섯 가지</a><a href="#ko-s8">Anthropic 공식 문서와의 대조</a><a href="#ko-s9">비활성화와 제거, 다음에 덧붙일 것</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">My environment</a><a href="#en-s2">The setup: one plugin and one marketplace</a><a href="#en-s3">Where a skill can live, and why I chose a plugin</a><a href="#en-s4">One repository as both the plugin and the marketplace</a><a href="#en-s5">Installing on the two machines</a><a href="#en-s6">The order of an edit and a release</a><a href="#en-s7">Six rules I keep</a><a href="#en-s8">Checked against the Anthropic documentation</a><a href="#en-s9">Disabling, removing, and what to add next</a><a href="#sources">References</a></nav>
 <div class="col l-ko" lang="ko">
-<section class="sec" id="ko-s1"><header class="sec-head"><h2>세 환경이 같은 Skills를 받는 구성</h2></header><div class="prose">
-<p>Claude Code를 여러 장비에서 사용하면 직접 만든 skill을 장비마다 복사해 두게 되고 한 곳에서 수정한 내용이 다른 곳에는 반영되지 않습니다. skill이 늘어날수록 어느 장비의 사본이 최신인지 알기 어려워지므로 한 곳에서 관리하는 방법이 필요합니다.</p>
-<p>저는 Claude Code를 세 곳에서 사용합니다. EC2의 Claude Code CLI, 맥북의 Claude Code CLI, 맥북의 Claude Code Desktop 앱입니다. 맥북을 들고 외근하는 일이 잦아 주 작업 환경은 EC2에 두었습니다. EC2에는 VS Code Server를 띄워 두거나 <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a>를 서버로 다시 패키징해 띄워 두고 브라우저로 접속합니다. Orca는 여러 코딩 에이전트를 병렬로 실행하는 오픈 소스 앱입니다. 외근 중에도 브라우저만 열면 작업하던 환경에 바로 접속하고 사용성도 맥북에서 직접 쓸 때와 같습니다.</p>
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>나의 환경</h2></header><div class="prose">
+<p>저는 Claude Code를 EC2와 맥북 두 장비에서 세 가지 방식으로 사용합니다. 직접 만든 skill을 장비마다 따로 두면 한 곳에서 수정한 내용이 다른 곳에 반영되지 않으므로 한 곳에서 관리하는 방법이 필요했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-my-environment.png" alt="세 부분으로 된 그림. 왼쪽은 Claude Code를 사용하는 세 가지 화면으로 맥북 안에 브라우저, Claude Code CLI, Claude Code Desktop 앱이 있고 EC2 안에 VS Code Server와 Orca 서버, 그 아래 Claude Code CLI가 있으며 맥북의 브라우저에서 EC2의 서버로 접속한다. 오른쪽 위는 EC2를 주 작업 환경으로 둔 이유로 외근이 잦고 브라우저만 열면 작업하던 환경에 접속하며 사용성이 맥북과 같다는 내용이다. 오른쪽 아래는 풀어야 할 문제로 skill 폴더가 장비마다 따로 있어 EC2에서 수정한 skill이 맥북에는 이전 내용으로 남는다는 내용이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 나의 환경. 맥북에서 직접 사용하거나 브라우저로 EC2에 접속해 사용</figcaption></figure>
+<p>세 가지는 EC2의 Claude Code CLI, 맥북의 Claude Code CLI, 맥북의 Claude Code Desktop 앱입니다. 맥북을 들고 외근하는 일이 잦아 주 작업 환경은 EC2에 두었습니다. EC2에는 VS Code Server를 띄워 두거나 <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a>를 서버로 다시 패키징해 띄워 두고 브라우저로 접속합니다. Orca는 여러 코딩 에이전트를 병렬로 실행하는 오픈 소스 앱입니다. 외근 중에도 브라우저만 열면 작업하던 환경에 바로 접속하고 사용성도 맥북에서 직접 쓸 때와 같습니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>환경</th><th>사용하는 방법</th><th>plugin 설치</th></tr>
@@ -219,25 +220,19 @@ html[data-lang="en"] .l-ko{display:none!important}
 </tbody>
 </table></div>
 <p class="cap"><b>표 1.</b> Claude Code를 사용하는 세 환경</p>
-<p>직접 만든 skill은 plugin 하나로 묶어 GitHub 저장소에 두고 그 저장소를 marketplace로 등록했습니다. 그림 1이 완성된 구성입니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-three-environments.png" alt="세 부분으로 된 그림. 왼쪽은 plugin이자 marketplace인 GitHub 저장소로 plugin.json, marketplace.json, skills 폴더, commands 폴더, 테스트와 CHANGELOG가 있고 version은 1.9.1이다. 오른쪽은 이 저장소에서 설치하는 환경으로 EC2의 Claude Code CLI와 맥북의 Claude Code CLI, Claude Code Desktop 앱이 있으며 EC2는 VS Code Server와 Orca 서버에 브라우저로 접속해 사용하고 맥북은 한 번 설치하면 CLI와 Desktop 앱에 모두 적용된다. 아래는 장비마다 skill 폴더를 손으로 복사하던 이전 방식과 지금 방식의 비교이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> GitHub 저장소 하나에서 EC2와 맥북이 같은 plugin을 설치하는 구성</figcaption></figure>
+<p>이 환경에서 풀어야 할 문제는 skill입니다. skill 폴더가 장비마다 따로 있으면 EC2에서 수정한 skill이 맥북에는 이전 내용으로 남고 어느 사본이 최신인지 알기 어려워집니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Plugin과 Marketplace로 묶은 구성</h2></header><div class="prose">
+<p>직접 만든 skill을 plugin 하나로 묶어 GitHub 저장소에 두고 그 저장소를 marketplace로 등록했습니다. 그림 2가 완성된 구성입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-three-environments.png" alt="세 부분으로 된 그림. 왼쪽은 plugin이자 marketplace인 GitHub 저장소로 plugin.json, marketplace.json, skills 폴더, commands 폴더, 테스트와 CHANGELOG가 있고 version은 1.9.1이다. 오른쪽은 이 저장소에서 설치하는 환경으로 EC2의 Claude Code CLI와 맥북의 Claude Code CLI, Claude Code Desktop 앱이 있으며 EC2는 VS Code Server와 Orca 서버에 브라우저로 접속해 사용하고 맥북은 한 번 설치하면 CLI와 Desktop 앱에 모두 적용된다. 아래는 장비마다 skill 폴더를 손으로 복사하던 이전 방식과 지금 방식의 비교이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> GitHub 저장소 하나에서 EC2와 맥북이 같은 plugin을 설치하는 구성</figcaption></figure>
 <p>장비는 둘이고 사용하는 화면은 셋입니다. 공식 문서에 따르면 한 컴퓨터의 터미널, Desktop 앱의 로컬 세션, VS Code 확장은 같은 설정 파일을 읽습니다. 그래서 맥북에서는 한 번 설치하면 CLI와 Desktop 앱에 함께 적용됩니다. 설치와 갱신은 장비마다 명령 한 줄입니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Skill이 놓이는 위치와 Plugin을 고른 이유</h2></header><div class="prose">
-<p>skill은 저장하는 위치에 따라 적용되는 범위가 달라집니다. 한 사람이 여러 장비에서 쓸 때 고를 수 있는 위치는 네 가지입니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>위치</th><th>경로</th><th>적용 범위</th><th>다른 장비에 반영하는 방법</th></tr>
-</thead>
-<tbody>
-<tr><td>개인</td><td><code>~/.claude/skills/</code></td><td>그 장비의 모든 프로젝트</td><td>폴더를 직접 복사</td></tr>
-<tr><td>프로젝트</td><td><code>.claude/skills/</code></td><td>그 저장소에서 시작한 세션</td><td>저장소에 커밋하고 다른 장비에서 pull</td></tr>
-<tr><td>claude.ai 계정</td><td>claude.ai 설정에서 활성화</td><td>claude.ai 계정으로 로그인한 세션</td><td>자동 동기화. Amazon Bedrock이나 API 키로 인증한 세션에는 동기화되지 않음</td></tr>
-<tr><td>Plugin</td><td><code>&lt;plugin&gt;/skills/</code></td><td>plugin을 활성화한 모든 세션</td><td>marketplace에서 설치하고 갱신</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 2.</b> 개인이 skill을 둘 수 있는 위치. Claude Code 공식 문서 기준이며 조직이 배포하는 위치는 제외</p>
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Skill이 놓이는 위치와 Plugin을 고른 이유</h2></header><div class="prose">
+<p>skill은 저장하는 위치에 따라 적용되는 범위가 달라집니다. 한 사람이 여러 장비에서 쓸 때 고를 수 있는 위치는 네 가지입니다. 그림 3은 EC2에서 만든 skill이 위치마다 세 화면에 나타나는지를 보여 줍니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig03-skill-locations.png" alt="두 부분으로 된 그림. 위쪽은 skill을 두는 위치 네 가지를 행으로, EC2의 CLI와 맥북의 CLI, 맥북의 Desktop 앱을 열로 놓은 표로 EC2에서 만든 skill이 각 화면에 나타나는지를 표시한다. 개인 폴더는 EC2에만 나타나고, 프로젝트 폴더는 저장소를 받은 곳의 그 저장소 세션에만, claude.ai 계정은 claude.ai로 로그인한 세션에만 나타나며, plugin은 설치한 세 화면 모두에 나타난다. 아래쪽은 비유로 skill은 요리법, plugin은 요리법을 묶은 책, marketplace는 서점의 목록, version은 책의 판에 대응한다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> skill을 두는 위치 네 가지와 다른 장비에 반영하는 방법. Claude Code 공식 문서 기준이며 조직이 배포하는 위치는 제외</figcaption></figure>
+<p>개인 폴더(<code>~/.claude/skills/</code>)의 skill은 그 장비에서만 보이고 프로젝트 폴더(<code>.claude/skills/</code>)의 skill은 그 저장소의 세션에서만 보입니다. claude.ai 계정의 skill은 자동으로 동기화되지만 Amazon Bedrock이나 API 키로 인증한 세션에는 내려오지 않습니다. plugin은 설치한 모든 곳에 같은 내용으로 나타납니다.</p>
 <p>plugin을 고른 이유는 세 가지입니다.</p>
 <ul>
 <li>장비가 달라도 설치와 갱신 명령이 같습니다. 인증 방식이 달라도 동작합니다.</li>
@@ -248,7 +243,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 <p>비유와 다른 점이 하나 있습니다. 새 판을 받아도 이미 실행 중인 세션은 다시 불러오기 전까지 이전 판을 계속 사용합니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>저장소 하나를 Plugin이자 Marketplace로 만들기</h2></header><div class="prose">
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>저장소 하나를 Plugin이자 Marketplace로 만들기</h2></header><div class="prose">
 <p>plugin은 <code>.claude-plugin/plugin.json</code>이 있는 폴더이고 marketplace는 <code>.claude-plugin/marketplace.json</code>이 있는 저장소입니다. 두 파일을 한 저장소에 두면 저장소 하나가 plugin이자 marketplace가 됩니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>my-plugins/
   .claude-plugin/
@@ -282,7 +277,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 ✔ Validation passed with warnings</code></pre></div>
 </div></section>
 
-<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>두 장비에 설치하기</h2></header><div class="prose">
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>두 장비에 설치하기</h2></header><div class="prose">
 <p>EC2와 맥북에서 한 번씩 실행합니다. marketplace를 추가한 뒤 plugin을 설치합니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude plugin marketplace add whchoi98/my-plugins
 claude plugin install my-plugins@my-plugins</code></pre></div>
@@ -295,9 +290,9 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <p>맥북에서는 터미널에서 설치한 plugin이 Desktop 앱의 로컬 세션에도 적용됩니다. Desktop 앱에서 직접 설치하려면 입력창 옆의 + 버튼에서 plugin 메뉴를 엽니다. 클라우드 세션은 로컬에 설치한 plugin을 불러오지 않습니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>수정하고 배포하는 순서</h2></header><div class="prose">
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>수정하고 배포하는 순서</h2></header><div class="prose">
 <p>skill을 수정해 각 환경에 반영하기까지 여섯 단계를 거칩니다.</p>
-<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-release-flow.png" alt="세 부분으로 된 그림. 위쪽은 배포 순서 여섯 단계로 클론에서 수정, 테스트와 검증, version 올림, push, 환경마다 갱신, 세션에 반영 순서이다. 아래 왼쪽은 장비에 저장되는 모습으로 plugins 폴더 아래 marketplace 사본과 version마다 따로 생기는 cache 폴더, 설치 기록 파일이 있다. 아래 오른쪽은 자주 겪는 문제 세 가지로 version을 그대로 두고 push한 경우, 설치본을 직접 수정한 경우, 갱신했는데 이전 내용으로 동작하는 경우와 각각의 조치이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> skill 수정에서 세션 반영까지의 순서와 자주 겪는 문제</figcaption></figure>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig04-release-flow.png" alt="세 부분으로 된 그림. 위쪽은 배포 순서 여섯 단계로 클론에서 수정, 테스트와 검증, version 올림, push, 환경마다 갱신, 세션에 반영 순서이다. 아래 왼쪽은 장비에 저장되는 모습으로 plugins 폴더 아래 marketplace 사본과 version마다 따로 생기는 cache 폴더, 설치 기록 파일이 있다. 아래 오른쪽은 자주 겪는 문제 세 가지로 version을 그대로 두고 push한 경우, 설치본을 직접 수정한 경우, 갱신했는데 이전 내용으로 동작하는 경우와 각각의 조치이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> skill 수정에서 세션 반영까지의 순서와 자주 겪는 문제</figcaption></figure>
 <ol>
 <li>저장소의 클론에서 skill을 수정합니다. 설치본이 있는 <code>~/.claude/plugins/cache/</code>는 수정하지 않습니다.</li>
 <li>테스트와 <code>claude plugin validate .</code>를 실행합니다.</li>
@@ -311,9 +306,11 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <p>설치본은 version마다 <code>cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code> 폴더에 따로 저장됩니다. 실행 중인 세션이 이전 version을 계속 읽을 수 있도록 이전 폴더는 갱신 14일 뒤에 정리됩니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>관리하면서 지키는 원칙 여섯 가지</h2></header><div class="prose">
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>관리하면서 지키는 원칙 여섯 가지</h2></header><div class="prose">
+<p>그림 5는 이 방식을 운영하면서 지키는 원칙 여섯 가지입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig05-six-rules.png" alt="원칙 여섯 가지를 카드 여섯 장으로 정리한 그림. 출처는 저장소 한 곳, 같은 skill은 한 곳에만, 설명은 짧게 쓰고 안 쓰는 skill은 정리, 릴리스 전에 검증, 공개 저장소에는 비밀 정보 없음, 자동 갱신은 필요할 때 활성화이다. 셋째 카드에는 skill과 command 17개가 세션마다 약 6,841토큰을 차지한다는 수치가 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> skill을 관리하면서 지키는 원칙 여섯 가지</figcaption></figure>
 <ul>
-<li><b>출처는 저장소 하나입니다.</b> 설치본과 개인 폴더의 사본은 수정하지 않습니다. 설치본은 다음 version에서 새 폴더로 바뀌므로 그 안에서 수정한 내용은 사라집니다.</li>
+<li><b>출처는 저장소 한 곳입니다.</b> 설치본과 개인 폴더의 사본은 수정하지 않습니다. 설치본은 다음 version에서 새 폴더로 바뀌므로 그 안에서 수정한 내용은 사라집니다.</li>
 <li><b>같은 skill을 여러 위치에 두지 않습니다.</b> plugin으로 옮긴 skill은 <code>~/.claude/skills/</code>와 claude.ai 계정에서 지웁니다. 제 EC2에는 개인 폴더에 7개, claude.ai 동기화로 28개의 skill이 따로 있었고 plugin과 이름이 같은 skill도 남아 있었습니다. 이름이 같으면 둘 다 목록에 실려 어느 쪽이 호출되는지 헷갈립니다.</li>
 <li><b>설명은 짧게 쓰고 사용하지 않는 skill은 정리합니다.</b> 활성화한 plugin의 skill 이름과 설명은 모든 세션의 모든 턴에 실립니다. 제 plugin은 skill과 command 17개가 세션마다 약 6,841토큰을 차지합니다. <code>claude plugin details my-plugins</code>가 이 값을 보여 주고 <code>/skill-doctor</code>가 skill별 비용과 사용 횟수를 보여 줍니다. 비용 구조는 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/" target="_blank" rel="noopener">비용 절감 Tip 글</a>에 정리했습니다.</li>
 <li><b>릴리스 전에 검증합니다.</b> 저장소의 테스트와 <code>claude plugin validate</code>를 통과한 뒤에 version을 올립니다. skill의 동작까지 확인하려면 <code>claude plugin eval</code>로 평가 사례를 만듭니다.</li>
@@ -322,7 +319,7 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 </ul>
 </div></section>
 
-<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Anthropic 공식 문서와의 대조</h2></header><div class="prose">
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Anthropic 공식 문서와의 대조</h2></header><div class="prose">
 <p>이 방식이 Claude Code 공식 문서의 안내와 맞는지 항목별로 확인했습니다.</p>
 <div class="scroll"><table>
 <thead>
@@ -337,11 +334,11 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <tr><td>한 사람이 여러 장비에 같은 plugin을 설치</td><td>여러 저장소와 팀 공유를 용도로 설명하고 개인의 여러 장비는 따로 언급하지 않음</td><td><span class="pill info">같은 구조를 적용</span></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 3.</b> 제 방식과 Claude Code 공식 문서의 대조. 2026년 11월 22일 확인</p>
+<p class="cap"><b>표 2.</b> 제 방식과 Claude Code 공식 문서의 대조. 2026년 11월 22일 확인</p>
 <p>문서가 알려 주는 한계도 있습니다. 클라우드 세션과 Cowork는 로컬에 설치한 plugin을 불러오지 않습니다. 이 환경에서는 claude.ai 계정에 활성화한 skill이나 저장소의 <code>.claude/skills/</code>를 사용합니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>비활성화와 제거, 다음에 덧붙일 것</h2></header><div class="prose">
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>비활성화와 제거, 다음에 덧붙일 것</h2></header><div class="prose">
 <p>plugin을 잠시 사용하지 않으려면 비활성화하고 완전히 지우려면 제거합니다. 저장소는 그대로 남으므로 다시 설치하면 같은 version으로 돌아옵니다.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude plugin disable my-plugins@my-plugins
 claude plugin uninstall my-plugins@my-plugins</code></pre></div>
@@ -349,9 +346,10 @@ claude plugin uninstall my-plugins@my-plugins</code></pre></div>
 </div></section>
 </div>
 <div class="col l-en" lang="en">
-<section class="sec" id="en-s1"><header class="sec-head"><h2>Three environments that get the same skills</h2></header><div class="prose">
-<p>When you use Claude Code on several machines, the skills you wrote end up copied to each one, and an edit made in one place does not reach the others. The more skills you have, the harder it is to tell which machine holds the latest copy, so you need one place to manage them.</p>
-<p>I use Claude Code in three places: the Claude Code CLI on EC2, the Claude Code CLI on my MacBook, and the Claude Code Desktop app on my MacBook. I often work away from the office with the MacBook, so my main working environment is on EC2. On EC2 I keep VS Code Server running, or <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a> repackaged to run as a server, and connect with a browser. Orca is an open-source app that runs several coding agents in parallel. Away from the office, opening a browser takes me straight back to the environment I was working in, and it is as easy to use as working on the MacBook itself.</p>
+<section class="sec" id="en-s1"><header class="sec-head"><h2>My environment</h2></header><div class="prose">
+<p>I use Claude Code on two machines, EC2 and a MacBook, in three ways. With the skills I wrote kept separately on each machine, an edit in one place did not reach the others, so I needed one place to manage them.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-my-environment-en.png" alt="A figure in three parts. On the left, the three surfaces where I use Claude Code: the MacBook holds a browser, the Claude Code CLI and the Claude Code Desktop app, and EC2 holds VS Code Server and the Orca server with the Claude Code CLI below them, reached from the MacBook's browser. At the upper right, why EC2 is my main workspace: I often work away from the office, a browser takes me straight back to my work, and it is as easy to use as the MacBook. At the lower right, the problem to solve: each machine has its own skill folder, so a skill edited on EC2 stays old on the MacBook" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> My environment. I work on the MacBook directly, or on EC2 through a browser</figcaption></figure>
+<p>The three are the Claude Code CLI on EC2, the Claude Code CLI on the MacBook, and the Claude Code Desktop app on the MacBook. I often work away from the office with the MacBook, so my main working environment is on EC2. On EC2 I keep VS Code Server running, or <a href="https://github.com/stablyai/orca" target="_blank" rel="noopener">Orca</a> repackaged to run as a server, and connect with a browser. Orca is an open-source app that runs several coding agents in parallel. Away from the office, opening a browser takes me straight back to the environment I was working in, and it is as easy to use as working on the MacBook itself.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>Environment</th><th>How I use it</th><th>Plugin install</th></tr>
@@ -363,25 +361,19 @@ claude plugin uninstall my-plugins@my-plugins</code></pre></div>
 </tbody>
 </table></div>
 <p class="cap"><b>Table 1.</b> The three environments where I use Claude Code</p>
-<p>I put the skills I wrote into one plugin in a GitHub repository and registered that repository as a marketplace. Figure 1 shows the finished setup.</p>
-<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig01-three-environments-en.png" alt="A figure in three parts. On the left, a GitHub repository that is both a plugin and a marketplace, holding plugin.json, marketplace.json, a skills folder, a commands folder, tests and a CHANGELOG, at version 1.9.1. On the right, the environments that install from it: the Claude Code CLI on EC2, and the Claude Code CLI and the Claude Code Desktop app on the MacBook. EC2 is used from a browser connected to VS Code Server or the Orca server, and on the MacBook one install serves both the CLI and the desktop app. At the bottom, the earlier way of copying skill folders to each machine by hand compared with the current way" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> EC2 and the MacBook install the same plugin from one GitHub repository</figcaption></figure>
+<p>The problem to solve in this environment is the skills. When each machine has its own skill folder, a skill edited on EC2 stays old on the MacBook, and it gets hard to tell which copy is the latest.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>The setup: one plugin and one marketplace</h2></header><div class="prose">
+<p>I put the skills I wrote into one plugin in a GitHub repository and registered that repository as a marketplace. Figure 2 shows the finished setup.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-three-environments-en.png" alt="A figure in three parts. On the left, a GitHub repository that is both a plugin and a marketplace, holding plugin.json, marketplace.json, a skills folder, a commands folder, tests and a CHANGELOG, at version 1.9.1. On the right, the environments that install from it: the Claude Code CLI on EC2, and the Claude Code CLI and the Claude Code Desktop app on the MacBook. EC2 is used from a browser connected to VS Code Server or the Orca server, and on the MacBook one install serves both the CLI and the desktop app. At the bottom, the earlier way of copying skill folders to each machine by hand compared with the current way" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> EC2 and the MacBook install the same plugin from one GitHub repository</figcaption></figure>
 <p>There are two machines and three surfaces. According to the documentation, the terminal, the desktop app's local sessions and the VS Code extension on one computer read the same settings files. So on the MacBook one install serves both the CLI and the desktop app. Installing and updating takes one command per machine.</p>
 </div></section>
 
-<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Where a skill can live, and why I chose a plugin</h2></header><div class="prose">
-<p>Where you save a skill decides which sessions load it. One person working on several machines has four places to choose from.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Location</th><th>Path</th><th>Loads in</th><th>How it reaches another machine</th></tr>
-</thead>
-<tbody>
-<tr><td>Personal</td><td><code>~/.claude/skills/</code></td><td>Every project on that machine</td><td>Copy the folder yourself</td></tr>
-<tr><td>Project</td><td><code>.claude/skills/</code></td><td>Sessions started in that repository</td><td>Commit it and pull on the other machine</td></tr>
-<tr><td>claude.ai account</td><td>Enabled in the claude.ai settings</td><td>Sessions signed in with the claude.ai account</td><td>Synced automatically. Not synced to sessions that authenticate through Amazon Bedrock or an API key</td></tr>
-<tr><td>Plugin</td><td><code>&lt;plugin&gt;/skills/</code></td><td>Every session where the plugin is enabled</td><td>Install and update from a marketplace</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 2.</b> Where one person can keep a skill. From the Claude Code documentation; locations an organization deploys are left out</p>
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Where a skill can live, and why I chose a plugin</h2></header><div class="prose">
+<p>Where you save a skill decides which sessions load it. One person working on several machines has four places to choose from. Figure 3 shows, for each place, whether a skill made on EC2 appears on the three surfaces.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig03-skill-locations-en.png" alt="A figure in two parts. At the top, a grid with the four places to keep a skill as rows and the CLI on EC2, the CLI on the MacBook and the desktop app on the MacBook as columns, marking whether a skill made on EC2 appears on each surface. A personal skill appears on EC2 only, a project skill only in sessions of that repository where it was pulled, a claude.ai account skill only in sessions signed in with claude.ai, and a plugin skill on all three surfaces where the plugin is installed. At the bottom, the picture: a skill is a recipe, the plugin is the book of recipes, the marketplace is the bookshop's catalog and the version is the edition" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> Four places to keep a skill and how each reaches another machine. From the Claude Code documentation; locations an organization deploys are left out</figcaption></figure>
+<p>A skill in the personal folder (<code>~/.claude/skills/</code>) is visible on that machine only, and a skill in the project folder (<code>.claude/skills/</code>) only in sessions of that repository. A skill on the claude.ai account syncs automatically, but not to sessions that authenticate through Amazon Bedrock or an API key. A plugin appears with the same content everywhere it is installed.</p>
 <p>I chose a plugin for three reasons.</p>
 <ul>
 <li>The install and update commands are the same on every machine, whatever the sign-in method.</li>
@@ -392,7 +384,7 @@ claude plugin uninstall my-plugins@my-plugins</code></pre></div>
 <p>The picture differs from reality in one way. Even after the new edition arrives, a session that is already running keeps using the old one until it reloads.</p>
 </div></section>
 
-<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>One repository as both the plugin and the marketplace</h2></header><div class="prose">
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>One repository as both the plugin and the marketplace</h2></header><div class="prose">
 <p>A plugin is a folder with <code>.claude-plugin/plugin.json</code>, and a marketplace is a repository with <code>.claude-plugin/marketplace.json</code>. With both files in one repository, that repository is the plugin and the marketplace at once.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>my-plugins/
   .claude-plugin/
@@ -426,7 +418,7 @@ claude plugin uninstall my-plugins@my-plugins</code></pre></div>
 ✔ Validation passed with warnings</code></pre></div>
 </div></section>
 
-<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Installing on the two machines</h2></header><div class="prose">
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Installing on the two machines</h2></header><div class="prose">
 <p>Run this once on EC2 and once on the MacBook. Add the marketplace, then install the plugin.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude plugin marketplace add whchoi98/my-plugins
 claude plugin install my-plugins@my-plugins</code></pre></div>
@@ -439,9 +431,9 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <p>On the MacBook, a plugin installed in the terminal also applies to the desktop app's local sessions. To install from the desktop app itself, open the plugin menu from the + button next to the prompt box. Cloud sessions do not load plugins installed locally.</p>
 </div></section>
 
-<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>The order of an edit and a release</h2></header><div class="prose">
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>The order of an edit and a release</h2></header><div class="prose">
 <p>An edit to a skill reaches every environment in six steps.</p>
-<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig02-release-flow-en.png" alt="A figure in three parts. At the top, the six steps of a release: edit in the clone, test and validate, bump the version, push, update in each environment, apply to the session. At the lower left, what is stored on each machine: under the plugins folder, a copy of the marketplace, a cache folder for each version and the install record. At the lower right, three common problems, each with its fix: pushing without changing the version, editing the installed copy, and old content still running after an update" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> From a skill edit to the running session, and three common problems</figcaption></figure>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig04-release-flow-en.png" alt="A figure in three parts. At the top, the six steps of a release: edit in the clone, test and validate, bump the version, push, update in each environment, apply to the session. At the lower left, what is stored on each machine: under the plugins folder, a copy of the marketplace, a cache folder for each version and the install record. At the lower right, three common problems, each with its fix: pushing without changing the version, editing the installed copy, and old content still running after an update" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> From a skill edit to the running session, and three common problems</figcaption></figure>
 <ol>
 <li>Edit the skill in a clone of the repository. Do not edit <code>~/.claude/plugins/cache/</code>, where the installed copy is.</li>
 <li>Run the tests and <code>claude plugin validate .</code>.</li>
@@ -455,7 +447,9 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <p>The installed copy is stored per version, in <code>cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code>. The previous folder is removed 14 days after the update, so that a running session can keep reading the previous version.</p>
 </div></section>
 
-<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Six rules I keep</h2></header><div class="prose">
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Six rules I keep</h2></header><div class="prose">
+<p>Figure 5 shows the six rules I keep while running this setup.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-skills-plugin-marketplace-assets/fig05-six-rules-en.png" alt="Six rules shown as six cards: one repository is the source; one skill, one place; short descriptions and no unused skills; validate before a release; no secrets in a public repository; activate auto-update when needed. The third card carries a number: 17 skills and commands take about 6,841 tokens per session" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> Six rules for managing skills</figcaption></figure>
 <ul>
 <li><b>One repository is the source.</b> I do not edit the installed copy or a copy in the personal folder. The installed copy becomes a new folder at the next version, so anything edited inside it is lost.</li>
 <li><b>The same skill does not live in several places.</b> Once a skill has moved into the plugin, I delete it from <code>~/.claude/skills/</code> and from the claude.ai account. On my EC2 there were 7 skills in the personal folder and 28 synced from claude.ai, and one had the same name as a skill in the plugin. With the same name in two places, both are listed and it is hard to tell which one gets invoked.</li>
@@ -466,7 +460,7 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 </ul>
 </div></section>
 
-<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Checked against the Anthropic documentation</h2></header><div class="prose">
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Checked against the Anthropic documentation</h2></header><div class="prose">
 <p>I checked item by item whether this way of working matches what the Claude Code documentation says.</p>
 <div class="scroll"><table>
 <thead>
@@ -481,11 +475,11 @@ claude plugin install my-plugins@my-plugins</code></pre></div>
 <tr><td>One person installs the same plugin on several machines</td><td>Names several repositories and sharing with a team as the uses, and does not mention one person's several machines</td><td><span class="pill info">Same structure applied</span></td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 3.</b> My way of working checked against the Claude Code documentation, November 22, 2026</p>
+<p class="cap"><b>Table 2.</b> My way of working checked against the Claude Code documentation, November 22, 2026</p>
 <p>The documentation also states a limit. Cloud sessions and Cowork do not load plugins installed locally. In those environments, use the skills enabled for your claude.ai account or the repository's <code>.claude/skills/</code>.</p>
 </div></section>
 
-<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Disabling, removing, and what to add next</h2></header><div class="prose">
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Disabling, removing, and what to add next</h2></header><div class="prose">
 <p>Disable the plugin to stop using it for a while, and uninstall it to remove it. The repository stays, so installing again brings back the same version.</p>
 <div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude plugin disable my-plugins@my-plugins
 claude plugin uninstall my-plugins@my-plugins</code></pre></div>
