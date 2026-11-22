@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code 비용 절감 Tip 7가지</title>
+<meta name="description" content="Claude Code의 비용이 생기는 구조를 공식 문서로 정리하고 개발 환경의 14일 세션 기록(API 요청 28,729건)을 집계해 확인했습니다. 캐시 읽기, 캐시 쓰기, 출력이 비용을 약 3분의 1씩 차지했고 이를 줄이는 습관과 설정 일곱 가지를 정리했습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-22</span><span class="l-en">Published 2026-11-22</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 14분</span><span class="l-en">14 min read</span></span></div>
+<h1><span class="l-ko">Claude Code 비용 절감 Tip 7가지</span><span class="l-en">Seven tips for cutting Claude Code costs</span></h1>
+<p class="thesis"><span class="l-ko">Claude Code의 비용을 줄이는 방법을 공식 문서 기준으로 정리하고 제 개발 환경의 최근 14일 세션 기록(API 요청 28,729건)을 집계해 실제 비중을 확인해 보았습니다. 입력 토큰의 98%는 캐시 읽기였고 정가로 환산한 비용은 캐시 읽기 36%, 캐시 쓰기 32%, 출력 32%로 나뉘었습니다. 따라서 줄일 곳은 요청마다 다시 읽는 컨텍스트, 캐시를 다시 쓰게 하는 행동, 출력과 추론의 양 세 가지이고 이를 줄이는 Tip 일곱 가지를 설명합니다.</span><span class="l-en">I set out the ways to cut Claude Code costs from the documentation and checked the real shares against the last 14 days of session logs from my own environment (28,729 API requests). Cache reads were 98% of the input tokens, and at list prices the cost split into 36% cache reads, 32% cache writes and 32% output. So there are three things to cut: the context that every request reads again, the actions that make the cache be written again, and the amount of output and reasoning. The post explains seven tips that cut them.</span></p>
+<div class="tags"><span>#Claude Code</span><span>#Prompt Caching</span><span>#Subagents</span><span>#Token Economics</span><span>#Cost Optimization</span></div>
+<ul class="facts"><li><span class="l-ko"><b>캐시</b>: 1시간 넘게 비운 뒤의 요청 114건 가운데 37건이 컨텍스트 전체를 다시 썼고 그 비용은 캐시에서 읽었을 때의 63배였습니다.</span><span class="l-en"><b>Cache</b>: of 114 requests that followed a gap of more than an hour, 37 wrote the whole context again, at 63 times what cache reads would have cost.</span></li><li><span class="l-ko"><b>컨텍스트</b>: 메인 대화의 요청은 중앙값으로 362,105토큰을 실었고 요청의 80%가 200,000토큰을 넘었습니다.</span><span class="l-en"><b>Context</b>: a request in a main conversation carried a median of 362,105 tokens, and 80% of the requests carried more than 200,000.</span></li><li><span class="l-ko"><b>도구 호출</b>: 프롬프트 하나가 중앙값으로 API 요청 11건을 만들었고 도구 결과의 93%가 Bash와 Read에서 나왔습니다.</span><span class="l-en"><b>Tool calls</b>: one prompt produced a median of 11 API requests, and 93% of the tool results by characters came from Bash and Read.</span></li><li><span class="l-ko"><b>서브에이전트</b>: 요청의 53%, 비용의 39%, 캐시 쓰기 토큰의 63%를 차지했습니다. 한 번 실행에 도구 결과를 중앙값으로 55,801자 받고 평균 1,001자를 메인 대화에 돌려줬습니다.</span><span class="l-en"><b>Subagents</b>: they made 53% of the requests, 39% of the cost and 63% of the cache-write tokens. One run took in a median of 55,801 characters of tool results and returned 1,001 characters on average to the main conversation.</span></li><li><span class="l-ko"><b>모델과 effort</b>: 서브에이전트 요청 한 건의 평균 비용은 Fable 5.2가 0.245달러, Haiku 5.5가 0.005달러였고 <code>xhigh</code>로 실행한 모델은 출력의 절반가량이 추론 토큰이었습니다.</span><span class="l-en"><b>Model and effort</b>: the mean cost of one subagent request was 0.245 USD on Fable 5.2 and 0.005 USD on Haiku 5.5, and on the models run at <code>xhigh</code> about half of the output was reasoning tokens.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">한 줄 질문에도 대화 전체를 다시 보내는 구조</a><a href="#ko-s2">토큰 종류별 가격과 비용이 생기는 세 곳</a><a href="#ko-s3">14일 세션 기록으로 본 비용의 구성</a><a href="#ko-s4">Tip 1. 프롬프트 캐시를 유지하는 습관</a><a href="#ko-s5">Tip 2. 작업 단위로 나누는 세션 (/clear, /compact)</a><a href="#ko-s6">Tip 3. 도구 호출 수와 결과 크기</a><a href="#ko-s7">Tip 4. 세션 시작부터 실리는 컨텍스트</a><a href="#ko-s8">Tip 5. 메인 에이전트와 서브에이전트의 분담</a><a href="#ko-s9">Tip 6. 모델과 effort 선택</a><a href="#ko-s10">Tip 7. 사용량 확인과 한도 설정</a><a href="#ko-s11">적용 순서와 점검표</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">A one-line question still sends the whole conversation</a><a href="#en-s2">Token prices and the three places cost comes from</a><a href="#en-s3">What 14 days of session logs say about the cost</a><a href="#en-s4">Tip 1. Habits that keep the prompt cache</a><a href="#en-s5">Tip 2. One task per session (/clear, /compact)</a><a href="#en-s6">Tip 3. Fewer tool calls, smaller results</a><a href="#en-s7">Tip 4. What loads before you type</a><a href="#en-s8">Tip 5. Main agent or subagent</a><a href="#en-s9">Tip 6. Model and effort level</a><a href="#en-s10">Tip 7. Check usage, set limits</a><a href="#en-s11">Order of adoption and a checklist</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>한 줄 질문에도 대화 전체를 다시 보내는 구조</h2></header><div class="prose">
+<p>Claude Code는 처리한 토큰만큼 API 비용이 들거나 요금제의 사용 한도가 줄어듭니다. 같은 작업도 세션을 쓰는 습관과 설정에 따라 처리하는 토큰의 양이 달라지므로 토큰이 어디에서 쓰이는지 알아야 줄일 곳이 보입니다.</p>
+<p>하루 종일 열어 둔 세션에 "변경 사항을 커밋해 줘"라고 한 줄을 입력하는 장면을 생각해 봅니다. 입력은 한 줄이지만 Claude Code가 모델에 보내는 요청에는 시스템 프롬프트, 도구 정의, CLAUDE.md, 그날의 대화와 도구 결과 전체가 다시 실립니다. 모델은 요청과 요청 사이에 아무것도 기억하지 않기 때문입니다. Claude가 커밋을 준비하면서 <code>git status</code>와 <code>git diff</code>를 실행하면 도구 결과가 돌아올 때마다 같은 내용을 실은 요청이 한 번씩 더 나갑니다.</p>
+<p>제 개발 환경의 최근 14일 기록에서 메인 대화의 요청 하나는 중앙값으로 362,105토큰을 실었고 프롬프트 하나를 처리하는 데 API 요청이 중앙값으로 11번 나갔습니다. 두 값을 단순히 곱하면 약 400만 토큰입니다.</p>
+<p>그림 1은 요청 하나에 실리는 것, 비용이 생기는 세 곳, 이 글의 Tip 일곱 가지가 각각 줄이는 비용을 한 장에 담았습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig01-cost-structure.png" alt="세 부분으로 된 그림. 왼쪽은 요청 하나에 실리는 네 층으로 시스템 프롬프트와 도구 정의, 프로젝트 컨텍스트, 대화, 새 메시지가 쌓여 있고 앞의 세 층은 이전 요청과 같으면 캐시에서 읽으며 새로 붙은 부분은 캐시에 쓴다. 가운데는 14일 기록을 정가로 환산한 비용 비중으로 캐시 읽기 36%, 캐시 쓰기 32%, 출력 32%이다. 오른쪽은 Tip 일곱 가지와 각 Tip이 줄이는 비용 항목이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> Claude Code 비용의 구조와 Tip 일곱 가지. 비중은 글쓴이 개발 환경의 14일 세션 기록을 정가로 환산한 값</figcaption></figure>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>토큰 종류별 가격과 비용이 생기는 세 곳</h2></header><div class="prose">
+<p>요청 하나의 입력은 세 종류로 나뉘어 과금됩니다. 이전 요청과 앞부분이 같아 캐시에서 읽은 토큰(캐시 읽기), 이번에 처음 처리해 캐시에 저장한 토큰(캐시 쓰기), 캐시를 거치지 않은 토큰입니다. 여기에 모델이 만든 출력 토큰이 더해지며 추론(thinking) 토큰도 출력으로 과금됩니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>모델</th><th>기본 입력</th><th>캐시 쓰기 (5분)</th><th>캐시 쓰기 (1시간)</th><th>캐시 읽기</th><th>출력</th></tr>
+</thead>
+<tbody>
+<tr><td>Claude Fable 5.2</td><td class="num">8</td><td class="num">10</td><td class="num">16</td><td class="num">0.20</td><td class="num">40</td></tr>
+<tr><td>Claude Opus 5.5</td><td class="num">4</td><td class="num">5</td><td class="num">8</td><td class="num">0.20</td><td class="num">20</td></tr>
+<tr><td>Claude Sonnet 5.5</td><td class="num">2</td><td class="num">2.50</td><td class="num">4</td><td class="num">0.10</td><td class="num">10</td></tr>
+<tr><td>Claude Haiku 5.5</td><td class="num">0.10</td><td class="num">0.125</td><td class="num">0.20</td><td class="num">0.01</td><td class="num">0.50</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 모델별 토큰 가격, 100만 토큰당 USD. Claude API 가격표 기준(2026년 11월 22일 확인). Haiku 5.5는 프롬프트가 100,000토큰을 넘으면 모든 항목이 5배 가격</p>
+<p>캐시 쓰기는 기본 입력 가격의 1.25배(5분 수명) 또는 2배(1시간 수명)입니다. 캐시 읽기는 Fable 5.2에서 0.025배, Opus 5.5와 Sonnet 5.5에서 0.05배, 그 밖의 모델에서 0.1배입니다. Fable 5.2에서 같은 토큰을 캐시에서 읽으면 100만 토큰당 0.20달러이고 1시간 수명의 캐시 쓰기로 다시 처리하면 16달러이므로 80배 차이가 납니다.</p>
+<p>이 가격 구조에서 비용이 생기는 곳은 세 가지입니다.</p>
+<ul>
+<li><b>다시 읽는 컨텍스트(캐시 읽기)</b>: 단가는 가장 낮지만 요청마다 컨텍스트 전체에 매겨집니다. 컨텍스트 크기에 요청 횟수를 곱한 만큼 듭니다.</li>
+<li><b>새로 쓰는 컨텍스트(캐시 쓰기)</b>: 새로 붙은 내용을 한 번 쓰는 것은 정상입니다. 캐시가 만료되거나 앞부분이 바뀌면 컨텍스트 전체에 이 단가가 다시 적용됩니다.</li>
+<li><b>출력</b>: 응답, 도구 호출, 추론이 모두 출력 단가로 과금됩니다. 출력 단가는 기본 입력의 5배입니다.</li>
+</ul>
+<blockquote><p>기억이 없는 자문가에게 일을 맡기는 상황에 비유하면 이해하기 쉽습니다. 자문가는 만날 때마다 지난 일을 잊으므로 매번 서류철 전체를 건네야 하고 읽은 쪽수만큼 비용을 청구합니다. 최근에 읽은 서류철과 앞에서부터 같은 부분은 훑어보기만 하고 싼값을 받습니다(캐시 읽기). 새로 끼운 쪽은 정독하고 색인을 만들어 두므로 더 비쌉니다(캐시 쓰기). 오랫동안 찾아가지 않거나 맨 앞 장을 바꾸면 색인을 버리고 서류철 전체를 처음부터 정독합니다. 자문가가 써 주는 답변서는 쪽당 가격이 가장 높습니다(출력).</p></blockquote>
+<p>Tip 일곱 가지도 같은 비유로 설명됩니다. 색인이 남아 있을 때 찾아가고(Tip 1) 일이 바뀌면 새 서류철을 만들며(Tip 2) 끼우는 서류와 맨 앞의 안내문을 줄입니다(Tip 3, Tip 4). 조사는 조수에게 얇은 서류철을 들려 보내고(Tip 5) 단순한 일은 단가가 낮은 자문가에게 맡기며(Tip 6) 청구서를 확인합니다(Tip 7). 실제 캐시는 비유와 달리 앞에서부터 글자 하나까지 같아야 읽히고 중간이 달라지면 그 뒤가 전부 다시 쓰입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>14일 세션 기록으로 본 비용의 구성</h2></header><div class="prose">
+<p>이 구조가 실제 사용에서 어떤 비중으로 나타나는지 제 개발 환경의 기록으로 확인했습니다. Claude Code는 세션 기록을 <code>~/.claude/projects/</code> 아래에 JSONL 파일로 저장하고 응답마다 API가 돌려준 <code>usage</code> 값을 함께 남깁니다. 다음 명령은 가장 최근 세션의 첫 응답에서 이 값을 출력합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>python3 - &lt;&lt;'EOF'
+import glob, json, os
+f = max(glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")), key=os.path.getmtime)
+for line in open(f, encoding="utf-8"):
+    d = json.loads(line)
+    if d.get("type") == "assistant" and "usage" in d.get("message", {}):
+        print(json.dumps(d["message"]["usage"], indent=1))
+        break
+EOF</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+ "input_tokens": 2,
+ "cache_creation_input_tokens": 53050,
+ "cache_read_input_tokens": 28990,
+ "output_tokens": 1029,
+ "output_tokens_details": {
+  "thinking_tokens": 491
+ },
+ "cache_creation": {
+  "ephemeral_1h_input_tokens": 53050,
+  "ephemeral_5m_input_tokens": 0
+ },
+ "speed": "standard"
+}</code></pre></div>
+<p>일부 필드는 생략했습니다. 이 응답은 28,990토큰을 캐시에서 읽고 53,050토큰을 1시간 수명의 캐시에 새로 썼으며 출력 1,029토큰 가운데 491토큰이 추론이었습니다. 이 값을 14일 동안의 모든 응답에서 응답 ID별로 한 번씩 모았습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>값</th></tr>
+</thead>
+<tbody>
+<tr><td>기간</td><td>2026년 11월 8일부터 22일까지 14일</td></tr>
+<tr><td>대상</td><td>Claude Code CLI의 API 요청 28,729건. 메인 대화 107개의 13,411건과 서브에이전트 658회의 15,318건</td></tr>
+<tr><td>환경</td><td>Claude 구독, v2.1.293부터 v2.1.330까지. 메인 대화는 주로 Fable 5.2, effort는 <code>xhigh</code></td></tr>
+<tr><td>비용 환산</td><td>표 1의 정가. 구독은 토큰 단가로 청구되지 않으므로 실제 청구액이 아님</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 집계 대상과 조건</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>토큰</th><th>입력 토큰 중 비중</th><th>비용 비중</th></tr>
+</thead>
+<tbody>
+<tr><td>캐시 읽기</td><td class="num">8,766,930,065</td><td class="num">98.03%</td><td class="num">35.8%</td></tr>
+<tr><td>캐시 쓰기</td><td class="num">176,394,617</td><td class="num">1.97%</td><td class="num">32.0%</td></tr>
+<tr><td>캐시를 거치지 않은 입력</td><td class="num">61,345</td><td class="num">0.001% 미만</td><td class="num">0.01% 미만</td></tr>
+<tr><td>출력 (그중 추론 22,390,761)</td><td class="num">48,648,992</td><td class="num">해당 없음</td><td class="num">32.2%</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 14일 동안의 토큰과 비용 구성. 비용 비중은 정가로 환산한 값</p>
+<p>표 3에서 세 가지가 보입니다.</p>
+<ul>
+<li>입력 토큰의 98%가 캐시 읽기였습니다. 단가가 기본 입력의 0.025배에서 0.05배인데도 양이 많아 비용의 36%를 차지했습니다.</li>
+<li>캐시 쓰기는 입력 토큰의 2%였지만 비용의 32%였습니다.</li>
+<li>출력은 전체 토큰의 0.5%였지만 비용의 32%였고 출력의 46%가 추론 토큰이었습니다.</li>
+</ul>
+<p>이 수치는 긴 세션과 서브에이전트를 자주 쓰는 한 사람의 환경에서 나온 값이고 조건을 통제한 실험이 아닙니다. Tip의 절감 효과를 증명하는 자료가 아니라 비용이 생기는 곳을 보여 주는 자료로 사용했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Tip 1. 프롬프트 캐시를 유지하는 습관</h2></header><div class="prose">
+<p>캐시가 유지되는 동안 작업하고 캐시를 다시 쓰게 하는 변경은 세션을 시작할 때 합니다. 캐시 미스(cache miss)가 한 번 나면 그 요청은 컨텍스트 전체를 캐시 쓰기 단가로 다시 처리합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig02-cache-lifetime.png" alt="네 부분으로 된 그림. 첫째는 턴 네 개의 막대로 첫 턴은 전체를 캐시에 쓰고 둘째와 셋째 턴은 앞부분을 캐시에서 읽으며 수명보다 긴 공백 뒤의 넷째 턴은 전체를 다시 쓴다. 둘째는 캐시 수명 기본값과 가격으로 구독의 메인 대화는 1시간, API 키와 클라우드 공급자는 5분이다. 셋째는 캐시를 다시 쓰게 하는 행동과 유지하는 행동의 목록이다. 넷째는 14일 기록으로 1시간을 넘긴 공백 뒤의 요청 114건 가운데 37건이 전체를 다시 썼고 그 비용은 캐시 읽기였을 때의 63배였다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 프롬프트 캐시의 수명과 캐시 미스. 아래 오른쪽은 글쓴이 개발 환경의 14일 세션 기록</figcaption></figure>
+<h3>캐시 수명</h3>
+<p>캐시는 마지막 요청 뒤 일정 시간이 지나면 만료됩니다. Claude Code는 요청마다 수명(TTL)을 정하고 기본값은 인증 방식에 따라 다릅니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>요청</th><th>Claude 구독, 요금제 사용량 안</th><th>사용량 크레딧, API 키, 클라우드 공급자</th></tr>
+</thead>
+<tbody>
+<tr><td>메인 대화</td><td>1시간</td><td>5분</td></tr>
+<tr><td>서브에이전트, 워크플로, 압축 등 그 밖의 요청</td><td>5분</td><td>5분</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 캐시 수명의 기본값. Claude Code 공식 문서 기준</p>
+<p>Amazon Bedrock이나 API 키로 사용하면 메인 대화의 캐시도 5분 뒤에 만료됩니다. 긴 응답을 읽는 동안 5분이 지나면 다음 메시지에서 컨텍스트 전체가 캐시 쓰기로 다시 처리됩니다. 이런 환경에서는 <code>promptCacheTtl</code> 설정으로 메인 대화의 수명을 1시간으로 지정합니다(v2.1.242 이상).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "promptCacheTtl": "1h",
+  "subagentPromptCacheTtl": "5m"
+}</code></pre></div>
+<p>이 설정에는 트레이드 오프가 있습니다. 1시간 수명의 캐시 쓰기는 기본 입력 가격의 2배로 5분 수명의 1.25배보다 비쌉니다. 5분 넘게 쉬는 일이 없는 짧은 작업에서는 비용이 오히려 늘어납니다. Amazon Bedrock에서는 1시간 수명의 지원 여부가 모델에 따라 다릅니다.</p>
+<h3>캐시를 다시 쓰게 하는 행동</h3>
+<p>캐시는 요청의 앞부분이 이전 요청과 정확히 같아야 읽힙니다. 다음 행동은 앞부분을 바꾸므로 다음 요청 한 번이 느려지고 비싸집니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>행동</th><th>캐시</th><th>대신 할 일</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/model</code>로 모델 전환</td><td>모델마다 캐시가 따로 있어 대화 전체를 다시 처리</td><td>세션을 시작할 때 모델을 정함</td></tr>
+<tr><td>effort 변경</td><td>대부분의 모델에서 다시 처리. API 키나 구독으로 쓰는 Fable 5.1 이상, Opus 5.5, Sonnet 5.5, Haiku 5.5는 유지</td><td>Amazon Bedrock에서는 세션을 시작할 때 정함</td></tr>
+<tr><td>fast mode 전환</td><td>일반 속도와 캐시가 따로 있어 대화 전체를 fast mode 단가로 처리</td><td>사용한다면 세션을 시작할 때 활성화</td></tr>
+<tr><td>MCP 서버 연결과 제거</td><td>도구 검색이 활성화된 기본 구성에서는 유지. 도구 정의를 미리 싣는 구성에서는 다시 처리</td><td>도구 검색을 비활성화했다면 세션 도중에 바꾸지 않음</td></tr>
+<tr><td><code>/compact</code></td><td>대화가 요약으로 바뀌어 대화 부분의 캐시를 새로 만듦</td><td>작업이 끝난 시점에 실행</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 캐시를 다시 쓰게 하는 행동. Claude Code 공식 문서 기준</p>
+<p>저장소의 파일 수정, CLAUDE.md 수정, 권한 모드 변경, skill과 명령 호출, <code>/rewind</code>, 서브에이전트 실행은 캐시를 유지합니다.</p>
+<h3>자리를 비운 뒤의 첫 메시지</h3>
+<p>제 기록에서 메인 대화의 캐시는 모두 1시간 수명이었습니다. 표 6은 이전 요청과의 간격별로 캐시 미스를 센 결과입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>이전 요청과의 간격</th><th>요청 수</th><th>컨텍스트 전체를 다시 쓴 요청</th><th>압축된 대화에서 이어간 요청</th></tr>
+</thead>
+<tbody>
+<tr><td>5분 미만</td><td class="num">12,783</td><td class="num">3</td><td class="num">해당 없음</td></tr>
+<tr><td>5분 이상 1시간 미만</td><td class="num">407</td><td class="num">0</td><td class="num">해당 없음</td></tr>
+<tr><td>1시간 이상</td><td class="num">114</td><td class="num">37</td><td class="num">77</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 메인 대화에서 이전 요청과의 간격별 캐시 미스. 이전 컨텍스트의 5% 이상이자 2,000토큰 이상을 캐시에서 읽지 못한 요청을 셈</p>
+<p>1시간 넘게 비운 뒤의 요청 114건 가운데 이전 컨텍스트를 캐시에서 읽은 요청은 한 건도 없었습니다. 37건은 컨텍스트 전체를 다시 썼습니다. 다시 쓴 양은 8,041,922토큰이고 그 비용은 같은 토큰을 캐시에서 읽었을 때의 63배였습니다. 가장 비용이 큰 한 건은 Fable 5.2에서 504,394토큰을 다시 써서 정가로 8.07달러였습니다. 캐시에서 읽었다면 0.10달러입니다.</p>
+<p>나머지 77건은 대화가 요약으로 압축된 상태에서 이어졌습니다. 유휴 압축(idle compaction)이 동작한 경우입니다. 1시간 수명을 쓰는 대화가 200,000토큰 이상이고 약 1시간 동안 요청이 없으면 Claude Code는 캐시가 만료되기 전에 대화를 요약해 둡니다. 기본값이 활성화입니다. 다시 쓰는 양은 줄지만 이전 대화의 세부 내용은 요약으로만 남습니다.</p>
+<p>이 결과에서 나오는 습관은 세 가지입니다.</p>
+<ul>
+<li>자리를 비우기 전에 작업이 끝났으면 <code>/clear</code>로 새 대화를 시작합니다. 이어서 할 작업이면 캐시가 남아 있을 때 <code>/compact</code>를 실행합니다.</li>
+<li>오래된 세션을 <code>--resume</code>으로 다시 열기보다 필요한 내용만 적어 새 세션을 시작합니다.</li>
+<li><code>/usage</code>의 <code>Prompt cache (main)</code> 줄에서 캐시 미스 횟수와 추정 원인을 확인합니다(v2.1.251 이상). 다음은 공식 문서의 예시 출력입니다.</li>
+</ul>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>Prompt cache (main):   14 requests · 91% of input tokens from cache · 2 misses (last 6m 10s ago, 310.2k tokens re-cached) · 1 expected rebuild (compaction or tool-result clearing) · warm (1h TTL, last activity 40s ago)</code></pre></div>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Tip 2. 작업 단위로 나누는 세션 (/clear, /compact)</h2></header><div class="prose">
+<p>작업이 바뀌면 <code>/clear</code>로 새 대화를 시작합니다. 대화에 쌓인 내용은 이후의 모든 요청이 다시 읽으므로 끝난 작업의 기록이 다음 작업의 비용이 됩니다.</p>
+<p>제 기록에서 메인 대화의 요청은 중앙값으로 362,105토큰을 실었고 상위 10%는 719,536토큰 이상이었습니다. 요청의 80%가 200,000토큰을 넘었고 가장 큰 요청은 967,430토큰이었습니다. 1M 컨텍스트 모델은 기본값으로 약 967,000토큰에 이르러야 자동 압축을 실행하기 때문에 정리하지 않은 세션은 이 크기까지 커집니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>컨텍스트</th><th>요청 한 건</th><th>요청 11건 (프롬프트 하나의 중앙값)</th></tr>
+</thead>
+<tbody>
+<tr><td>50,000토큰</td><td class="num">0.01달러</td><td class="num">0.11달러</td></tr>
+<tr><td>200,000토큰</td><td class="num">0.04달러</td><td class="num">0.44달러</td></tr>
+<tr><td>362,105토큰 (중앙값)</td><td class="num">0.07달러</td><td class="num">0.80달러</td></tr>
+<tr><td>900,000토큰</td><td class="num">0.18달러</td><td class="num">1.98달러</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 7.</b> 컨텍스트 크기에 따른 캐시 읽기 비용. Fable 5.2의 캐시 읽기 단가(100만 토큰당 0.20달러)로 계산한 값이며 새로 붙는 내용의 캐시 쓰기와 출력은 포함하지 않음</p>
+<p>컨텍스트를 작게 유지하는 명령은 다섯 가지입니다.</p>
+<ul>
+<li><code>/clear</code>: 새 대화를 시작합니다. 비용이 들지 않습니다. <code>/clear oauth-migration</code>처럼 이름을 붙이면 이전 대화를 <code>/resume</code>에서 찾기 쉽습니다.</li>
+<li><code>/compact</code>: 대화를 요약으로 바꿉니다. <code>/compact API 변경 사항과 테스트 명령을 남겨 줘</code>처럼 남길 내용을 지정합니다. 긴 대화를 요약하는 요청은 대화 전체를 읽으므로 캐시가 남아 있는 작업 사이에 실행합니다.</li>
+<li><code>/autocompact 300k</code>: 자동 압축이 실행되는 크기를 낮춥니다.</li>
+<li><code>/rewind</code>: 잘못 진행한 부분을 버리고 이전 지점부터 다시 시작합니다. 그 지점까지는 이미 캐시되어 있으므로 압축과 달리 캐시를 새로 쓰지 않습니다.</li>
+<li><code>/btw</code>: 대화에 남기지 않는 곁가지 질문을 합니다.</li>
+</ul>
+<p>같은 문제를 두 번 교정해도 해결되지 않으면 세 번째 교정 대신 <code>/clear</code>를 실행하고 알게 된 내용을 담아 프롬프트를 새로 작성합니다. 실패한 시도 두 번이 대화에 남아 이후 요청마다 다시 읽히기 때문입니다. 컨텍스트를 줄이는 일에도 비용이 듭니다. <code>/compact</code>는 요약을 만드는 요청을 한 번 보내고 그 뒤 대화 부분의 캐시를 새로 만듭니다. 이어서 볼 내용이 없으면 <code>/clear</code>가 가장 쌉니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Tip 3. 도구 호출 수와 결과 크기</h2></header><div class="prose">
+<p>도구 호출은 두 가지로 비용을 늘립니다. 도구 결과가 돌아올 때마다 컨텍스트 전체를 실은 요청이 한 번 더 나가고 결과는 대화에 남아 이후의 모든 요청이 다시 읽습니다.</p>
+<p>제 기록에서 프롬프트 하나는 중앙값으로 API 요청 11건을 만들었고 상위 10%는 67건 이상이었습니다(프롬프트 524개). 도구 호출은 35,412회였고 Bash가 62%, Read가 15%였습니다. 도구 결과를 글자 수로 보면 Bash와 Read가 93%를 차지했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>도구</th><th>호출 수</th><th>결과 글자 수 비중</th><th>결과 한 건의 평균 글자 수</th></tr>
+</thead>
+<tbody>
+<tr><td>Bash</td><td class="num">21,949</td><td class="num">51.6%</td><td class="num">2,427</td></tr>
+<tr><td>Read</td><td class="num">5,467</td><td class="num">41.7%</td><td class="num">7,871</td></tr>
+<tr><td>MCP 도구</td><td class="num">622</td><td class="num">3.4%</td><td class="num">5,597</td></tr>
+<tr><td>WebFetch</td><td class="num">269</td><td class="num">1.4%</td><td class="num">5,320</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 8.</b> 도구별 호출 수와 결과 크기. 메인 대화와 서브에이전트를 합한 값</p>
+<p>줄이는 방법은 다섯 가지입니다.</p>
+<ul>
+<li><b>구체적으로 요청합니다.</b> 파일 경로, 함수 이름, 기대하는 결과를 적으면 파일을 찾는 호출이 줄어듭니다.</li>
+<li><b>긴 출력을 줄여서 받습니다.</b> Bash 결과는 기본값으로 약 30,000자까지 그대로 대화에 들어갑니다. 테스트와 빌드는 마지막 부분만 받도록 요청하거나 아래의 hook으로 자동화합니다.</li>
+<li><b>파일은 필요한 범위만 읽게 합니다.</b> 타입이 있는 언어는 코드 인텔리전스 플러그인을 설치하면 정의로 이동 한 번이 검색과 여러 파일 읽기를 대신합니다.</li>
+<li><b>MCP 서버보다 CLI를 사용합니다.</b> <code>gh</code>, <code>aws</code>, <code>gcloud</code> 같은 CLI는 도구 목록을 컨텍스트에 더하지 않습니다.</li>
+<li><b>방향이 틀리면 바로 멈춥니다.</b> <code>Esc</code>로 멈춘 뒤 <code>/rewind</code>로 이전 지점부터 다시 시작합니다.</li>
+</ul>
+<p>공식 문서의 예시 hook은 테스트 명령의 출력을 마지막 100줄로 줄입니다. <code>settings.json</code>에 hook을 등록하고 스크립트를 <code>~/.claude/hooks/filter-test-output.sh</code>로 저장합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/filter-test-output.sh"
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>#!/bin/bash
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+# 테스트 실행이면 출력의 마지막 100줄만 남긴다
+pattern='^(npm test|pytest|go test)( [^;&amp;|&lt;&gt;`$#\\[:cntrl:]]*)?$'
+if [[ "$cmd" =~ $pattern ]]; then
+  filtered_cmd="$cmd 2&gt;&amp;1 | tail -n 100"
+  echo "$input" | jq --arg filtered "$filtered_cmd" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", updatedInput: (.tool_input + {command: $filtered})}}'
+else
+  echo "{}"
+fi</code></pre></div>
+<p>여러 도구 호출을 코드 한 번으로 묶는 Code Mode도 같은 목적의 기능입니다. 실험 기능이고 기본값은 비활성화입니다. <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-code-mode-token-measurement/" target="_blank" rel="noopener">이전 글의 테스트</a>에서 기본 도구 작업은 총 토큰이 42%, 비용이 13% 줄었고 MCP 도구 작업은 총 토큰이 19% 늘었습니다. Amazon Bedrock과 OpenTelemetry 내보내기 환경에서는 사용할 수 없습니다.</p>
+<p>도구 호출을 무조건 줄이는 것이 목표는 아닙니다. 검증을 건너뛰어 틀린 결과를 다시 작업하면 토큰이 더 듭니다. 줄일 대상은 결과를 쓰지 않는 탐색과 필요 이상으로 긴 출력입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Tip 4. 세션 시작부터 실리는 컨텍스트</h2></header><div class="prose">
+<p>아무것도 입력하기 전에 실리는 내용을 줄입니다. 시스템 프롬프트, 도구 정의, CLAUDE.md, 자동 메모리, skill과 서브에이전트의 설명은 세션의 모든 요청에 실리고 새로 시작하는 서브에이전트에도 대부분 실립니다.</p>
+<p>제 환경에서 평소 설정으로 시작한 대화형 세션 29개의 첫 요청은 중앙값으로 81,995토큰이었습니다. 같은 장비에서 플러그인과 MCP 서버를 제외하고 시작한 세션의 첫 요청은 35.0k토큰이었습니다(<a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-code-mode-token-measurement/" target="_blank" rel="noopener">Code Mode 글</a>의 테스트). 차이인 약 47,000토큰이 플러그인과 skill의 설명, MCP 서버의 안내, CLAUDE.md, 메모리에서 왔습니다. 공식 문서의 예시 세션은 입력 전에 7,850토큰이 실립니다.</p>
+<ul>
+<li><b>CLAUDE.md</b>: 파일마다 200줄 이하를 목표로 합니다. 특정 작업에만 필요한 절차는 skill로 옮깁니다. skill의 본문은 호출할 때만 실립니다. <code>@</code>로 불러온 파일은 함께 실리므로 컨텍스트가 줄지 않습니다.</li>
+<li><b>MCP 서버</b>: 도구 정의는 기본값으로 필요할 때만 불러오고(도구 검색) 시작할 때는 도구 이름과 서버 안내만 실립니다. 사용하지 않는 서버는 <code>/mcp</code>에서 비활성화합니다.</li>
+<li><b>skill과 서브에이전트의 설명</b>: 설명은 Claude가 언제 사용할지 판단하도록 항상 실립니다. 사용하지 않는 플러그인은 비활성화합니다.</li>
+<li><b>확인</b>: <code>/context</code>는 지금 컨텍스트를 채운 항목별 토큰과 줄일 곳을 보여 줍니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Tip 5. 메인 에이전트와 서브에이전트의 분담</h2></header><div class="prose">
+<p>출력이 많고 결과만 필요한 일은 서브에이전트에 맡기고 짧은 수정과 주고받으며 다듬는 작업은 메인 대화에서 합니다. 서브에이전트는 자기 컨텍스트에서 일하고 요약만 돌려주므로 메인 대화가 커지지 않습니다. 하지만 서브에이전트가 보내는 요청도 같은 사용량에 더해집니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig03-main-vs-subagent.png" alt="네 부분으로 된 그림. 위쪽은 세 가지 실행 방식의 비교로 메인 대화는 대화 전체를 요청마다 다시 읽고, 서브에이전트는 새 컨텍스트로 시작해 도구 결과를 자기 안에 남기고 요약만 돌려주며, fork는 부모 대화 전체를 상속하고 부모의 캐시를 읽는다. 아래 왼쪽은 작업별로 맡길 곳이고 가운데는 서브에이전트 요청 한 건의 모델별 평균 비용으로 Fable 5.2가 0.245달러, Haiku 5.5가 0.005달러이다. 아래 오른쪽은 14일 기록에서 서브에이전트가 요청의 53%, 비용의 39%, 캐시 쓰기 토큰의 63%를 차지했다는 수치이다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 메인 대화, 서브에이전트, fork의 컨텍스트와 비용. 수치는 글쓴이 개발 환경의 14일 세션 기록</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>메인 대화</th><th>서브에이전트</th><th>fork</th></tr>
+</thead>
+<tbody>
+<tr><td>시작할 때의 컨텍스트</td><td>대화 전체</td><td>자기 시스템 프롬프트, 위임 메시지, CLAUDE.md</td><td>부모 대화 전체</td></tr>
+<tr><td>도구 결과가 남는 곳</td><td>메인 대화</td><td>서브에이전트. 메인에는 요약만 돌아옴</td><td>fork. 메인에는 최종 결과만 돌아옴</td></tr>
+<tr><td>캐시</td><td>구독은 1시간</td><td>부모와 별도. 구독에서도 5분</td><td>부모의 캐시를 읽음</td></tr>
+<tr><td>모델</td><td>세션의 모델</td><td>지정 가능</td><td>부모와 같음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 9.</b> 세 가지 실행 방식. Claude Code 공식 문서 기준</p>
+<p>제 기록의 서브에이전트 실행 658회에서 한 번의 실행이 도구 결과로 받은 글자 수는 중앙값으로 55,801자였고 메인 대화로 돌아온 결과는 평균 1,001자였습니다. 메인 대화가 같은 일을 직접 했다면 도구 결과가 대화에 남아 이후 요청마다 다시 읽혔을 것입니다.</p>
+<p>반대쪽 비용도 있습니다. 새 서브에이전트는 부모의 캐시를 읽지 못합니다. 첫 요청은 중앙값으로 약 59,000토큰이었고 모델별 중앙값으로 그중 38,922토큰에서 56,765토큰을 캐시에 새로 썼습니다. 14일 동안 서브에이전트는 요청의 53%, 비용의 39%, 캐시 쓰기 토큰의 63%를 차지했습니다. 파일 하나를 읽고 한 줄을 수정하는 일을 서브에이전트에 맡기면 메인 대화에서 직접 할 때보다 비쌉니다.</p>
+<p>fork는 부모의 시스템 프롬프트, 도구, 대화를 그대로 물려받아 첫 요청이 부모의 캐시를 읽습니다. 제 기록에서 첫 요청이 캐시에서 100,000토큰 이상을 읽어 fork로 분류한 실행 가운데 Fable 5.2로 실행된 25회는 첫 요청에서 중앙값으로 282,365토큰을 읽고 7,566토큰만 새로 썼습니다. 대신 fork의 모든 요청은 물려받은 대화 전체를 다시 읽습니다. 긴 대화에서 맥락이 필요 없는 작은 조사를 fork로 보내면 요청마다 수십만 토큰의 캐시 읽기가 과금됩니다. 물려받는 것과 돌아오는 것의 차이는 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-subagent-vs-fork/" target="_blank" rel="noopener">Subagent와 fork를 비교한 글</a>에 정리했습니다.</p>
+<p>맡길 때는 두 가지를 지킵니다.</p>
+<ul>
+<li>서브에이전트가 돌려주는 결과도 메인 대화에 쌓입니다. "실패한 테스트와 에러 메시지만 보고해 줘"처럼 돌려받을 범위를 정합니다.</li>
+<li>병렬 서브에이전트, 워크플로, 에이전트 팀은 에이전트 수만큼 토큰을 사용합니다. 공식 문서는 팀원이 plan 모드로 실행되는 에이전트 팀이 일반 세션의 약 7배 토큰을 쓴다고 설명합니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Tip 6. 모델과 effort 선택</h2></header><div class="prose">
+<p>작업에 맞는 모델과 effort를 세션을 시작할 때 정하고 서브에이전트에는 더 낮은 등급의 모델을 지정합니다. 표 1의 가격으로 Opus 5.5는 Fable 5.2의 2분의 1, Sonnet 5.5는 4분의 1, Haiku 5.5는 80분의 1입니다.</p>
+<h3>세션의 모델</h3>
+<p>기본 모델은 구독, Anthropic API, Amazon Bedrock 모두 Opus 5.5입니다. Fable은 기본값이 아니지만 <code>/model</code>에서 한 번 선택하면 사용자 설정에 저장되어 이후 세션도 Fable로 시작합니다. 어려운 작업 하나를 위해 올렸다면 <code>/model</code> 목록에서 <code>s</code>를 눌러 현재 세션에만 적용합니다.</p>
+<h3>서브에이전트의 모델</h3>
+<p>서브에이전트는 기본값으로 메인 대화의 모델을 물려받습니다. 메인 대화를 Fable이나 Opus로 실행하면 탐색과 테스트 실행도 같은 단가로 처리됩니다. 서브에이전트 정의 파일에 <code>model: haiku</code>를 지정하거나 다음 설정으로 모든 서브에이전트에 한 모델을 적용합니다(v2.1.257 이상).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+  }
+}</code></pre></div>
+<p>두 변수를 함께 설정해야 기본 제공 Explore와 Plan 서브에이전트에도 적용됩니다. 실행 중인 서브에이전트의 모델은 <code>/tasks</code>에서 확인합니다. 그림 3의 요청당 평균 비용은 Fable 5.2가 0.245달러, Haiku 5.5가 0.005달러였습니다. 모델마다 맡은 작업과 컨텍스트 크기가 달라 통제된 비교는 아닙니다.</p>
+<h3>effort와 추론 토큰</h3>
+<p>추론 토큰은 출력 단가로 과금됩니다. Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5의 기본 effort는 <code>medium</code>이고 이 모델들은 thinking을 비활성화할 수 없으므로 추론의 양은 effort로 조절합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>모델</th><th>effort</th><th>출력 토큰 중 추론 비중</th><th>요청당 평균 출력 토큰</th></tr>
+</thead>
+<tbody>
+<tr><td>Fable 5.2</td><td><code>xhigh</code></td><td class="num">46.7%</td><td class="num">2,085</td></tr>
+<tr><td>Opus 5.5</td><td><code>xhigh</code></td><td class="num">51.7%</td><td class="num">1,383</td></tr>
+<tr><td>Sonnet 5.5</td><td><code>medium</code></td><td class="num">27.2%</td><td class="num">1,057</td></tr>
+<tr><td>Haiku 5.5</td><td><code>medium</code></td><td class="num">16.1%</td><td class="num">998</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 10.</b> 모델과 effort별 추론 토큰의 비중. 모델과 작업이 서로 달라 effort만의 효과를 분리한 값이 아님</p>
+<p>제 기록에서 <code>xhigh</code>로 실행한 두 모델은 출력의 절반가량이 추론이었습니다. 범위가 분명한 일상 작업은 기본값인 <code>medium</code>으로 시작하고 검증이 중요하거나 예외 상황이 많은 작업에만 <code>/effort high</code> 이상을 사용합니다. 한 번만 깊은 추론이 필요하면 프롬프트에 <code>ultrathink</code>를 넣습니다. 세션의 effort를 바꾸지 않고 그 턴에만 적용됩니다.</p>
+<p>fast mode는 응답이 빨라지는 대신 단가가 표준의 2배입니다. 대화 도중에 처음 활성화하면 그때까지의 대화 전체를 fast mode 단가로 캐시 없이 읽습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Tip 7. 사용량 확인과 한도 설정</h2></header><div class="prose">
+<p>줄이기 전에 어디에서 쓰이는지 확인하고 자리를 비운 채 실행하는 작업에는 한도를 정합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>도구</th><th>보여 주는 것</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/usage</code> (별칭 <code>/cost</code>, <code>/stats</code>)</td><td>세션의 토큰과 정가 환산 비용, <code>Prompt cache (main)</code> 줄. 구독에서는 skill, 서브에이전트, 플러그인, MCP 서버별 비중과 권장 조치</td></tr>
+<tr><td><code>/context</code></td><td>지금 컨텍스트를 채운 항목별 토큰과 줄일 곳</td></tr>
+<tr><td>상태 줄 (<code>/statusline</code>)</td><td>컨텍스트 사용률, 비용, <code>prompt_cache</code> 객체의 <code>warm</code>, <code>hit_ratio</code>, <code>misses</code></td></tr>
+<tr><td>OpenTelemetry 내보내기</td><td>사용자와 세션별 토큰, 비용, 캐시 읽기와 쓰기</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 11.</b> 사용량을 확인하는 도구. Claude Code 공식 문서 기준</p>
+<p>자리를 비운 채 실행하는 <code>claude -p</code>에는 턴 수와 비용의 한도를 지정합니다. 두 플래그는 print 모드에서만 동작하고 비용 한도는 클라이언트의 추정값으로 판단하므로 여유를 둡니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>claude -p --max-turns 20 --max-budget-usd 5 "실패하는 테스트를 수정하고 결과를 요약해 줘"</code></pre></div>
+<p>조직의 한도는 사용하는 방식에 따라 정하는 곳이 다릅니다. Claude Console은 워크스페이스의 지출 한도, Teams와 Enterprise 요금제는 관리자 설정의 지출 한도, Amazon Bedrock은 AWS의 예산 관리입니다. Amazon Bedrock의 사용량은 Anthropic의 분석 대시보드에 나타나지 않으므로 사용자별 집계에는 OpenTelemetry나 게이트웨이를 사용합니다. 공식 문서는 기업 배포의 평균을 개발자 한 명당 활성 일 기준 약 13달러, 월 150달러에서 250달러로 제시합니다.</p>
+<p>자리를 비운 동안에도 <code>/loop</code> 같은 예약 작업과 goal의 확인 턴은 컨텍스트 전체를 실은 요청을 보냅니다. 사용하지 않는 예약 작업은 중지합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>적용 순서와 점검표</h2></header><div class="prose">
+<p>일곱 가지를 한꺼번에 적용할 필요는 없습니다. <code>/usage</code>와 <code>/context</code>로 자신의 사용량을 먼저 확인하고 표 12에서 해당하는 증상부터 줄입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>증상</th><th>먼저 볼 곳</th><th>조치</th></tr>
+</thead>
+<tbody>
+<tr><td>자리를 비운 뒤 첫 응답이 느리고 사용량이 크게 늘어남</td><td><code>/usage</code>의 캐시 미스와 캐시 수명</td><td>Tip 1</td></tr>
+<tr><td>짧은 질문에도 사용량이 빠르게 줄어듦</td><td><code>/context</code>의 대화 크기</td><td>Tip 2</td></tr>
+<tr><td>프롬프트 하나에 요청이 수십 번 나감</td><td>도구 호출 수와 결과 크기</td><td>Tip 3</td></tr>
+<tr><td>새 세션의 첫 요청부터 수만 토큰이 실림</td><td><code>/context</code>의 CLAUDE.md, skill, MCP 항목</td><td>Tip 4</td></tr>
+<tr><td>서브에이전트의 비중이 큼</td><td><code>/usage</code>의 서브에이전트 비중, <code>/tasks</code>의 모델</td><td>Tip 5, Tip 6</td></tr>
+<tr><td>출력 토큰의 비중이 큼</td><td>effort와 모델</td><td>Tip 6</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 12.</b> 증상별 점검표</p>
+<p>적용하는 조건도 함께 확인합니다. 캐시 수명을 1시간으로 늘리는 설정은 5분 넘게 쉬는 일이 잦을 때만 이득입니다. 서브에이전트는 출력이 많은 작업에서만 메인 대화의 비용을 줄입니다. Code Mode는 MCP 도구가 중심인 작업에서 토큰이 늘었습니다. 이 글의 비중은 제 환경의 값이므로 <code>usage</code> 값을 출력하는 앞의 명령으로 자신의 세션 기록부터 확인해 보기를 권합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>A one-line question still sends the whole conversation</h2></header><div class="prose">
+<p>Claude Code costs API money, or uses up the allowance of your plan, in proportion to the tokens it processes. The same task can take very different amounts of tokens depending on habits and settings, so you need to know where the tokens go before you can cut them.</p>
+<p>Picture typing one line, "commit the changes", into a session that has been open all day. The input is one line, but the request Claude Code sends to the model carries the system prompt, the tool definitions, CLAUDE.md, and the whole conversation and every tool result of that day again. The model remembers nothing between requests. When Claude runs <code>git status</code> and <code>git diff</code> to prepare the commit, each tool result that comes back triggers one more request with the same content.</p>
+<p>In the last 14 days of logs from my environment, one request in a main conversation carried a median of 362,105 tokens, and handling one prompt took a median of 11 API requests. Multiplying the two gives about 4 million tokens.</p>
+<p>Figure 1 puts on one page what a request carries, the three places cost comes from, and which cost each of the seven tips in this post cuts.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig01-cost-structure-en.png" alt="A figure in three parts. On the left, the four layers one request carries: the system prompt and tool definitions, the project context, the conversation, and the new message. The first three are read from the cache when they match the previous request, and the newly added part is written to the cache. In the middle, the share of cost at list prices over 14 days of logs: cache reads 36%, cache writes 32%, output 32%. On the right, the seven tips and the cost each one reduces" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> Where Claude Code costs come from, and the seven tips. Shares are from 14 days of session logs in the author's environment, converted at list prices</figcaption></figure>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>Token prices and the three places cost comes from</h2></header><div class="prose">
+<p>The input of one request is billed in three kinds. Tokens read from the cache because the start of the request matches the previous one (cache read), tokens processed for the first time and stored in the cache (cache write), and tokens that bypass the cache. On top of that come the output tokens the model generates, and reasoning (thinking) tokens are billed as output.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Model</th><th>Base input</th><th>Cache write (5 min)</th><th>Cache write (1 hour)</th><th>Cache read</th><th>Output</th></tr>
+</thead>
+<tbody>
+<tr><td>Claude Fable 5.2</td><td class="num">8</td><td class="num">10</td><td class="num">16</td><td class="num">0.20</td><td class="num">40</td></tr>
+<tr><td>Claude Opus 5.5</td><td class="num">4</td><td class="num">5</td><td class="num">8</td><td class="num">0.20</td><td class="num">20</td></tr>
+<tr><td>Claude Sonnet 5.5</td><td class="num">2</td><td class="num">2.50</td><td class="num">4</td><td class="num">0.10</td><td class="num">10</td></tr>
+<tr><td>Claude Haiku 5.5</td><td class="num">0.10</td><td class="num">0.125</td><td class="num">0.20</td><td class="num">0.01</td><td class="num">0.50</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Token prices by model, USD per million tokens. From the Claude API price list (checked November 22, 2026). Haiku 5.5 costs five times as much on every item when the prompt is over 100,000 tokens</p>
+<p>A cache write costs 1.25 times the base input price (5-minute lifetime) or 2 times (1-hour lifetime). A cache read costs 0.025 times on Fable 5.2, 0.05 times on Opus 5.5 and Sonnet 5.5, and 0.1 times on other models. On Fable 5.2, reading the same tokens from the cache costs 0.20 USD per million tokens and processing them again as a 1-hour cache write costs 16 USD, an 80-fold difference.</p>
+<p>With these prices, cost comes from three places.</p>
+<ul>
+<li><b>Context that is read again (cache read)</b>: the lowest unit price, but it is charged on the whole context for every request. It costs the context size multiplied by the number of requests.</li>
+<li><b>Context that is newly written (cache write)</b>: writing newly added content once is normal. When the cache expires or the start of the request changes, the whole context is charged at this price again.</li>
+<li><b>Output</b>: the response, the tool calls and the reasoning are all billed at the output price, which is five times the base input price.</li>
+</ul>
+<blockquote><p>It helps to picture handing work to an advisor who has no memory. The advisor forgets everything between meetings, so you hand over the whole binder each time, and the advisor bills by the pages read. The part of the binder that matches, from the first page on, a binder read recently is only skimmed and billed cheaply (cache read). Newly inserted pages are read closely and indexed, which costs more (cache write). If you stay away for long or change the first page, the advisor throws the index away and reads the whole binder closely from the start. The written answer the advisor gives you has the highest price per page (output).</p></blockquote>
+<p>The seven tips fit the same picture. Visit while the index is still there (Tip 1), start a new binder when the work changes (Tip 2), and insert fewer pages and keep the notice at the front thin (Tip 3, Tip 4). Send an assistant with a thin binder to do the research (Tip 5), give simple work to an advisor with a lower rate (Tip 6), and check the invoice (Tip 7). Unlike the picture, the real cache is read only when the request matches character for character from the start, and a change in the middle makes everything after it be written again.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>What 14 days of session logs say about the cost</h2></header><div class="prose">
+<p>I checked how this structure shows up in real use against the logs of my own environment. Claude Code stores session transcripts as JSONL files under <code>~/.claude/projects/</code> and records, with each response, the <code>usage</code> values the API returned. The command below prints them for the first response of the most recent session.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>python3 - &lt;&lt;'EOF'
+import glob, json, os
+f = max(glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")), key=os.path.getmtime)
+for line in open(f, encoding="utf-8"):
+    d = json.loads(line)
+    if d.get("type") == "assistant" and "usage" in d.get("message", {}):
+        print(json.dumps(d["message"]["usage"], indent=1))
+        break
+EOF</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+ "input_tokens": 2,
+ "cache_creation_input_tokens": 53050,
+ "cache_read_input_tokens": 28990,
+ "output_tokens": 1029,
+ "output_tokens_details": {
+  "thinking_tokens": 491
+ },
+ "cache_creation": {
+  "ephemeral_1h_input_tokens": 53050,
+  "ephemeral_5m_input_tokens": 0
+ },
+ "speed": "standard"
+}</code></pre></div>
+<p>Some fields are left out of the output. This response read 28,990 tokens from the cache, wrote 53,050 tokens to the 1-hour cache, and 491 of its 1,029 output tokens were reasoning. I collected these values from every response over 14 days, once per response ID.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Period</td><td>14 days, November 8 to 22, 2026</td></tr>
+<tr><td>Scope</td><td>28,729 API requests made by the Claude Code CLI: 13,411 in 107 main conversations and 15,318 in 658 subagent runs</td></tr>
+<tr><td>Environment</td><td>A Claude subscription, v2.1.293 to v2.1.330. Main conversations mostly on Fable 5.2, effort <code>xhigh</code></td></tr>
+<tr><td>Cost conversion</td><td>The list prices in Table 1. A subscription is not billed per token, so these are not billed amounts</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> What was aggregated and under which conditions</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Tokens</th><th>Share of input tokens</th><th>Share of cost</th></tr>
+</thead>
+<tbody>
+<tr><td>Cache read</td><td class="num">8,766,930,065</td><td class="num">98.03%</td><td class="num">35.8%</td></tr>
+<tr><td>Cache write</td><td class="num">176,394,617</td><td class="num">1.97%</td><td class="num">32.0%</td></tr>
+<tr><td>Input that bypassed the cache</td><td class="num">61,345</td><td class="num">under 0.001%</td><td class="num">under 0.01%</td></tr>
+<tr><td>Output (of which reasoning 22,390,761)</td><td class="num">48,648,992</td><td class="num">not applicable</td><td class="num">32.2%</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Tokens and cost over the 14 days. The cost share is at list prices</p>
+<p>Table 3 shows three things.</p>
+<ul>
+<li>Cache reads were 98% of the input tokens. Their unit price is 0.025 to 0.05 times the base input price, yet the volume made them 36% of the cost.</li>
+<li>Cache writes were 2% of the input tokens and 32% of the cost.</li>
+<li>Output was 0.5% of all tokens and 32% of the cost, and 46% of the output was reasoning tokens.</li>
+</ul>
+<p>These numbers come from the environment of one person who uses long sessions and many subagents, and this is not a controlled experiment. I use it to show where the cost comes from, not to prove how much each tip saves.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Tip 1. Habits that keep the prompt cache</h2></header><div class="prose">
+<p>Work while the cache is alive, and make the changes that force a rewrite of the cache when you start a session. On one cache miss, that request processes the whole context again at the cache-write price.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig02-cache-lifetime-en.png" alt="A figure in four parts. First, bars for four turns: the first turn writes everything to the cache, the second and third read the start from the cache, and the fourth, after a gap longer than the lifetime, writes everything again. Second, the default cache lifetime and prices: one hour for the main conversation on a subscription, five minutes with an API key or a cloud provider. Third, a list of actions that rewrite the cache and actions that keep it. Fourth, 14 days of logs: of 114 requests that followed a gap of an hour or more, 37 rewrote the whole context, at 63 times what cache reads would have cost" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Prompt cache lifetime and cache misses. The lower right part is from 14 days of session logs in the author's environment</figcaption></figure>
+<h3>Cache lifetime</h3>
+<p>The cache expires a set time after the last request. Claude Code picks the lifetime (TTL) for each request, and the default depends on how you sign in.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Request</th><th>Claude subscription, within plan usage</th><th>Usage credits, API key or cloud provider</th></tr>
+</thead>
+<tbody>
+<tr><td>Main conversation</td><td>1 hour</td><td>5 minutes</td></tr>
+<tr><td>Everything else, such as subagents, workflows and compaction</td><td>5 minutes</td><td>5 minutes</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Default cache lifetime. From the Claude Code documentation</p>
+<p>On Amazon Bedrock or with an API key, the cache of the main conversation also expires after 5 minutes. If 5 minutes pass while you are reading a long response, the next message processes the whole context again as a cache write. In that setup, set the lifetime of the main conversation to 1 hour with the <code>promptCacheTtl</code> setting (v2.1.242 or later).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "promptCacheTtl": "1h",
+  "subagentPromptCacheTtl": "5m"
+}</code></pre></div>
+<p>This setting is a trade-off. A cache write at the 1-hour lifetime costs 2 times the base input price, more than the 1.25 times of the 5-minute lifetime. For short work that never pauses for more than 5 minutes, the cost goes up. On Amazon Bedrock, whether the 1-hour lifetime is available depends on the model.</p>
+<h3>Actions that rewrite the cache</h3>
+<p>The cache is read only when the start of the request is exactly the same as in the previous request. The actions below change that start, so the next request is slower and more expensive once.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Action</th><th>Cache</th><th>What to do instead</th></tr>
+</thead>
+<tbody>
+<tr><td>Switching models with <code>/model</code></td><td>Each model has its own cache, so the whole conversation is processed again</td><td>Pick the model when you start the session</td></tr>
+<tr><td>Changing effort</td><td>Processed again on most models. With an API key or a subscription, the cache is kept on Fable 5.1 and later, Opus 5.5, Sonnet 5.5 and Haiku 5.5</td><td>On Amazon Bedrock, pick it when you start the session</td></tr>
+<tr><td>Toggling fast mode</td><td>Fast mode and standard speed have separate caches, so the whole conversation is processed at fast mode prices</td><td>If you use it, activate it when you start the session</td></tr>
+<tr><td>Connecting or removing an MCP server</td><td>Kept in the default setup, where tool search is active. Processed again where tool definitions are loaded upfront</td><td>If you turned tool search off, do not change servers in the middle of a session</td></tr>
+<tr><td><code>/compact</code></td><td>The conversation becomes a summary, so a new cache is built for the conversation part</td><td>Run it when a task is finished</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Actions that rewrite the cache. From the Claude Code documentation</p>
+<p>Editing files in the repository, editing CLAUDE.md, changing the permission mode, invoking skills and commands, <code>/rewind</code> and spawning a subagent keep the cache.</p>
+<h3>The first message after stepping away</h3>
+<p>In my logs every cache of a main conversation had the 1-hour lifetime. Table 6 counts the cache misses by the gap since the previous request.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Gap since the previous request</th><th>Requests</th><th>Rewrote the whole context</th><th>Continued from a compacted conversation</th></tr>
+</thead>
+<tbody>
+<tr><td>Under 5 minutes</td><td class="num">12,783</td><td class="num">3</td><td class="num">not applicable</td></tr>
+<tr><td>5 minutes to under 1 hour</td><td class="num">407</td><td class="num">0</td><td class="num">not applicable</td></tr>
+<tr><td>1 hour or more</td><td class="num">114</td><td class="num">37</td><td class="num">77</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Cache misses in main conversations by the gap since the previous request. A request counts when at least 5% of the previous context, and at least 2,000 tokens, was not read from the cache</p>
+<p>Of the 114 requests that followed a gap of an hour or more, not one read the previous context from the cache. 37 wrote the whole context again. They rewrote 8,041,922 tokens, at 63 times what reading the same tokens from the cache would have cost. The most expensive one rewrote 504,394 tokens on Fable 5.2, which is 8.07 USD at list price. Read from the cache, it would have been 0.10 USD.</p>
+<p>The other 77 continued from a conversation that had been compacted into a summary. That is idle compaction at work. When a conversation on the 1-hour lifetime holds 200,000 tokens or more and gets no request for about an hour, Claude Code summarizes it before the cache expires. It is on by default. Less is rewritten, but the detail of the earlier conversation survives only as the summary.</p>
+<p>Three habits follow from this.</p>
+<ul>
+<li>Before you step away, start a new conversation with <code>/clear</code> if the task is done. If the task continues, run <code>/compact</code> while the cache is still alive.</li>
+<li>Do not reopen an old session with <code>--resume</code> when you can start a new one with only the content you need.</li>
+<li>Check the number of cache misses and the likely cause on the <code>Prompt cache (main)</code> line of <code>/usage</code> (v2.1.251 or later). The example output below is from the documentation.</li>
+</ul>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>Prompt cache (main):   14 requests · 91% of input tokens from cache · 2 misses (last 6m 10s ago, 310.2k tokens re-cached) · 1 expected rebuild (compaction or tool-result clearing) · warm (1h TTL, last activity 40s ago)</code></pre></div>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Tip 2. One task per session (/clear, /compact)</h2></header><div class="prose">
+<p>When the work changes, start a new conversation with <code>/clear</code>. Everything that has piled up in the conversation is read again by every later request, so the record of a finished task becomes a cost of the next one.</p>
+<p>In my logs a request in a main conversation carried a median of 362,105 tokens, and the top 10% carried 719,536 or more. 80% of the requests were over 200,000 tokens, and the largest was 967,430. A 1M-context model runs automatic compaction only at about 967,000 tokens by default, so a session that is never cleaned up grows to that size.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Context</th><th>One request</th><th>11 requests (the median for one prompt)</th></tr>
+</thead>
+<tbody>
+<tr><td>50,000 tokens</td><td class="num">0.01 USD</td><td class="num">0.11 USD</td></tr>
+<tr><td>200,000 tokens</td><td class="num">0.04 USD</td><td class="num">0.44 USD</td></tr>
+<tr><td>362,105 tokens (the median)</td><td class="num">0.07 USD</td><td class="num">0.80 USD</td></tr>
+<tr><td>900,000 tokens</td><td class="num">0.18 USD</td><td class="num">1.98 USD</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 7.</b> Cost of cache reads by context size. Calculated at the cache-read price of Fable 5.2 (0.20 USD per million tokens); cache writes of newly added content and output are not included</p>
+<p>Five commands keep the context small.</p>
+<ul>
+<li><code>/clear</code>: starts a new conversation. It costs nothing. With a name, as in <code>/clear oauth-migration</code>, the previous conversation is easy to find in <code>/resume</code>.</li>
+<li><code>/compact</code>: replaces the conversation with a summary. Say what to keep, as in <code>/compact keep the API changes and the test commands</code>. The request that summarizes a long conversation reads all of it, so run it between tasks, while the cache is alive.</li>
+<li><code>/autocompact 300k</code>: lowers the size at which automatic compaction runs.</li>
+<li><code>/rewind</code>: drops the part that went wrong and starts again from an earlier point. That point is already cached, so unlike compaction it does not write a new cache.</li>
+<li><code>/btw</code>: asks a side question that is not added to the conversation.</li>
+</ul>
+<p>If two corrections of the same problem have not fixed it, do not make a third. Run <code>/clear</code> and write a new prompt that includes what you learned. The two failed attempts stay in the conversation and are read again by every later request. Shrinking the context has a cost too. <code>/compact</code> sends one request to produce the summary and then builds a new cache for the conversation part. If there is nothing you need to carry over, <code>/clear</code> is the cheapest.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Tip 3. Fewer tool calls, smaller results</h2></header><div class="prose">
+<p>Tool calls raise the cost in two ways. Each tool result that comes back triggers one more request carrying the whole context, and the result stays in the conversation, where every later request reads it again.</p>
+<p>In my logs one prompt produced a median of 11 API requests, and the top 10% produced 67 or more (524 prompts). There were 35,412 tool calls, 62% of them Bash and 15% Read. By characters, Bash and Read made up 93% of the tool results.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Tool</th><th>Calls</th><th>Share of result characters</th><th>Mean characters per result</th></tr>
+</thead>
+<tbody>
+<tr><td>Bash</td><td class="num">21,949</td><td class="num">51.6%</td><td class="num">2,427</td></tr>
+<tr><td>Read</td><td class="num">5,467</td><td class="num">41.7%</td><td class="num">7,871</td></tr>
+<tr><td>MCP tools</td><td class="num">622</td><td class="num">3.4%</td><td class="num">5,597</td></tr>
+<tr><td>WebFetch</td><td class="num">269</td><td class="num">1.4%</td><td class="num">5,320</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 8.</b> Calls and result size by tool. Main conversations and subagents together</p>
+<p>There are five ways to cut them.</p>
+<ul>
+<li><b>Ask specifically.</b> With a file path, a function name and the result you expect, fewer calls go into finding files.</li>
+<li><b>Take long output in a shorter form.</b> By default a Bash result goes into the conversation as it is up to roughly 30,000 characters. Ask for only the last part of test and build output, or automate it with the hook below.</li>
+<li><b>Have files read only in the range needed.</b> For typed languages, a code intelligence plugin lets one go-to-definition call replace a search plus several file reads.</li>
+<li><b>Use a CLI in place of an MCP server.</b> CLIs such as <code>gh</code>, <code>aws</code> and <code>gcloud</code> add no tool listing to the context.</li>
+<li><b>Stop at once when the direction is wrong.</b> Stop with <code>Esc</code> and start again from an earlier point with <code>/rewind</code>.</li>
+</ul>
+<p>The example hook in the documentation trims the output of test commands to the last 100 lines. Register the hook in <code>settings.json</code> and save the script as <code>~/.claude/hooks/filter-test-output.sh</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/filter-test-output.sh"
+          }
+        ]
+      }
+    ]
+  }
+}</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>#!/bin/bash
+input=$(cat)
+cmd=$(echo "$input" | jq -r '.tool_input.command')
+
+# If running tests, keep only the last 100 lines
+pattern='^(npm test|pytest|go test)( [^;&amp;|&lt;&gt;`$#\\[:cntrl:]]*)?$'
+if [[ "$cmd" =~ $pattern ]]; then
+  filtered_cmd="$cmd 2&gt;&amp;1 | tail -n 100"
+  echo "$input" | jq --arg filtered "$filtered_cmd" \
+    '{hookSpecificOutput: {hookEventName: "PreToolUse", updatedInput: (.tool_input + {command: $filtered})}}'
+else
+  echo "{}"
+fi</code></pre></div>
+<p>Code Mode, which bundles several tool calls into one piece of code, serves the same purpose. It is experimental and off by default. In <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-code-mode-token-measurement/" target="_blank" rel="noopener">the tests of an earlier post</a>, tasks on built-in tools used 42% fewer tokens in total and cost 13% less, and tasks on MCP tools used 19% more tokens. It is not available on Amazon Bedrock or with OpenTelemetry export on.</p>
+<p>The goal is not to cut tool calls at any price. Skipping verification and redoing a wrong result takes more tokens. What to cut is exploration whose results are never used and output that is longer than needed.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Tip 4. What loads before you type</h2></header><div class="prose">
+<p>Cut what is loaded before you type anything. The system prompt, the tool definitions, CLAUDE.md, auto memory, and the descriptions of skills and subagents ride on every request of a session, and most of them on every subagent that starts.</p>
+<p>In my environment the first request of 29 interactive sessions started with my usual setup was a median of 81,995 tokens. On the same machine, the first request of a session started without plugins and MCP servers was 35.0k tokens (the tests of <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-code-mode-token-measurement/" target="_blank" rel="noopener">the Code Mode post</a>). The difference of about 47,000 tokens came from the descriptions of plugins and skills, the instructions of MCP servers, CLAUDE.md and memory. The example session in the documentation loads 7,850 tokens before any input.</p>
+<ul>
+<li><b>CLAUDE.md</b>: aim for under 200 lines per file. Move procedures that only one kind of work needs into skills. The body of a skill loads only when it is invoked. Files imported with <code>@</code> load too, so they do not shrink the context.</li>
+<li><b>MCP servers</b>: by default tool definitions load only when needed (tool search), and only tool names and server instructions load at the start. Disable servers you do not use in <code>/mcp</code>.</li>
+<li><b>Descriptions of skills and subagents</b>: descriptions are always loaded so that Claude can decide when to use them. Disable plugins you do not use.</li>
+<li><b>Checking</b>: <code>/context</code> shows the tokens of each item that fills the context now, and where to cut.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Tip 5. Main agent or subagent</h2></header><div class="prose">
+<p>Give work that produces a lot of output and needs only its result to a subagent, and keep quick changes and work refined in back-and-forth in the main conversation. A subagent works in its own context and returns only a summary, so the main conversation does not grow. But the requests a subagent sends count toward the same usage.</p>
+<figure class="fig"><div class="canvas wide"><img src="claude-code-cost-saving-tips-assets/fig03-main-vs-subagent-en.png" alt="A figure in four parts. At the top, three ways to run the work: the main conversation reads the whole conversation again on every request, a subagent starts with a fresh context, keeps its tool results inside and returns only a summary, and a fork inherits the whole parent conversation and reads the parent's cache. At the lower left, where each kind of work goes. In the middle, the mean cost of one subagent request by model: 0.245 USD on Fable 5.2 and 0.005 USD on Haiku 5.5. At the lower right, the share of subagents in 14 days of logs: 53% of requests, 39% of cost and 63% of cache-write tokens" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> Context and cost of the main conversation, a subagent and a fork. Numbers are from 14 days of session logs in the author's environment</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Main conversation</th><th>Subagent</th><th>Fork</th></tr>
+</thead>
+<tbody>
+<tr><td>Context at the start</td><td>The whole conversation</td><td>Its own system prompt, the delegation message, CLAUDE.md</td><td>The whole parent conversation</td></tr>
+<tr><td>Where tool results stay</td><td>The main conversation</td><td>The subagent. Only a summary comes back</td><td>The fork. Only the final result comes back</td></tr>
+<tr><td>Cache</td><td>1 hour on a subscription</td><td>Its own. 5 minutes even on a subscription</td><td>Reads the parent's cache</td></tr>
+<tr><td>Model</td><td>The session's model</td><td>Can be set</td><td>Same as the parent</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 9.</b> Three ways to run the work. From the Claude Code documentation</p>
+<p>Across the 658 subagent runs in my logs, one run took in a median of 55,801 characters of tool results, and the result that came back to the main conversation was 1,001 characters on average. Had the main conversation done the same work itself, the tool results would have stayed in the conversation and been read again by every later request.</p>
+<p>There is a cost on the other side. A fresh subagent cannot read the parent's cache. Its first request was a median of about 59,000 tokens, of which a median of 38,922 to 56,765 tokens, depending on the model, was newly written to the cache. Over the 14 days subagents made 53% of the requests, 39% of the cost and 63% of the cache-write tokens. Handing a subagent the job of reading one file and changing one line costs more than doing it in the main conversation.</p>
+<p>A fork inherits the parent's system prompt, tools and conversation as they are, so its first request reads the parent's cache. In my logs, among the runs I classified as forks because their first request read 100,000 tokens or more from the cache, the 25 that ran on Fable 5.2 read a median of 282,365 tokens on the first request and newly wrote only 7,566. In exchange, every request of a fork reads the whole inherited conversation again. Sending a small piece of research that needs no context to a fork from a long conversation is billed hundreds of thousands of cache-read tokens per request. What is inherited and what comes back is set out in <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-subagent-vs-fork/" target="_blank" rel="noopener">the post comparing subagents and forks</a>.</p>
+<p>Keep two things in mind when you delegate.</p>
+<ul>
+<li>What a subagent returns piles up in the main conversation too. Set the scope of what comes back, as in "report only the failing tests and their error messages".</li>
+<li>Parallel subagents, workflows and agent teams use tokens in proportion to the number of agents. The documentation says an agent team whose teammates run in plan mode uses about 7 times the tokens of a standard session.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Tip 6. Model and effort level</h2></header><div class="prose">
+<p>Pick the model and the effort level that fit the work when you start the session, and set a lower-tier model for subagents. At the prices in Table 1, Opus 5.5 costs one half of Fable 5.2, Sonnet 5.5 one quarter, and Haiku 5.5 one eightieth.</p>
+<h3>The model of the session</h3>
+<p>The default model is Opus 5.5 on a subscription, on the Anthropic API and on Amazon Bedrock. Fable is not the default, but once you choose it in <code>/model</code> it is saved in your user settings and later sessions start on Fable too. If you raised the model for one hard task, press <code>s</code> in the <code>/model</code> picker to apply it to the current session only.</p>
+<h3>The model of subagents</h3>
+<p>By default a subagent inherits the model of the main conversation. If the main conversation runs on Fable or Opus, exploration and test runs are processed at the same price. Set <code>model: haiku</code> in the subagent's definition file, or apply one model to every subagent with the settings below (v2.1.257 or later).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+    "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+  }
+}</code></pre></div>
+<p>Both variables must be set for the built-in Explore and Plan subagents to follow. Check the model of a running subagent in <code>/tasks</code>. In Figure 3 the mean cost per request was 0.245 USD on Fable 5.2 and 0.005 USD on Haiku 5.5. The models did different work with different context sizes, so this is not a controlled comparison.</p>
+<h3>Effort and reasoning tokens</h3>
+<p>Reasoning tokens are billed at the output price. The default effort of Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5 is <code>medium</code>, and thinking cannot be turned off on these models, so the amount of reasoning is controlled with the effort level.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Model</th><th>Effort</th><th>Reasoning share of output tokens</th><th>Mean output tokens per request</th></tr>
+</thead>
+<tbody>
+<tr><td>Fable 5.2</td><td><code>xhigh</code></td><td class="num">46.7%</td><td class="num">2,085</td></tr>
+<tr><td>Opus 5.5</td><td><code>xhigh</code></td><td class="num">51.7%</td><td class="num">1,383</td></tr>
+<tr><td>Sonnet 5.5</td><td><code>medium</code></td><td class="num">27.2%</td><td class="num">1,057</td></tr>
+<tr><td>Haiku 5.5</td><td><code>medium</code></td><td class="num">16.1%</td><td class="num">998</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 10.</b> Share of reasoning tokens by model and effort. The models and the work differ, so this does not isolate the effect of effort</p>
+<p>In my logs about half of the output of the two models run at <code>xhigh</code> was reasoning. Start everyday work with a clear scope at the default <code>medium</code>, and use <code>/effort high</code> or above only for work where verification matters or edge cases are likely. When you need deep reasoning once, put <code>ultrathink</code> in the prompt. It applies to that turn only and leaves the effort of the session as it is.</p>
+<p>Fast mode gives faster responses at twice the standard price. The first time you activate it in the middle of a conversation, the whole conversation so far is read uncached at fast mode prices.</p>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Tip 7. Check usage, set limits</h2></header><div class="prose">
+<p>Before you cut, check where the tokens go, and set a limit on work that runs while you are away.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Tool</th><th>What it shows</th></tr>
+</thead>
+<tbody>
+<tr><td><code>/usage</code> (aliases <code>/cost</code>, <code>/stats</code>)</td><td>Tokens and cost at list price for the session, and the <code>Prompt cache (main)</code> line. On a subscription, the share by skill, subagent, plugin and MCP server, and recommended changes</td></tr>
+<tr><td><code>/context</code></td><td>The tokens of each item that fills the context now, and where to cut</td></tr>
+<tr><td>Status line (<code>/statusline</code>)</td><td>Context usage, cost, and <code>warm</code>, <code>hit_ratio</code> and <code>misses</code> of the <code>prompt_cache</code> object</td></tr>
+<tr><td>OpenTelemetry export</td><td>Tokens, cost, cache reads and cache writes per user and session</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 11.</b> Tools for checking usage. From the Claude Code documentation</p>
+<p>For a <code>claude -p</code> run that you leave unattended, set a limit on turns and on spend. Both flags work in print mode only, and the spend limit is checked against a client-side estimate, so leave headroom.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>claude -p --max-turns 20 --max-budget-usd 5 "Fix the failing tests and summarize the result"</code></pre></div>
+<p>Where an organization sets its limit depends on how it uses Claude Code. The Claude Console has workspace spend limits, the Teams and Enterprise plans have spend limits in the admin settings, and Amazon Bedrock uses the budget controls of AWS. Usage on Amazon Bedrock does not appear in Anthropic's analytics dashboards, so use OpenTelemetry or a gateway for per-user numbers. The documentation puts the average across enterprise deployments at about 13 USD per developer per active day and 150 to 250 USD per month.</p>
+<p>While you are away, a scheduled task such as <code>/loop</code> and the check-in turn of a goal still send requests that carry the whole context. Stop scheduled tasks you do not use.</p>
+</div></section>
+
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>Order of adoption and a checklist</h2></header><div class="prose">
+<p>You do not have to adopt all seven at once. Check your own usage with <code>/usage</code> and <code>/context</code> first, then start with the symptom in Table 12 that applies to you.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Symptom</th><th>Where to look first</th><th>What to do</th></tr>
+</thead>
+<tbody>
+<tr><td>The first response after stepping away is slow and usage jumps</td><td>Cache misses and the cache lifetime in <code>/usage</code></td><td>Tip 1</td></tr>
+<tr><td>Usage runs down fast even on short questions</td><td>The size of the conversation in <code>/context</code></td><td>Tip 2</td></tr>
+<tr><td>One prompt sends dozens of requests</td><td>The number of tool calls and the size of their results</td><td>Tip 3</td></tr>
+<tr><td>The first request of a new session already carries tens of thousands of tokens</td><td>The CLAUDE.md, skill and MCP items in <code>/context</code></td><td>Tip 4</td></tr>
+<tr><td>Subagents take a large share</td><td>The subagent share in <code>/usage</code>, the models in <code>/tasks</code></td><td>Tip 5, Tip 6</td></tr>
+<tr><td>Output tokens take a large share</td><td>The effort level and the model</td><td>Tip 6</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 12.</b> Checklist by symptom</p>
+<p>Check the conditions under which each tip pays off as well. The setting that extends the cache lifetime to 1 hour pays off only when you often pause for more than 5 minutes. A subagent lowers the cost of the main conversation only for work with a lot of output. Code Mode used more tokens on work centered on MCP tools. The shares in this post are from my environment, so I recommend checking your own session logs first with the command above that prints the <code>usage</code> values.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://code.claude.com/docs/en/costs" target="_blank" rel="noopener">Manage costs effectively</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://code.claude.com/docs/en/prompt-caching" target="_blank" rel="noopener">How Claude Code uses prompt caching</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://code.claude.com/docs/en/context-window" target="_blank" rel="noopener">Explore the context window</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://code.claude.com/docs/en/sub-agents" target="_blank" rel="noopener">Create custom subagents</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://code.claude.com/docs/en/model-config" target="_blank" rel="noopener">Model configuration</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://code.claude.com/docs/en/fast-mode" target="_blank" rel="noopener">Speed up responses with fast mode</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://code.claude.com/docs/en/mcp" target="_blank" rel="noopener">Connect Claude Code to tools via MCP</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://code.claude.com/docs/en/memory" target="_blank" rel="noopener">How Claude remembers your project</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://code.claude.com/docs/en/skills" target="_blank" rel="noopener">Extend Claude with skills</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://code.claude.com/docs/en/code-mode" target="_blank" rel="noopener">Run tool calls from code with Code Mode</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://code.claude.com/docs/en/workflows" target="_blank" rel="noopener">Orchestrate subagents at scale with dynamic workflows</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://code.claude.com/docs/en/best-practices" target="_blank" rel="noopener">Best practices for Claude Code</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://code.claude.com/docs/en/statusline" target="_blank" rel="noopener">Customize your status line</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://code.claude.com/docs/en/settings-reference" target="_blank" rel="noopener">All settings</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://code.claude.com/docs/en/commands" target="_blank" rel="noopener">Commands</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://code.claude.com/docs/en/cli-reference" target="_blank" rel="noopener">CLI reference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://code.claude.com/docs/en/tools-reference" target="_blank" rel="noopener">Tools reference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">Claude Code docs</span></td><td class="nowrap num">2026-11-22</td></tr>
+<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://platform.claude.com/docs/en/about-claude/pricing" target="_blank" rel="noopener">Pricing</a></td><td class="nowrap"><span class="l-ko">가격표</span><span class="l-en">Claude API pricing</span></td><td class="nowrap num">2026-11-22</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 8일부터 22일까지 한 사람의 개발 환경에서 나온 Claude Code 세션 기록을 집계한 값입니다. Claude 구독으로 Fable 5.2와 Opus 5.5를 xhigh effort로 사용한 환경이고 조건을 통제한 비교 실험이 아니므로 비중과 평균은 환경에 따라 달라집니다. 비용은 2026년 11월 22일에 확인한 Claude API 정가로 환산한 값이며 실제 청구액이 아닙니다. Claude Code의 동작과 설정 이름은 같은 날 확인한 공식 문서를 기준으로 하고 버전에 따라 달라집니다.</span><span class="l-en">The figures in this post are aggregated from the Claude Code session logs of one person's development environment between November 8 and 22, 2026. The environment used Fable 5.2 and Opus 5.5 at xhigh effort on a Claude subscription, and this is not a controlled experiment, so the shares and means change with the environment. Costs are converted at the Claude API list prices checked on November 22, 2026 and are not billed amounts. How Claude Code behaves and what the settings are called follow the documentation checked the same day and change with the version.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
