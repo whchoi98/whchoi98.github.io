@@ -1,6 +1,6 @@
 ---
-title: "서울 리전에서 테스트한 AWS Lambda GPU 함수의 시작 시간과 동시성"
-title_en: "Start-up time and concurrency of AWS Lambda GPU functions, tested in Seoul"
+title: "AWS Lambda GPU 함수의 시작과 동시성"
+title_en: "Start-up and concurrency of AWS Lambda GPU functions"
 layout: report
 report_src: /docs/techblog/aws-core/lambda-gpu-functions-seoul-test-report.html
 date: 2026-11-21

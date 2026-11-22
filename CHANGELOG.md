@@ -33,7 +33,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add post (KO/EN): "Token savings with the Code Mode feature in Claude Code" (`docs/techblog/aiml/claude-code-code-mode-token-measurement`), with three figures in a Korean and an English version
 - Add post (KO/EN): "GPT-6.2 Sol and Astra: the official announcement and real test results" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), with five figures in a Korean and an English version
 - Add post (KO/EN): "Six AWS platforms for running vLLM and how to choose" (`docs/techblog/aiml/vllm-on-aws-platform-selection`), with four figures in a Korean and an English version
-- Add post (KO/EN): "Start-up time and concurrency of AWS Lambda GPU functions, tested in Seoul" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), with four figures in a Korean and an English version
+- Add post (KO/EN): "Start-up and concurrency of AWS Lambda GPU functions" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), with four figures in a Korean and an English version
 - Add a three-part guide series (KO/EN): "OpenWeight on AWS GPU" (`docs/techblog/container/eks-vllm-two-models-part-1` to `-part-3`): Part 1 "The eight stages of an LLM API call on Amazon EKS and vLLM", Part 2 "The architecture for serving two models and Amazon EKS optimizations", Part 3 "Building the environment in ten steps", with three, five and three figures in a Korean and an English version
 - Add post (KO/EN): "How Amazon Bedrock Runtime and Mantle differ, and which to choose" (`docs/techblog/aiml/bedrock-runtime-vs-mantle`), with four figures in a Korean and an English version
 - Add post (KO/EN): "AWS Transit Gateway 1:1 NAT" (`docs/techblog/networking/aws-transit-gateway-1-1-nat-seoul-test`), with four figures in a Korean and an English version
@@ -45,7 +45,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 ### Changed
 - Post "AWS Transit Gateway 1:1 NAT": the first chapter now opens with an infographic of the whole test setup (figure 1 in a Korean and an English version, replacing the setup diagram of chapter 02); chapter 03 shows the AWS CLI commands used before and after enabling NAT with their output, and chapter 06 the two flow log query commands with their output; the Korean page writes control plane as "컨트롤 플레인"; figures 2 to 4 (NAT on one side only, packet walkthrough, enable timeline) are rebuilt as infographics, so all four figures now share one style
 - Top menu: "About" moves to the end, after "Code Pulse" and "LLM Monitor" (Home, Tags, Workshop, Code Pulse, LLM Monitor, About)
-- Post "Start-up time and concurrency of AWS Lambda GPU functions, tested in Seoul": add chapter 08 "Examples where a Lambda GPU function fits well" (four examples backed by the test results, five use cases AWS lists, four cases that do not fit) with a fifth figure in a Korean and an English version; the limits chapter moves to 09 and the settings chapter to 10
+- Post "Start-up and concurrency of AWS Lambda GPU functions": add chapter 08 "Examples where a Lambda GPU function fits well" (four examples backed by the test results, five use cases AWS lists, four cases that do not fit) with a fifth figure in a Korean and an English version; the limits chapter moves to 09 and the settings chapter to 10
 - Post titles: every report page shrinks the title of the visible language until it fits on one line (not below 30px; a title that is still too long wraps at 30px). At a 1440px-wide window 21 of 22 Korean titles and 11 of 22 English titles are on one line (7 and 3 before). All 22 reports were rebuilt with the new `my-plugins:techblogs` template; only their style and script blocks changed
 - Post "Subagents and forks in Claude Code": the English page shows English versions of the four figures (`fig0N-*-en.png`), so the figures change with the language switch
 - The left card on the home page always shows the newest post, and its badge reads "New" instead of "Featured" (a `featured: true` in a post's front matter no longer takes the card)
@@ -113,7 +113,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가(한영): "Claude Code의 Code Mode 기능 기반의 토큰 절감" (`docs/techblog/aiml/claude-code-code-mode-token-measurement`), 그림 3장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "GPT-6.2 Sol과 Astra, 공식 발표 내용과 실제 테스트 결과" (`docs/techblog/aiml/gpt-6-2-sol-astra-official-vs-test`), 그림 5장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "AWS에서 vLLM을 실행하는 플랫폼 여섯 가지와 선택 기준" (`docs/techblog/aiml/vllm-on-aws-platform-selection`), 그림 4장의 한국어판과 영어판 포함
-- 게시물 추가(한영): "서울 리전에서 테스트한 AWS Lambda GPU 함수의 시작 시간과 동시성" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), 그림 4장의 한국어판과 영어판 포함
+- 게시물 추가(한영): "AWS Lambda GPU 함수의 시작과 동시성" (`docs/techblog/aws-core/lambda-gpu-functions-seoul-test`), 그림 4장의 한국어판과 영어판 포함
 - 안내서 연재 게시물 3편 추가(한영): "OpenWeight on AWS GPU" (`docs/techblog/container/eks-vllm-two-models-part-1`부터 `-part-3`): 1부 "Amazon EKS와 vLLM의 LLM API 호출 8개 단계", 2부 "두 모델을 서빙하는 구조와 Amazon EKS 최적화", 3부 "10개 단계로 따라 하는 구축 과정", 그림 3장, 5장, 3장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Amazon Bedrock Runtime과 Mantle의 차이와 선택 기준" (`docs/techblog/aiml/bedrock-runtime-vs-mantle`), 그림 4장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "AWS Transit Gateway 1:1 NAT" (`docs/techblog/networking/aws-transit-gateway-1-1-nat-seoul-test`), 그림 4장의 한국어판과 영어판 포함
@@ -125,7 +125,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 ### Changed
 - 게시물 "AWS Transit Gateway 1:1 NAT": 첫 챕터를 전체 테스트 구성 인포그래픽으로 시작(그림 1의 한국어판과 영어판, 챕터 02의 구성도를 대체). 챕터 03에 NAT 활성화 전과 후에 사용한 AWS CLI 명령과 출력, 챕터 06에 Flow Logs 조회 명령 두 개와 출력 추가. 한국어 페이지에서 control plane을 "컨트롤 플레인"으로 표기. 그림 2, 3, 4(한쪽만 활성화, 패킷의 주소 변환, 활성화 타임라인)를 인포그래픽으로 다시 제작해 그림 4장의 스타일을 통일
 - 상단 메뉴: "About"을 "Code Pulse"와 "LLM Monitor" 다음인 마지막 자리로 이동 (Home, Tags, Workshop, Code Pulse, LLM Monitor, About 순서)
-- 게시물 "서울 리전에서 테스트한 AWS Lambda GPU 함수의 시작 시간과 동시성": 챕터 08 "Lambda GPU 함수를 활용하기 좋은 예시" 추가(테스트 결과를 근거로 든 예시 네 가지, AWS가 제시한 사례 다섯 가지, 맞지 않는 경우 네 가지), 그림 5의 한국어판과 영어판 포함. 테스트의 한계 챕터는 09, 설정 권고 챕터는 10으로 이동
+- 게시물 "AWS Lambda GPU 함수의 시작과 동시성": 챕터 08 "Lambda GPU 함수를 활용하기 좋은 예시" 추가(테스트 결과를 근거로 든 예시 네 가지, AWS가 제시한 사례 다섯 가지, 맞지 않는 경우 네 가지), 그림 5의 한국어판과 영어판 포함. 테스트의 한계 챕터는 09, 설정 권고 챕터는 10으로 이동
 - 게시물 제목: 모든 리포트 페이지가 보이는 언어의 제목을 한 줄에 들어갈 때까지 줄임(30px 아래로는 줄이지 않고, 그래도 긴 제목은 30px에서 줄을 바꿈). 창 폭 1440px에서 한국어 제목 22편 중 21편, 영어 제목 22편 중 11편이 한 줄(이전 7편, 3편). 22편을 새 `my-plugins:techblogs` 템플릿으로 다시 빌드했고 스타일과 스크립트 블록만 바뀜
 - 게시물 "Claude Code의 Subagent와 fork": 영어 화면에서 그림 4장의 영어판(`fig0N-*-en.png`)을 표시. 언어를 전환하면 그림도 함께 바뀜
 - 홈 왼쪽 카드가 항상 최신 글을 보여 주고 배지를 "Featured"에서 "New"로 변경 (글의 front matter에 `featured: true`를 넣어도 카드를 차지하지 않음)
