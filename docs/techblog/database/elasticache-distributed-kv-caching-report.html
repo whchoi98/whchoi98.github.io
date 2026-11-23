@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Amazon ElastiCache Distributed KV Caching</title>
-<meta name="description" content="Amazon ElastiCache의 distributed KV caching을 도쿄 리전의 GPU 서버 2대에 붙여 테스트했습니다. 다른 서버가 계산한 14,984토큰 프롬프트를 공유 캐시에서 읽으면 TTFT가 4,194.8ms에서 614.9ms가 됐고 982토큰에서는 거의 같았습니다.">
+<meta name="description" content="Amazon ElastiCache의 distributed KV caching을 도쿄 리전의 GPU 서버 2대에 붙여 테스트했습니다. 긴 프롬프트와 메모리를 넘는 멀티턴 부하에서 TTFT와 처리량이 좋아졌지만 이 규모에서는 요청 1,000건당 비용이 1.36배에서 2.11배로 올랐고 계산으로는 GPU 서버 4대에서 8대부터 비용도 내려갑니다.">
 <link rel="canonical" href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/">
 <script>
 /* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
@@ -196,21 +196,21 @@ html[data-lang="en"] .l-ko{display:none!important}
   </div>
 </nav>
 <header class="masthead">
-<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-23</span><span class="l-en">Published 2026-11-23</span></span><span>Database</span><span><span class="l-ko">읽는 시간 12분</span><span class="l-en">12 min read</span></span></div>
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-23</span><span class="l-en">Published 2026-11-23</span></span><span>Database</span><span><span class="l-ko">읽는 시간 14분</span><span class="l-en">14 min read</span></span></div>
 <h1><span class="l-ko">Amazon ElastiCache Distributed KV Caching</span><span class="l-en">Amazon ElastiCache Distributed KV Caching</span></h1>
-<p class="thesis"><span class="l-ko">자체 호스팅한 LLM 서버 여러 대가 KV를 함께 사용하는 Amazon ElastiCache의 distributed KV caching을 도쿄 리전에서 직접 테스트해 보았습니다. 이 기능은 서울 리전에서 아직 제공되지 않습니다. 다른 서버가 계산한 14,984토큰 프롬프트를 공유 캐시에서 RDMA로 읽으면 TTFT가 4,194.8ms에서 614.9ms로 줄었습니다. 세션이 GPU와 호스트 메모리를 넘는 멀티턴 부하에서는 초당 요청이 0.533에서 1.042로 늘었습니다. 하지만 982토큰 프롬프트에서는 TTFT가 거의 같았고 세션이 GPU 메모리에 들어가는 부하에서는 계층 비율이 달라지지 않았습니다. TPOT p90은 50ms 아래로 내려가지 않았습니다.</span><span class="l-en">I tested Amazon ElastiCache distributed KV caching, which lets several self-hosted LLM servers share their KV, in the Tokyo Region. The feature is not yet offered in the Seoul Region. Reading a 14,984-token prompt that another server had computed from the shared cache over RDMA brought TTFT from 4,194.8 ms to 614.9 ms, and in a multi-turn load whose sessions did not fit in GPU and host memory the requests per second rose from 0.533 to 1.042. However, a 982-token prompt had about the same TTFT, and a load whose sessions fit in GPU memory kept the same shares by tier. TPOT p90 did not fall below 50 ms.</span></p>
+<p class="thesis"><span class="l-ko">자체 호스팅한 LLM 서버 여러 대가 KV를 함께 사용하는 Amazon ElastiCache의 distributed KV caching을 도쿄 리전에서 직접 테스트해 보았습니다. 이 기능은 서울 리전에서 아직 제공되지 않습니다. 다른 서버가 계산한 14,984토큰 프롬프트를 공유 캐시에서 RDMA로 읽으면 TTFT가 4,194.8ms에서 614.9ms로 줄었습니다. 세션이 GPU와 호스트 메모리를 넘는 멀티턴 부하에서는 초당 요청이 1.7배에서 2.7배가 됐습니다. 하지만 GPU 서버 2대인 이 규모에서는 캐시 노드 한 대의 시간당 비용이 GPU 서버 2대의 2.88배여서 요청 1,000건당 비용이 1.36배에서 2.11배로 올랐습니다. 캐시 노드는 고정 비용이므로 측정한 처리량 배율로 계산하면 g6e.8xlarge 4대에서 8대부터 요청당 비용도 내려갑니다. 작은 규모에서는 지연 시간을 줄이는 비용이고 큰 규모에서는 비용과 지연 시간을 함께 줄이는 수단입니다.</span><span class="l-en">I tested Amazon ElastiCache distributed KV caching, which lets several self-hosted LLM servers share their KV, in the Tokyo Region. The feature is not yet offered in the Seoul Region. Reading a 14,984-token prompt that another server had computed from the shared cache over RDMA brought TTFT from 4,194.8 ms to 614.9 ms, and in multi-turn loads whose sessions did not fit in GPU and host memory requests per second rose 1.7 to 2.7 times. At this scale of two GPU servers, however, one cache node costs 2.88 times as much per hour as the two GPU servers, so the cost per 1,000 requests rose 1.36 to 2.11 times. The cache node is a fixed cost, and by calculation from the measured throughput gains the cost per request also falls from 4 to 8 g6e.8xlarge servers. At small scale the shared cache is the price of lower latency; at larger scale it lowers both cost and latency.</span></p>
 <div class="tags"><span>#Amazon ElastiCache</span><span>#Valkey</span><span>#KV cache</span><span>#LMCache</span><span>#vLLM</span><span>#EFA</span></div>
-<ul class="facts"><li><span class="l-ko"><b>다른 서버의 KV</b>: 14,984토큰에서 재계산 4,194.8ms, 공유 캐시 <code>rdma</code> 614.9ms로 6.8배 빨랐습니다. 982토큰에서는 248.6ms와 245.1ms로 거의 같았습니다.</span><span class="l-en"><b>KV from another server</b>: at 14,984 tokens recompute took 4,194.8 ms and the shared cache over <code>rdma</code> 614.9 ms, 6.8x faster. At 982 tokens the two were about the same, 248.6 ms and 245.1 ms.</span></li><li><span class="l-ko"><b>멀티턴 부하</b>: 세션 24개, 문서 11,000토큰, 동시 요청 4에서 초당 요청이 0.533에서 1.042로, TTFT p50이 3,226.8ms에서 898.7ms로 바뀌었습니다(파드 경로).</span><span class="l-en"><b>Multi-turn load</b>: with 24 sessions, 11,000-token documents and concurrency 4, requests per second went from 0.533 to 1.042 and TTFT p50 from 3,226.8 ms to 898.7 ms (pod route).</span></li><li><span class="l-ko"><b>계층 비율이 그대로인 부하</b>: 세션 8개를 게이트웨이 경로로 보낸 부하는 캐시 전에도 둘째 라운드부터 L0에서 읽었고 계층 비율이 달라지지 않았습니다.</span><span class="l-en"><b>A load with unchanged tier shares</b>: 8 sessions sent through the gateway route already read from L0 from the second round before the cache, and the shares by tier did not change.</span></li><li><span class="l-ko"><b>전송 방식</b>: 같은 캐시를 <code>blob-tcp</code>로 읽으면 <code>rdma</code>보다 2.7배에서 3.2배 느렸고 3,982토큰 이하에서는 재계산보다도 느렸습니다.</span><span class="l-en"><b>Transport</b>: reading the same cache with <code>blob-tcp</code> was 2.7 to 3.2 times slower than <code>rdma</code>, and at 3,982 tokens or less slower than recompute.</span></li><li><span class="l-ko"><b>서버 재시작</b>: 다시 뜬 서버가 같은 프롬프트의 7,936토큰을 공유 캐시에서 읽어 TTFT가 434.8ms였습니다(처음 계산 2,025.1ms).</span><span class="l-en"><b>Server restart</b>: the restarted server read 7,936 tokens of the same prompt from the shared cache, and TTFT was 434.8 ms (2,025.1 ms when first computed).</span></li></ul>
+<ul class="facts"><li><span class="l-ko"><b>다른 서버의 KV</b>: 14,984토큰에서 재계산 4,194.8ms, 공유 캐시 <code>rdma</code> 614.9ms로 6.8배 빨랐습니다. 982토큰에서는 248.6ms와 245.1ms로 거의 같았습니다.</span><span class="l-en"><b>KV from another server</b>: at 14,984 tokens recompute took 4,194.8 ms and the shared cache over <code>rdma</code> 614.9 ms, 6.8x faster. At 982 tokens the two were about the same, 248.6 ms and 245.1 ms.</span></li><li><span class="l-ko"><b>멀티턴 부하</b>: 세션 24개와 48개에서 초당 요청이 1.7배에서 2.7배가 됐고 TTFT p50은 3.1초에서 5.7초이던 것이 0.47초에서 0.95초가 됐습니다.</span><span class="l-en"><b>Multi-turn load</b>: with 24 and 48 sessions, requests per second rose 1.7 to 2.7 times and TTFT p50 went from 3.1 to 5.7 s down to 0.47 to 0.95 s.</span></li><li><span class="l-ko"><b>비용</b>: GPU 서버 2대인 이 규모에서는 요청 1,000건당 비용이 1.36배에서 2.11배가 됐습니다. 캐시 노드(시간당 37.806 USD)는 고정 비용이어서 계산으로는 g6e.8xlarge 4대에서 8대부터 요청당 비용도 내려갑니다.</span><span class="l-en"><b>Cost</b>: at this scale of two GPU servers the cost per 1,000 requests rose 1.36 to 2.11 times. The cache node (37.806 USD per hour) is a fixed cost, so by calculation the cost per request also falls from 4 to 8 g6e.8xlarge servers.</span></li><li><span class="l-ko"><b>맞지 않는 부하</b>: 세션 8개를 게이트웨이 경로로 보낸 부하는 계층 비율이 달라지지 않았고 요청당 비용은 4.12배가 됐습니다. <code>blob-tcp</code>는 <code>rdma</code>보다 2.7배에서 3.2배 느렸습니다.</span><span class="l-en"><b>Loads it does not fit</b>: 8 sessions on the gateway route kept the same shares by tier, and the cost per request became 4.12 times. <code>blob-tcp</code> was 2.7 to 3.2 times slower than <code>rdma</code>.</span></li><li><span class="l-ko"><b>서버 재시작</b>: 다시 뜬 서버가 같은 프롬프트의 7,936토큰을 공유 캐시에서 읽어 TTFT가 434.8ms였습니다(처음 계산 2,025.1ms). GPU 서버를 더해서는 얻을 수 없는 효과입니다.</span><span class="l-en"><b>Server restart</b>: the restarted server read 7,936 tokens of the same prompt from the shared cache, and TTFT was 434.8 ms (2,025.1 ms when first computed). Adding GPU servers does not give this.</span></li></ul>
 </header>
-<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">다른 서버로 간 세션은 프롬프트를 다시 계산합니다</a><a href="#ko-s2">14,984토큰은 6.8배, 982토큰은 그대로</a><a href="#ko-s3">L0, L1, L2 순서로 KV를 찾는 구조</a><a href="#ko-s4">도쿄 리전의 테스트 구성과 비용</a><a href="#ko-s5">공유 캐시를 만들고 연결을 확인한 명령</a><a href="#ko-s6">다른 서버가 계산한 KV를 읽을 때의 TTFT</a><a href="#ko-s7">세션이 메모리를 넘는 멀티턴 부하에서 늘어난 처리량</a><a href="#ko-s8">서버를 다시 시작한 뒤 434.8ms</a><a href="#ko-s9">수치가 이렇게 나온 이유</a><a href="#ko-s10">distributed KV caching을 활용하는 경우</a><a href="#ko-s11">테스트의 한계와 다시 재 볼 것</a><a href="#ko-s12">공유 캐시를 붙이기 전에 확인할 것</a><a href="#sources">참고 자료</a></nav>
-<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">A session that lands on another server computes its prompt again</a><a href="#en-s2">6.8x at 14,984 tokens, no change at 982 tokens</a><a href="#en-s3">Looking up the KV in L0, L1 and L2 order</a><a href="#en-s4">The test setup in the Tokyo Region and its cost</a><a href="#en-s5">Commands that created the cache and checked the connection</a><a href="#en-s6">TTFT when reading the KV another server computed</a><a href="#en-s7">More throughput in a multi-turn load that outgrows memory</a><a href="#en-s8">434.8 ms after a server restart</a><a href="#en-s9">Why the numbers came out this way</a><a href="#en-s10">Where distributed KV caching is used</a><a href="#en-s11">Limits of this test and what to measure again</a><a href="#en-s12">What to check before attaching a shared cache</a><a href="#sources">References</a></nav>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">다른 서버로 간 세션은 프롬프트를 다시 계산합니다</a><a href="#ko-s2">14,984토큰은 6.8배, 982토큰은 그대로</a><a href="#ko-s3">L0, L1, L2 순서로 KV를 찾는 구조</a><a href="#ko-s4">도쿄 리전의 테스트 구성과 비용</a><a href="#ko-s5">공유 캐시를 만들고 연결을 확인한 명령</a><a href="#ko-s6">다른 서버가 계산한 KV를 읽을 때의 TTFT</a><a href="#ko-s7">세션이 메모리를 넘는 멀티턴 부하에서 늘어난 처리량</a><a href="#ko-s8">서버를 다시 시작한 뒤 434.8ms</a><a href="#ko-s9">수치가 이렇게 나온 이유</a><a href="#ko-s10">테스트의 한계와 다시 측정할 것</a><a href="#ko-s11">비용과 성능을 함께 본 분석과 사용 기준</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">A session that lands on another server computes its prompt again</a><a href="#en-s2">6.8x at 14,984 tokens, no change at 982 tokens</a><a href="#en-s3">Looking up the KV in L0, L1 and L2 order</a><a href="#en-s4">The test setup in the Tokyo Region and its cost</a><a href="#en-s5">Commands that created the cache and checked the connection</a><a href="#en-s6">TTFT when reading the KV another server computed</a><a href="#en-s7">More throughput in a multi-turn load that outgrows memory</a><a href="#en-s8">434.8 ms after a server restart</a><a href="#en-s9">Why the numbers came out this way</a><a href="#en-s10">Limits of this test and what to measure again</a><a href="#en-s11">Cost and performance together, and where to use it</a><a href="#sources">References</a></nav>
 <div class="col l-ko" lang="ko">
 <section class="sec" id="ko-s1"><header class="sec-head"><h2>다른 서버로 간 세션은 프롬프트를 다시 계산합니다</h2></header><div class="prose">
 <p>LLM 서버는 답을 만들기 전에 프롬프트 전체를 읽어 KV라는 중간 계산 결과를 만들고 서버를 여러 대 두면 이 결과는 서버마다 따로 남습니다. 2026년 11월 18일 정식 출시된 Amazon ElastiCache의 distributed KV caching은 이 결과를 여러 서버가 함께 사용하는 공유 캐시입니다.</p>
 <p>이 기능은 2026년 11월 23일 기준으로 서울 리전에서 제공되지 않습니다. 그래서 도쿄 리전(ap-northeast-1)에 GPU 서버 2대와 공유 캐시를 만들어 테스트했고 이 글의 수치는 모두 도쿄 리전에서 측정한 값입니다.</p>
 <p>공유 캐시가 없으면 KV는 그 KV를 만든 서버의 GPU 메모리(L0)와 호스트 메모리(L1)에만 있습니다. 다음 턴이 다른 서버로 가거나 세션이 많아 메모리에서 밀려나거나 서버가 다시 시작하면 프롬프트를 처음부터 다시 계산합니다.</p>
 <figure class="fig"><div class="canvas wide"><img src="elasticache-distributed-kv-caching-assets/fig01-before.png" alt="공유 캐시가 없을 때 두 번째 턴이 다른 서버로 가면 프롬프트 전체를 다시 계산하고, 공유 캐시가 있으면 다른 서버가 저장한 KV를 RDMA로 읽어 마지막 Chunk의 끝자락만 계산하는 흐름, L0, L1, L2 순서의 조회, 재계산이 생기는 세 가지 경우를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 공유 캐시가 없을 때와 있을 때 KV를 읽는 곳</figcaption></figure>
-<p>캐시를 붙이기 전에 잰 기준값도 그랬습니다. 서버 0이 처음 계산한 14,984토큰 프롬프트의 TTFT(첫 토큰까지의 시간)는 4,124.9ms였고 같은 프롬프트를 서버 1에 보내면 4,138.1ms였습니다. 세션 24개가 11,000토큰 문서로 대화하는 부하에서는 둘째 라운드부터도 프롬프트 토큰의 75%에서 100%를 다시 계산했습니다.</p>
+<p>캐시를 붙이기 전의 측정 기준값도 그랬습니다. 서버 0이 처음 계산한 14,984토큰 프롬프트의 TTFT(첫 토큰까지의 시간)는 4,124.9ms였고 같은 프롬프트를 서버 1에 보내면 4,138.1ms였습니다. 세션 24개가 11,000토큰 문서로 대화하는 부하에서는 둘째 라운드부터도 프롬프트 토큰의 75%에서 100%를 다시 계산했습니다.</p>
 <p><a href="https://aws.amazon.com/ko/blogs/database/announcing-distributed-kv-caching-for-self-hosted-llms-with-amazon-elasticache/" target="_blank" rel="noopener">발표 블로그</a>는 이 상황을 KV가 있는 GPU에서 오래 기다릴지 다른 GPU에서 다시 계산할지 고르는 문제로 설명합니다. 공유 캐시는 여기에 다른 서버가 계산한 KV를 읽는 방법을 더합니다.</p>
 </div></section>
 
@@ -346,7 +346,7 @@ GPU 인스턴스(EC2): 없음
 </div></section>
 
 <section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>다른 서버가 계산한 KV를 읽을 때의 TTFT</h2></header><div class="prose">
-<p>같은 프롬프트를 네 경로로 보냈습니다. 재계산은 새 <code>cache_salt</code>로 보낸 처음 보는 프롬프트이고 L0는 같은 서버에 다시, L1은 GPU 캐시를 비운 뒤 같은 서버에 보낸 경우입니다. 다른 서버는 서버 0이 계산한 프롬프트를 L2 저장이 끝난 뒤 서버 1에 보낸 경우입니다. <code>rdma</code>와 <code>blob-tcp</code>는 파드를 다시 시작한 뒤 따로 잰 두 실행이고 값은 5회의 중앙값입니다.</p>
+<p>같은 프롬프트를 네 경로로 보냈습니다. 재계산은 새 <code>cache_salt</code>로 보낸 처음 보는 프롬프트이고 L0는 같은 서버에 다시, L1은 GPU 캐시를 비운 뒤 같은 서버에 보낸 경우입니다. 다른 서버는 서버 0이 계산한 프롬프트를 L2 저장이 끝난 뒤 서버 1에 보낸 경우입니다. <code>rdma</code>와 <code>blob-tcp</code>는 파드를 다시 시작한 뒤 따로 측정한 두 실행이고 값은 5회의 중앙값입니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>프롬프트 토큰</th><th>재계산</th><th>L0</th><th>L1</th><th>다른 서버, L2 <code>rdma</code></th><th>다른 서버, L2 <code>blob-tcp</code></th></tr>
@@ -361,12 +361,12 @@ GPU 인스턴스(EC2): 없음
 <p class="cap"><b>표 2.</b> 프롬프트 길이별 TTFT(ms, 5회 중앙값). 재계산, L0, L1은 <code>rdma</code> 실행의 값</p>
 <figure class="fig"><div class="canvas wide"><img src="elasticache-distributed-kv-caching-assets/fig03-ttft.png" alt="982, 3,982, 7,982, 14,984토큰에서 재계산, L0, L1, 다른 서버의 L2 rdma와 blob-tcp 경로의 TTFT를 가로 막대로 비교하고 주요 결과 여섯 가지와 경로를 만든 방법을 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 프롬프트 길이와 경로별 TTFT</figcaption></figure>
 <p><code>rdma</code>로 읽으면 재계산보다 3,982토큰에서 2.7배, 7,982토큰에서 4.6배, 14,984토큰에서 6.8배 빨랐습니다. 14,984토큰 가운데 14,848토큰은 L2에서 왔고 마지막 136토큰은 256토큰 Chunk를 채우지 못해 새로 계산했습니다. 982토큰에서는 768토큰을 L2에서 읽었지만 TTFT는 재계산과 거의 같았습니다.</p>
-<p><code>blob-tcp</code>로 읽으면 같은 길이의 <code>rdma</code>보다 2.7배에서 3.2배 느렸습니다. 982토큰과 3,982토큰에서는 재계산보다도 느렸고(793.0ms와 250.2ms, 1,127.3ms와 965.1ms) 7,982토큰부터 빨랐습니다. 이 비교에는 <code>blob-tcp</code> 실행에서 잰 재계산 값을 사용했습니다.</p>
+<p><code>blob-tcp</code>로 읽으면 같은 길이의 <code>rdma</code>보다 2.7배에서 3.2배 느렸습니다. 982토큰과 3,982토큰에서는 재계산보다도 느렸고(793.0ms와 250.2ms, 1,127.3ms와 965.1ms) 7,982토큰부터 빨랐습니다. 이 비교에는 <code>blob-tcp</code> 실행에서 측정한 재계산 값을 사용했습니다.</p>
 <p>같은 서버의 L1과 비교하면 공유 캐시는 14,984토큰에서 371.9ms 느렸습니다(243.0ms와 614.9ms). 공유 캐시가 대신하는 것은 같은 서버에 있는 KV가 아니라 다른 서버로 간 요청의 재계산입니다.</p>
 </div></section>
 
 <section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>세션이 메모리를 넘는 멀티턴 부하에서 늘어난 처리량</h2></header><div class="prose">
-<p>멀티턴 부하는 11,000토큰 문서에 질문을 네 번 이어 붙이는 세션 여러 개를 동시에 보내는 방식입니다. 답은 최대 48토큰이고 캐시 전 기준값과 같은 인자로 <code>rdma</code>에서 다시 쟀습니다. 파드 경로는 다음 턴이 같은 서버로 간다는 보장이 없고 게이트웨이 경로는 EPP가 서버를 고릅니다.</p>
+<p>멀티턴 부하는 11,000토큰 문서에 질문을 네 번 이어 붙이는 세션 여러 개를 동시에 보내는 방식입니다. 답은 최대 48토큰이고 캐시 전 기준값과 같은 인자로 <code>rdma</code>에서 다시 측정했습니다. 파드 경로는 다음 턴이 같은 서버로 간다는 보장이 없고 게이트웨이 경로는 EPP가 서버를 고릅니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>경로</th><th>세션</th><th>동시 요청</th><th>초당 요청 (전, 후)</th><th>TTFT p50 ms (전, 후)</th><th>둘째 라운드부터 TTFT p90 ms (전, 후)</th><th>TPOT p90 ms (전, 후)</th></tr>
@@ -384,7 +384,7 @@ GPU 인스턴스(EC2): 없음
 <p>세션 24개와 48개에서는 초당 요청이 1.7배에서 2.7배가 됐고 TTFT p50은 3.1초에서 5.7초이던 것이 0.47초에서 0.95초로 내려갔습니다. 둘째 라운드부터의 TTFT p90은 10개 구성 모두 1.2초 아래였습니다.</p>
 <figure class="fig"><div class="canvas wide"><img src="elasticache-distributed-kv-caching-assets/fig04-multiturn.png" alt="파드와 게이트웨이 경로, 세션 8개, 24개, 48개 구성에서 프롬프트 토큰이 L0, L1, L2, 새로 계산 가운데 어디에서 왔는지 공유 캐시 전과 후를 100% 막대로 비교한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 멀티턴 부하에서 프롬프트 토큰이 온 계층, 공유 캐시 전과 후</figcaption></figure>
 <p>그림의 세션 24개와 48개 구성은 캐시 전에 프롬프트 토큰의 88.1%에서 97.4%를 새로 계산했고 캐시를 붙인 뒤에는 25%대였습니다. 남은 25%대는 거의 전부 처음 보는 문서를 읽는 첫 라운드입니다. 새로 계산한 토큰의 96.0%에서 98.5%가 첫 라운드였고 파드 경로 세션 24개, 동시 요청 4의 둘째 라운드에서 새로 계산한 토큰은 265,126개 가운데 5,958개(2.2%)였습니다.</p>
-<p>세션 8개를 게이트웨이 경로로 보낸 부하는 계층 비율이 달라지지 않았습니다. 캐시 전에도 둘째 라운드부터 L0에서 읽던 부하여서 공유 캐시가 할 일이 없었습니다. 초당 요청과 전체 TTFT p90은 나빠졌지만(1.158에서 1.033, 4,300.2ms에서 5,418.5ms) 이 p90은 첫 라운드 요청 하나로 정해지고 한 번씩 잰 값이라 편차와 구분하지 못합니다. 같은 세션 8개라도 파드 경로에서는 다음 턴이 다른 서버로 갈 때 다시 계산하던 부분을 L2에서 읽었습니다.</p>
+<p>세션 8개를 게이트웨이 경로로 보낸 부하는 계층 비율이 달라지지 않았습니다. 캐시 전에도 둘째 라운드부터 L0에서 읽던 부하여서 공유 캐시가 할 일이 없었습니다. 초당 요청과 전체 TTFT p90은 나빠졌지만(1.158에서 1.033, 4,300.2ms에서 5,418.5ms) 이 p90은 첫 라운드 요청 하나로 정해지고 한 번씩 측정한 값이라 편차와 구분하지 못합니다. 같은 세션 8개라도 파드 경로에서는 다음 턴이 다른 서버로 갈 때 다시 계산하던 부분을 L2에서 읽었습니다.</p>
 <p>캐시를 붙인 뒤 세션 24개와 48개의 L1 비율이 13.5%에서 42.4%가 됐습니다. 캐시 전에는 0%에서 0.9%였습니다. L2에서 읽은 KV는 그 서버의 L1에 남으므로 같은 서버로 다시 온 요청이 L1에서 읽은 것으로 보지만 원인은 확인하지 않았습니다.</p>
 <h3>KVTrace의 예측</h3>
 <p>캐시를 만들기 전에 <a href="https://github.com/aws-samples/amazon-elasticache-samples/tree/main/kvtrace" target="_blank" rel="noopener">KVTrace</a>로 효과를 예측했습니다. KVTrace는 vLLM이 내보내는 KV 이벤트를 기록해 공유 캐시가 있었다면 얼마나 적중했을지 계산하는 도구입니다. 세션 24개, 동시 요청 4의 부하에서는 L2를 조회했을 토큰의 63.6%가 적중한다고 예측했습니다(L2가 277.7GiB 이상일 때).</p>
@@ -409,51 +409,67 @@ GPU 인스턴스(EC2): 없음
 
 <section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>수치가 이렇게 나온 이유</h2></header><div class="prose">
 <p>짧은 프롬프트에서 TTFT가 거의 같은 것은 읽어 오는 시간이 다시 계산하는 시간과 비슷해지기 때문으로 보입니다. 982토큰에서는 768토큰만 L2에서 오고 214토큰은 새로 계산합니다. 발표 블로그는 캐시에서 읽는 편이 다시 계산하는 것보다 빨라지는 프롬프트 길이를 cutover point라고 부르고 모델마다 다르다고 설명합니다. 이 장비와 모델의 <code>rdma</code>에서는 982토큰에서 거의 같았고 3,982토큰에서는 2.7배 빨랐습니다.</p>
-<p>읽을 때는 저장한 것의 일부만 가져옵니다. 연결을 확인할 때 서버 1이 8,704토큰을 읽으면서 가져온 객체는 저장된 68개 가운데 38개(740MiB)였습니다. 설치된 LMCache의 소스는 sliding window 층의 그룹에 접두사의 마지막 몇 개 Chunk만 필요하다고 적고 있습니다. 저장한 객체는 Chunk마다 2개(Chunk 34개에 68개)였습니다. 그래서 38개를 한 그룹의 34개와 sliding window 그룹의 마지막 4개로 추론했습니다. 그룹별 크기는 재지 않았습니다.</p>
+<p>읽을 때는 저장한 것의 일부만 가져옵니다. 연결을 확인할 때 서버 1이 8,704토큰을 읽으면서 가져온 객체는 저장된 68개 가운데 38개(740MiB)였습니다. 설치된 LMCache의 소스는 sliding window 층의 그룹에 접두사의 마지막 몇 개 Chunk만 필요하다고 적고 있습니다. 저장한 객체는 Chunk마다 2개(Chunk 34개에 68개)였습니다. 그래서 38개를 한 그룹의 34개와 sliding window 그룹의 마지막 4개로 추론했습니다. 그룹별 크기는 측정하지 않았습니다.</p>
 <p>멀티턴에서 처리량이 늘어난 것은 둘째 라운드부터 다시 계산하던 프롬프트를 L2와 L1에서 읽었기 때문입니다. 캐시 전에는 세션 24개의 문서 합계 약 26만 토큰이 L0(약 45,321토큰)와 L1(76,288토큰)에 다 들어가지 않았고 밀려난 세션을 다시 계산한 것으로 봅니다.</p>
 <p>TPOT p90은 여러 구성에서 줄었지만 50ms 아래로 내려간 구성은 없었습니다. 캐시를 붙인 뒤 54.72ms에서 210.84ms였고 동시 요청 2에서는 캐시 전 54.75ms와 거의 같았습니다. 공유 캐시가 덜어 주는 것은 프롬프트를 계산하는 단계(prefill)이고 토큰을 하나씩 만드는 단계(decode)는 GPU가 그대로 맡습니다. 발표 블로그의 SLO(TTFT p90 5초 미만, TPOT p90 50ms 미만)를 지킨 구성은 캐시 전과 후 모두 없었고 TPOT p90은 모든 구성에서 기준을 넘었습니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>distributed KV caching을 활용하는 경우</h2></header><div class="prose">
-<p><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/distributed-kv-caching.html" target="_blank" rel="noopener">사용 설명서</a>는 오래 이어지는 세션과 멀티턴 세션, 공유하거나 반복되는 문맥, 여러 GPU 서버로 퍼지는 변동이 큰 트래픽에 이 기능이 맞는다고 설명합니다. 예로 코딩 에이전트, 멀티턴 대화, 공유 시스템 프롬프트, 긴 문맥과 RAG를 듭니다. 그 경우마다 이번 테스트에서 본 결과를 표 5에 정리했습니다.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>경우</th><th>이 테스트에서 본 것</th></tr>
-</thead>
-<tbody>
-<tr><td>여러 세션이 긴 문서에 질문을 이어 가는 서비스</td><td>세션 24개와 48개에서 초당 요청 1.7배에서 2.7배, 둘째 라운드부터 TTFT p90 1.2초 아래</td></tr>
-<tr><td>요청이 여러 서버로 흩어지는 라우팅</td><td>파드 경로에서 다른 서버로 간 턴을 L2에서 읽음</td></tr>
-<tr><td>서버 재시작과 서버 추가</td><td>다시 뜬 서버가 7,936토큰을 L2에서 읽어 TTFT 434.8ms</td></tr>
-<tr><td>긴 프롬프트</td><td>14,984토큰에서 6.8배, 길수록 차이가 큼</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>표 5.</b> 문서가 드는 활용 경우와 이 테스트의 결과. 서버 추가는 재시작과 같이 L0와 L1이 비어 있는 경우로 보고 따로 재지 않음</p>
-<p>공유 캐시가 TTFT를 줄이지 못한 경우도 분명했습니다. 982토큰 정도의 짧은 프롬프트에서는 재계산과 거의 같았고 EFA 없이 TCP로 읽는 짧은 프롬프트는 재계산보다 느렸습니다. 세션이 GPU 메모리에 들어가 이미 L0에서 읽는 부하에서는 계층 비율이 달라지지 않았습니다. 문서도 짧거나 반복되지 않는 프롬프트(분류, 번역, 콘텐츠 검토)와 출력 생성이 대부분인 부하에는 효과가 작다고 설명합니다.</p>
-</div></section>
 
-<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>테스트의 한계와 다시 재 볼 것</h2></header><div class="prose">
-<p>모든 구성을 한 번씩만 실행해 실행 사이의 편차는 재지 않았습니다. 수치는 g6e.8xlarge 2대(L40S 한 장씩)와 Gemma 4 31B의 값입니다. 발표 블로그는 GPU 8장짜리 P6 서버 2대에서 6대, 250B에서 1.6T 파라미터 모델로 비용 최대 40% 절감과 TTFT 최대 80% 단축을 보고했으므로 두 수치는 조건이 다릅니다.</p>
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>테스트의 한계와 다시 측정할 것</h2></header><div class="prose">
+<p>모든 구성을 한 번씩만 실행해 실행 사이의 편차는 측정하지 않았습니다. 수치는 g6e.8xlarge 2대(L40S 한 장씩)와 Gemma 4 31B의 값입니다. 발표 블로그는 GPU 8장짜리 P6 서버 2대에서 6대, 250B에서 1.6T 파라미터 모델로 비용 최대 40% 절감과 TTFT 최대 80% 단축을 보고했으므로 두 수치는 조건이 다릅니다.</p>
 <p>도쿄 리전에서만 테스트했습니다. LMCache 0.5.8rc3은 정식 릴리스가 아닌 시험판이고 문서도 <code>rdma</code>와 <code>blob-tcp</code>에는 0.5.8rc1 이상이 필요하다고 안내합니다. vLLM과 LMCache의 설정은 L1 크기(32GiB)를 포함해 캐시 전 기준값과 같게 두었습니다.</p>
-<p>다시 재 볼 것은 <code>blob-tcp</code>와 <code>tcp</code>의 멀티턴 부하, 캐시 전체가 사라졌을 때 진행 중인 요청의 동작, 한 서버가 내려가 있는 동안 남은 서버의 TTFT, 실행 사이의 편차입니다. <code>blob-tcp</code>가 982토큰에서도 793.0ms 걸린 이유, 캐시를 붙인 뒤 L1 적중이 늘어난 원인, 게이트웨이 경로에서 EPP가 고른 서버는 확인하지 않았습니다.</p>
+<p>다시 측정할 것은 <code>blob-tcp</code>와 <code>tcp</code>의 멀티턴 부하, 캐시 전체가 사라졌을 때 진행 중인 요청의 동작, 한 서버가 내려가 있는 동안 남은 서버의 TTFT, 실행 사이의 편차입니다. <code>blob-tcp</code>가 982토큰에서도 793.0ms 걸린 이유, 캐시를 붙인 뒤 L1 적중이 늘어난 원인, 게이트웨이 경로에서 EPP가 고른 서버는 확인하지 않았습니다.</p>
 </div></section>
 
-<section class="sec" id="ko-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>공유 캐시를 붙이기 전에 확인할 것</h2></header><div class="prose">
-<p>공유 캐시를 붙일지는 프롬프트 길이, 세션 수와 GPU 메모리, 라우팅으로 정합니다. 확인할 항목과 이 테스트의 값을 표 6에 정리했습니다.</p>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>비용과 성능을 함께 본 분석과 사용 기준</h2></header><div class="prose">
+<p>긴 프롬프트가 다른 서버로 가거나 세션이 서버의 메모리를 넘는 부하에서는 성능이 분명히 좋아졌습니다. TTFT p50은 3.1초에서 5.7초이던 것이 0.47초에서 0.95초가 됐고 초당 요청은 1.7배에서 2.7배가 됐습니다. 하지만 GPU 서버 2대인 이 규모에서는 캐시 노드 한 대의 시간당 비용이 GPU 서버 2대의 2.88배여서 세션 24개와 48개 부하의 요청 1,000건당 비용이 1.36배에서 2.11배로 올랐습니다.</p>
+<p>캐시 노드는 서버 수와 관계없는 고정 비용이어서 측정한 처리량 배율로 계산하면 g6e.8xlarge 4대에서 8대부터 요청당 비용도 내려갑니다. 그 규모에서 측정한 값은 아닙니다. 작은 규모에서 공유 캐시는 지연 시간을 줄이는 데 드는 비용이고 서버가 여러 대인 규모에서는 비용과 지연 시간을 함께 줄이는 수단입니다.</p>
+<h3>요청 1,000건당 비용</h3>
+<p>환경 전체의 시간당 비용을 한 시간에 처리한 요청 수(초당 요청에 3,600을 곱한 값)로 나누고 1,000을 곱했습니다. 시간당 비용은 캐시 전 14.117 USD, 캐시 후 51.923 USD입니다.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>확인할 것</th><th>이 테스트의 값</th><th>판단</th></tr>
+<tr><th>경로</th><th>세션</th><th>동시 요청</th><th>처리량 배율</th><th>캐시 전 (USD)</th><th>캐시 후 (USD)</th><th>비용 배율</th><th>요청당 비용이 같아지는 GPU 서버 수</th></tr>
 </thead>
 <tbody>
-<tr><td>프롬프트 길이</td><td><code>rdma</code>에서 982토큰은 거의 같음, 3,982토큰부터 2.7배 이상</td><td>길이 분포에서 cutover point보다 긴 요청의 비율을 봄</td></tr>
-<tr><td>세션 수와 GPU 메모리</td><td>L0 약 45,321토큰, 세션 8개 게이트웨이 경로는 계층 비율 그대로</td><td>세션이 L0에 다 들어가면 효과가 작음</td></tr>
-<tr><td>라우팅</td><td>파드 경로에서 다른 서버로 간 턴을 L2에서 읽음</td><td>다음 턴이 다른 서버로 가는 구성일수록 효과가 큼</td></tr>
-<tr><td>전송 방식</td><td><code>blob-tcp</code>는 <code>rdma</code>보다 2.7배에서 3.2배 느림</td><td>같은 가용 영역에서 <code>rdma</code> 사용</td></tr>
-<tr><td>TPOT 목표</td><td>캐시를 붙인 뒤 54.72ms에서 210.84ms</td><td>공유 캐시와 별개로 GPU 구성으로 맞춤</td></tr>
-<tr><td>비용</td><td>도쿄 리전 노드 시간당 37.806 USD</td><td>측정할 때만 만들고 삭제 일정을 둠</td></tr>
+<tr><td>파드</td><td class="num">24</td><td class="num">2</td><td class="num">1.74배</td><td class="num">9.54</td><td class="num">20.17</td><td class="num">2.11배</td><td class="num">8대</td></tr>
+<tr><td>파드</td><td class="num">24</td><td class="num">4</td><td class="num">1.95배</td><td class="num">7.36</td><td class="num">13.84</td><td class="num">1.88배</td><td class="num">7대</td></tr>
+<tr><td>파드</td><td class="num">24</td><td class="num">8</td><td class="num">2.43배</td><td class="num">6.52</td><td class="num">9.89</td><td class="num">1.52배</td><td class="num">5대</td></tr>
+<tr><td>게이트웨이</td><td class="num">24</td><td class="num">2</td><td class="num">1.92배</td><td class="num">11.33</td><td class="num">21.66</td><td class="num">1.91배</td><td class="num">7대</td></tr>
+<tr><td>게이트웨이</td><td class="num">24</td><td class="num">4</td><td class="num">2.26배</td><td class="num">8.19</td><td class="num">13.32</td><td class="num">1.63배</td><td class="num">5대</td></tr>
+<tr><td>게이트웨이</td><td class="num">24</td><td class="num">8</td><td class="num">2.70배</td><td class="num">7.14</td><td class="num">9.73</td><td class="num">1.36배</td><td class="num">4대</td></tr>
+<tr><td>파드</td><td class="num">48</td><td class="num">4</td><td class="num">2.02배</td><td class="num">7.58</td><td class="num">13.79</td><td class="num">1.82배</td><td class="num">6대</td></tr>
+<tr><td>게이트웨이</td><td class="num">48</td><td class="num">4</td><td class="num">2.10배</td><td class="num">8.09</td><td class="num">14.18</td><td class="num">1.75배</td><td class="num">6대</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 6.</b> 공유 캐시를 붙이기 전에 확인할 항목. 값은 이 테스트의 장비와 모델 기준</p>
-<p>KVTrace는 캐시 없이 실행되므로 지금 부하에서 L2에 적중할 토큰이 얼마나 되는지 먼저 확인해 보는 것을 권고합니다. 수치는 GPU, 모델의 토큰당 KV 크기(이 모델은 450,560바이트), 프롬프트 길이, 세션 수, 라우팅에 따라 달라집니다.</p>
+<p class="cap"><b>표 5.</b> 요청 1,000건당 비용(문서 11,000토큰). 측정한 초당 요청과 단가로 계산한 값이며 청구서 값이 아님</p>
+<p>마지막 열은 <code>servers x 6.568 x (gain - 1) &gt;= 37.806</code>을 만족하는 가장 작은 GPU 서버 수(servers)입니다. gain은 처리량 배율이고 6.568 USD는 도쿄 리전의 g6e.8xlarge 시간당 단가입니다. 캐시 없이 같은 처리량을 내려고 더해야 하는 GPU 서버의 비용이 캐시 노드 한 대의 비용과 같아지는 지점입니다. 가정은 세 가지이고 모두 검증하지 않았습니다. 처리량 배율은 서버 수가 늘어도 유지되고 캐시 노드 한 대가 그 서버들의 KV를 모두 담는다고 보았으며 게이트웨이와 대기 상태의 비용은 계산에서 뺐습니다.</p>
+<p>세션 8개의 두 구성은 처리량이 1.26배(파드 경로)와 0.89배(게이트웨이 경로)여서 요청 1,000건당 비용이 2.91배와 4.12배가 됐습니다. 공유 캐시가 맞지 않는 부하입니다.</p>
+<h3>GPU 서버를 더해서는 얻을 수 없는 것</h3>
+<p>처리량만 필요하면 이 규모에서는 GPU 서버를 더하는 편이 쌉니다. 처리량을 두 배로 만드는 데 g6e.8xlarge 2대(시간당 13.136 USD)면 되고 캐시 노드는 시간당 37.806 USD입니다. 하지만 재계산하는 요청의 TTFT는 프롬프트 길이로 정해지므로 GPU 서버를 더해도 줄지 않습니다. 부하가 낮은 동시 요청 2에서도 11,000토큰 문서의 TTFT p50은 3.1초였고 이 시간을 줄이는 방법은 캐시에서 읽는 것뿐입니다. 다시 시작한 서버가 이미 계산한 KV를 이어받은 것도 공유 캐시를 거쳐서였습니다(2,025.1ms가 434.8ms).</p>
+<h3>사용하기 좋은 경우와 맞지 않는 경우</h3>
+<div class="scroll"><table>
+<thead>
+<tr><th>기준</th><th>사용하기 좋은 경우</th><th>맞지 않는 경우</th></tr>
+</thead>
+<tbody>
+<tr><td>프롬프트 길이</td><td>긴 프롬프트. <code>rdma</code>에서 3,982토큰부터 재계산보다 빨랐고 길수록 차이가 큼</td><td>짧은 프롬프트. 982토큰에서 재계산과 거의 같음</td></tr>
+<tr><td>세션과 라우팅</td><td>세션이 GPU와 호스트 메모리를 넘거나 다음 턴이 다른 서버로 감</td><td>세션이 GPU 메모리에 들어가고 같은 서버로 감(세션 8개 게이트웨이 경로)</td></tr>
+<tr><td>서비스의 목표</td><td>대화형 서비스, 긴 문서 질의, 코딩 에이전트처럼 첫 토큰을 기다리는 시간이 사용자에게 보임</td><td>출력 속도(TPOT)가 목표. 공유 캐시는 prefill만 줄임</td></tr>
+<tr><td>규모와 비용</td><td>GPU 서버가 여러 대이거나 서버 한 대가 비쌈. 캐시 노드의 고정 비용이 묻힘</td><td>GPU 서버 두세 대에서 지연 시간보다 요청당 비용이 중요</td></tr>
+<tr><td>네트워크</td><td>캐시와 같은 가용 영역에서 EFA로 <code>rdma</code> 사용</td><td>EFA 없이 TCP. 짧은 프롬프트에서 재계산보다 느림</td></tr>
+<tr><td>서버 변동</td><td>재시작이 잦음. 재시작한 서버가 7,936토큰을 L2에서 읽음</td><td>해당 없음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 6.</b> 공유 캐시를 사용하기 좋은 경우와 맞지 않는 경우. 근거는 이 테스트의 장비와 모델의 값</p>
+<p>발표 블로그는 GPU 8장짜리 P6 서버 2대에서 6대로 비용 절감을 보고했습니다. 캐시 노드가 큰 서버군에서 차지하는 비중이 작기 때문으로 보이며 이것은 추론입니다.</p>
+<h3>먼저 해 볼 것</h3>
+<ol>
+<li>요청의 프롬프트 길이 분포를 봅니다. 긴 요청의 비율이 낮으면 효과가 작습니다.</li>
+<li>세션을 같은 서버로 보내는 라우팅을 먼저 적용합니다. 세션 8개 부하는 그것만으로 L0에서 읽었습니다.</li>
+<li>KVTrace로 지금 부하에서 L2가 얼마나 적중할지 예측합니다. 캐시 없이 실행됩니다.</li>
+<li>위 계산식에 운영 환경의 GPU 서버 단가와 대수를 넣어 봅니다. 결과는 GPU, 모델의 토큰당 KV 크기(이 모델은 450,560바이트), 프롬프트 길이, 세션 수에 따라 달라집니다.</li>
+</ol>
 </div></section>
 </div>
 <div class="col l-en" lang="en">
@@ -666,46 +682,61 @@ GPU 인스턴스(EC2): 없음
 <p>TPOT p90 dropped in several configurations, but none went below 50 ms. With the cache it was 54.72 ms to 210.84 ms, and at concurrency 2 it was about the same as the 54.75 ms before the cache. What the shared cache takes off the GPU is the step that processes the prompt (prefill); the step that produces tokens one by one (decode) stays on the GPU. No configuration met the announcement post's SLO (TTFT p90 under 5 s, TPOT p90 under 50 ms) before or after the cache, and TPOT p90 exceeded the target in every configuration.</p>
 </div></section>
 
-<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Where distributed KV caching is used</h2></header><div class="prose">
-<p>The <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/distributed-kv-caching.html" target="_blank" rel="noopener">User Guide</a> says the feature suits long-running and multi-turn sessions, shared or repeated context, and spiky traffic spread across many GPU servers. Its examples are coding agents, multi-turn chat, shared system prompts, and long-context and RAG workloads. Table 5 lists what this test saw for each case.</p>
-<div class="scroll"><table>
-<thead>
-<tr><th>Case</th><th>What this test saw</th></tr>
-</thead>
-<tbody>
-<tr><td>A service where many sessions keep asking about long documents</td><td>1.7 to 2.7 times the requests per second with 24 and 48 sessions, TTFT p90 under 1.2 s from round 2</td></tr>
-<tr><td>Routing that spreads requests over several servers</td><td>On the pod route, turns that went to the other server were read from L2</td></tr>
-<tr><td>Server restarts and added servers</td><td>The restarted server read 7,936 tokens from L2, TTFT 434.8 ms</td></tr>
-<tr><td>Long prompts</td><td>6.8 times at 14,984 tokens, the gap grows with length</td></tr>
-</tbody>
-</table></div>
-<p class="cap"><b>Table 5.</b> Cases the documentation names and what this test saw. An added server is taken to start with empty L0 and L1 like a restart and was not measured separately</p>
-<p>The cases where the shared cache did not lower TTFT were just as clear. Short prompts of about 982 tokens were about the same as recompute, and short prompts read over TCP without EFA were slower than recompute. A load whose sessions fit in GPU memory and already read from L0 kept the same shares by tier. The documentation, too, says the benefit is small for short or never-repeated prompts (classification, translation, moderation) and for workloads where output generation takes most of the time.</p>
-</div></section>
 
-<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>Limits of this test and what to measure again</h2></header><div class="prose">
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Limits of this test and what to measure again</h2></header><div class="prose">
 <p>Each configuration ran once, so run-to-run variation was not measured. The figures belong to two g6e.8xlarge instances (one L40S each) and Gemma 4 31B. The announcement post reported up to 40% lower cost and up to 80% lower TTFT with 2 to 6 P6 servers of 8 GPUs each and models of 250B to 1.6T parameters, so the two sets of figures come from different conditions.</p>
 <p>The test ran only in the Tokyo Region. LMCache 0.5.8rc3 is a pre-release, not a stable release, and the documentation states that <code>rdma</code> and <code>blob-tcp</code> need 0.5.8rc1 or later. vLLM and LMCache settings, including the 32 GiB L1, were kept the same as in the baseline without the cache.</p>
 <p>Worth measuring again: the multi-turn load over <code>blob-tcp</code> and <code>tcp</code>, what in-flight requests do when the whole cache disappears, the TTFT of the remaining server while one server is down, and run-to-run variation. I did not check why <code>blob-tcp</code> took 793.0 ms even at 982 tokens, why L1 hits grew after the cache was attached, or which server the EPP picked on the gateway route.</p>
 </div></section>
 
-<section class="sec" id="en-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>What to check before attaching a shared cache</h2></header><div class="prose">
-<p>Whether to attach a shared cache depends on prompt length, the number of sessions against GPU memory, and routing. Table 6 lists the items to check with the values from this test.</p>
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>Cost and performance together, and where to use it</h2></header><div class="prose">
+<p>Performance clearly improved when long prompts went to another server or sessions outgrew a server's memory. TTFT p50 went from 3.1 to 5.7 s down to 0.47 to 0.95 s, and requests per second rose 1.7 to 2.7 times. At this scale of two GPU servers, however, one cache node costs 2.88 times as much per hour as the two GPU servers, so the cost per 1,000 requests of the 24- and 48-session loads rose 1.36 to 2.11 times.</p>
+<p>The cache node is a fixed cost that does not depend on the number of servers, so by calculation from the measured throughput gains the cost per request also falls from 4 to 8 g6e.8xlarge servers. That scale was not measured. At small scale the shared cache is the price of lower latency; with many servers it lowers both cost and latency.</p>
+<h3>Cost per 1,000 requests</h3>
+<p>The hourly cost of the whole environment was divided by the requests handled in an hour (requests per second times 3,600) and multiplied by 1,000. The hourly cost is 14.117 USD before the cache and 51.923 USD after it.</p>
 <div class="scroll"><table>
 <thead>
-<tr><th>What to check</th><th>Value in this test</th><th>How to decide</th></tr>
+<tr><th>Route</th><th>Sessions</th><th>Concurrency</th><th>Throughput gain</th><th>Before (USD)</th><th>After (USD)</th><th>Cost ratio</th><th>GPU servers at which the cost per request breaks even</th></tr>
 </thead>
 <tbody>
-<tr><td>Prompt length</td><td>About the same at 982 tokens with <code>rdma</code>, 2.7 times or more from 3,982 tokens</td><td>Look at the share of requests longer than the cutover point</td></tr>
-<tr><td>Sessions and GPU memory</td><td>L0 about 45,321 tokens; tier shares unchanged with 8 sessions on the gateway route</td><td>Little gain when all sessions fit in L0</td></tr>
-<tr><td>Routing</td><td>On the pod route, turns that went to the other server were read from L2</td><td>The more often the next turn lands on another server, the larger the gain</td></tr>
-<tr><td>Transport</td><td><code>blob-tcp</code> 2.7 to 3.2 times slower than <code>rdma</code></td><td>Use <code>rdma</code> in the same Availability Zone</td></tr>
-<tr><td>TPOT target</td><td>54.72 ms to 210.84 ms with the cache</td><td>Meet it with the GPU setup, apart from the shared cache</td></tr>
-<tr><td>Cost</td><td>37.806 USD per node hour in the Tokyo Region</td><td>Create it only for measurements and keep a deletion schedule</td></tr>
+<tr><td>Pods</td><td class="num">24</td><td class="num">2</td><td class="num">1.74x</td><td class="num">9.54</td><td class="num">20.17</td><td class="num">2.11x</td><td class="num">8</td></tr>
+<tr><td>Pods</td><td class="num">24</td><td class="num">4</td><td class="num">1.95x</td><td class="num">7.36</td><td class="num">13.84</td><td class="num">1.88x</td><td class="num">7</td></tr>
+<tr><td>Pods</td><td class="num">24</td><td class="num">8</td><td class="num">2.43x</td><td class="num">6.52</td><td class="num">9.89</td><td class="num">1.52x</td><td class="num">5</td></tr>
+<tr><td>Gateway</td><td class="num">24</td><td class="num">2</td><td class="num">1.92x</td><td class="num">11.33</td><td class="num">21.66</td><td class="num">1.91x</td><td class="num">7</td></tr>
+<tr><td>Gateway</td><td class="num">24</td><td class="num">4</td><td class="num">2.26x</td><td class="num">8.19</td><td class="num">13.32</td><td class="num">1.63x</td><td class="num">5</td></tr>
+<tr><td>Gateway</td><td class="num">24</td><td class="num">8</td><td class="num">2.70x</td><td class="num">7.14</td><td class="num">9.73</td><td class="num">1.36x</td><td class="num">4</td></tr>
+<tr><td>Pods</td><td class="num">48</td><td class="num">4</td><td class="num">2.02x</td><td class="num">7.58</td><td class="num">13.79</td><td class="num">1.82x</td><td class="num">6</td></tr>
+<tr><td>Gateway</td><td class="num">48</td><td class="num">4</td><td class="num">2.10x</td><td class="num">8.09</td><td class="num">14.18</td><td class="num">1.75x</td><td class="num">6</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 6.</b> Items to check before attaching a shared cache. Values are for the hardware and model of this test</p>
-<p>KVTrace runs without the cache, so I recommend first checking how many tokens of the current load would hit L2. The figures change with the GPU, the model's KV size per token (450,560 bytes for this model), the prompt length, the number of sessions and the routing.</p>
+<p class="cap"><b>Table 5.</b> Cost per 1,000 requests (11,000-token documents). Calculated from the measured requests per second and unit prices, not billed amounts</p>
+<p>The last column is the smallest number of GPU servers (servers) that satisfies <code>servers x 6.568 x (gain - 1) &gt;= 37.806</code>. gain is the throughput gain, and 6.568 USD is the hourly price of a g6e.8xlarge in the Tokyo Region. It is the point at which the GPU servers you would have to add to reach the same throughput without the cache cost as much as one cache node. There are three assumptions, none of them verified: the throughput gain holds as the number of servers grows, one cache node holds the KV of all those servers, and the gateway and standby costs are left out.</p>
+<p>The two 8-session configurations reached 1.26 times (pod route) and 0.89 times (gateway route) the throughput, so the cost per 1,000 requests became 2.91 and 4.12 times. The shared cache does not fit that load.</p>
+<h3>What adding GPU servers cannot give</h3>
+<p>If only throughput is needed, adding GPU servers is cheaper at this scale. Doubling throughput takes two more g6e.8xlarge (13.136 USD per hour), while the cache node costs 37.806 USD per hour. The TTFT of a recomputed request, however, is set by the prompt length, so more GPU servers do not lower it. Even at a light concurrency of 2, TTFT p50 for the 11,000-token document was 3.1 s, and the only way to cut that time is to read from a cache. The restarted server, too, inherited the KV it had computed only through the shared cache (2,025.1 ms became 434.8 ms).</p>
+<h3>Where it fits and where it does not</h3>
+<div class="scroll"><table>
+<thead>
+<tr><th>Criterion</th><th>Fits</th><th>Does not fit</th></tr>
+</thead>
+<tbody>
+<tr><td>Prompt length</td><td>Long prompts. With <code>rdma</code>, faster than recompute from 3,982 tokens and the gap grows with length</td><td>Short prompts. About the same as recompute at 982 tokens</td></tr>
+<tr><td>Sessions and routing</td><td>Sessions outgrow GPU and host memory, or the next turn lands on another server</td><td>Sessions fit in GPU memory and go to the same server (8 sessions on the gateway route)</td></tr>
+<tr><td>Service goal</td><td>The wait for the first token is visible to users: chat, long-document Q&amp;A, coding agents</td><td>Output speed (TPOT) is the goal. The shared cache cuts only prefill</td></tr>
+<tr><td>Scale and cost</td><td>Many GPU servers, or expensive servers. The fixed cost of the cache node is spread thin</td><td>Two or three GPU servers where cost per request matters more than latency</td></tr>
+<tr><td>Network</td><td><code>rdma</code> over EFA in the cache's Availability Zone</td><td>TCP without EFA. Slower than recompute for short prompts</td></tr>
+<tr><td>Server churn</td><td>Frequent restarts. The restarted server read 7,936 tokens from L2</td><td>Not applicable</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 6.</b> Where the shared cache fits and where it does not. Evidence from the hardware and model of this test</p>
+<p>The announcement post reported lower cost with 2 to 6 P6 servers of 8 GPUs each. My inference is that the cache node is a small share of the cost of such a large fleet.</p>
+<h3>What to try first</h3>
+<ol>
+<li>Look at the distribution of prompt lengths. If few requests are long, the gain is small.</li>
+<li>Apply routing that keeps a session on the same server first. The 8-session load read from L0 with that alone.</li>
+<li>Predict with KVTrace how often L2 would hit for the current load. It runs without the cache.</li>
+<li>Put the price and number of your own GPU servers into the formula above. The result depends on the GPU, the model's KV size per token (450,560 bytes for this model), the prompt length and the number of sessions.</li>
+</ol>
 </div></section>
 </div>
 <section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
@@ -725,7 +756,7 @@ GPU 인스턴스(EC2): 없음
 <ul>
 <li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
 </ul>
-<p><span class="l-ko">이 글의 수치는 2026년 11월 21일부터 23일까지 도쿄 리전(ap-northeast-1)의 한 계정에서 직접 테스트한 결과입니다. distributed KV caching은 2026년 11월 23일 기준 서울 리전에서 제공되지 않아 도쿄 리전에서 테스트했습니다. 조건은 g6e.8xlarge 2대(NVIDIA L40S 한 장씩), vLLM v0.33.0, LMCache 0.5.8rc3, Gemma 4 31B(FP8-dynamic)입니다. 공유 캐시는 ElastiCache for Valkey 9.1.0 cache.i8ge.48xlarge 1대이고 구성마다 한 번씩 실행했습니다. 수치는 장비, 모델, 프롬프트 길이, 세션 수, 라우팅에 따라 달라지며 발표 블로그의 수치와 조건이 다릅니다. 비용은 단가와 기록의 시각으로 계산한 값이고 청구서 값이 아닙니다. 도쿄 리전의 노드 단가는 AWS 가격 목록(Price List)에서 읽었습니다. AWS의 설명은 같은 날 확인한 ElastiCache 사용 설명서, What's New 게시물, 발표 블로그를 기준으로 합니다.</span><span class="l-en">The figures in this post come from my own tests in one account in the Tokyo Region (ap-northeast-1) from November 21 to 23, 2026. Distributed KV caching was not offered in the Seoul Region as of November 23, 2026, so I tested it in Tokyo. The conditions were two g6e.8xlarge instances (one NVIDIA L40S each), vLLM v0.33.0, LMCache 0.5.8rc3, Gemma 4 31B (FP8-dynamic) and one ElastiCache for Valkey 9.1.0 cache.i8ge.48xlarge node, and each configuration ran once. The figures depend on the hardware, the model, the prompt length, the number of sessions and the routing, and the conditions differ from those of the announcement blog post. Costs are computed from unit prices and the times in the records, not read from a bill. The Tokyo node price comes from the AWS Price List. Statements about AWS follow the ElastiCache User Guide, the What's New post and the announcement blog post as read on the same day.</span></p>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 21일부터 23일까지 도쿄 리전(ap-northeast-1)의 한 계정에서 직접 테스트한 결과입니다. distributed KV caching은 2026년 11월 23일 기준 서울 리전에서 제공되지 않아 도쿄 리전에서 테스트했습니다. 조건은 g6e.8xlarge 2대(NVIDIA L40S 한 장씩), vLLM v0.33.0, LMCache 0.5.8rc3, Gemma 4 31B(FP8-dynamic)입니다. 공유 캐시는 ElastiCache for Valkey 9.1.0 cache.i8ge.48xlarge 1대이고 구성마다 한 번씩 실행했습니다. 수치는 장비, 모델, 프롬프트 길이, 세션 수, 라우팅에 따라 달라지며 발표 블로그의 수치와 조건이 다릅니다. 비용과 요청당 비용은 측정한 초당 요청과 기록의 시각, 도쿄 리전 On-Demand 단가로 계산한 값이고 청구서 값이 아닙니다. 단가는 cache.i8ge.48xlarge 시간당 37.806 USD, g6e.8xlarge 시간당 6.568 USD입니다. 서버 4대에서 8대 규모의 비용은 측정하지 않은 계산값입니다. AWS의 설명은 같은 날 확인한 ElastiCache 사용 설명서, What's New 게시물, 발표 블로그를 기준으로 합니다.</span><span class="l-en">The figures in this post come from my own tests in one account in the Tokyo Region (ap-northeast-1) from November 21 to 23, 2026. Distributed KV caching was not offered in the Seoul Region as of November 23, 2026, so I tested it in Tokyo. The conditions were two g6e.8xlarge instances (one NVIDIA L40S each), vLLM v0.33.0, LMCache 0.5.8rc3, Gemma 4 31B (FP8-dynamic) and one ElastiCache for Valkey 9.1.0 cache.i8ge.48xlarge node, and each configuration ran once. The figures depend on the hardware, the model, the prompt length, the number of sessions and the routing, and the conditions differ from those of the announcement blog post. Costs and costs per request are computed from the measured requests per second, the times in the records and the Tokyo On-Demand prices (cache.i8ge.48xlarge 37.806 USD and g6e.8xlarge 6.568 USD per hour), not read from a bill. The cost at 4 to 8 servers is a calculation, not a measurement. Statements about AWS follow the ElastiCache User Guide, the What's New post and the announcement blog post as read on the same day.</span></p>
 </footer>
 
 </div>
