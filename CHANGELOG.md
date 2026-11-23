@@ -40,6 +40,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - Add post (KO/EN): "The interruption when an Amazon Aurora cluster moves to another VPC" (`docs/techblog/database/aurora-move-cluster-to-different-vpc`), with eight figures in a Korean and an English version
 - Add post (KO/EN): "Seven tips for cutting Claude Code costs" (`docs/techblog/aiml/claude-code-cost-saving-tips`), with three figures in a Korean and an English version
 - Add post (KO/EN): "Best practices for managing Claude Code skills" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), with five figures in a Korean and an English version
+- Add post (KO/EN): "AWS Network Load Balancer mTLS" (`docs/techblog/networking/aws-network-load-balancer-mtls`), with eight figures in a Korean and an English version
 - Add the new report format built by the `my-plugins:techblogs` skill: one column up to 1440px, NanumSquare and D2Coding served from `assets/fonts/`, language and theme switches, a horizontal section menu, code boxes with a copy button, and images in `<slug>-assets/`
 - Add 18 posts (KO/EN) republished from the author's AWS Tech Blog posts (2025-09-30 to 2026-11-04), each with the original publication date, a link to the original and a canonical link to it; series parts link to each other on this site
 - Show post lists (home, category, tags) five at a time, newest first, with a "show more" button (`assets/js/main.js` `setupPager`)
@@ -126,6 +127,7 @@ No version tags exist yet; all changes accumulate under Unreleased.
 - 게시물 추가(한영): "Amazon Aurora 클러스터의 VPC 이동과 중단 시간" (`docs/techblog/database/aurora-move-cluster-to-different-vpc`), 그림 8장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Claude Code 비용 절감 Tip 7가지" (`docs/techblog/aiml/claude-code-cost-saving-tips`), 그림 3장의 한국어판과 영어판 포함
 - 게시물 추가(한영): "Claude Code Skills 관리 모범사례" (`docs/techblog/aiml/claude-code-skills-plugin-marketplace`), 그림 5장의 한국어판과 영어판 포함
+- 게시물 추가(한영): "AWS Network Load Balancer mTLS" (`docs/techblog/networking/aws-network-load-balancer-mtls`), 그림 8장의 한국어판과 영어판 포함
 - `my-plugins:techblogs` 스킬이 빌드하는 새 리포트 형식 추가: 최대 1440px 한 컬럼, `assets/fonts/`에서 받는 나눔스퀘어와 D2Coding, 언어와 테마 전환, 가로 이동 메뉴, 복사 버튼이 있는 코드 상자, `<slug>-assets/` 그림 폴더
 - 글쓴이의 AWS 기술 블로그 글(2025-09-30부터 2026-11-04까지)을 옮겨 실은 게시물 18편 추가 (KO/EN) - 원문 게시일 유지, 원문 링크와 원문을 가리키는 canonical 링크 포함, 연재 글끼리는 이 사이트 안의 주소로 연결
 - 글 목록(홈, 카테고리, 태그)을 최신순으로 5개씩 보여 주고 "더 보기"로 펼치도록 변경 (`assets/js/main.js` `setupPager`)

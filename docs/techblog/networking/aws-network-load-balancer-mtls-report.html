@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Network Load Balancer mTLS</title>
+<meta name="description" content="Network Load Balancer의 mTLS를 서울 리전에서 인증서 48종으로 테스트했습니다. mTLS로 늘어난 시간은 ECDSA P-256 인증서에서 0.5ms였고 설정 변경은 호출 후 31초에서 62초 사이에 적용됐으며 거부 사유는 액세스 로그에만 남았습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/networking/aws-network-load-balancer-mtls/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-23</span><span class="l-en">Published 2026-11-23</span></span><span>Networking</span><span><span class="l-ko">읽는 시간 11분</span><span class="l-en">11 min read</span></span></div>
+<h1><span class="l-ko">AWS Network Load Balancer mTLS</span><span class="l-en">AWS Network Load Balancer mTLS</span></h1>
+<p class="thesis"><span class="l-ko">Network Load Balancer가 2026년 11월 19일에 발표한 상호 TLS 인증(mTLS)을 서울 리전에서 직접 테스트해 보았습니다. 조건이 다른 클라이언트 인증서 48종의 판정은 문서와 일치했고 mTLS로 늘어난 시간은 ECDSA P-256 인증서에서 0.5ms였습니다. 하지만 설정 변경은 호출 후 31초에서 62초 사이에 적용됐고 인증서를 폐기해도 이미 맺은 연결은 유지됐습니다. 거부된 클라이언트에는 사유가 전달되지 않아 원인은 액세스 로그로만 확인됩니다.</span><span class="l-en">I tested the mutual TLS authentication (mTLS) that Network Load Balancer announced on November 19, 2026, in the Seoul Region. The verdicts for 48 kinds of client certificates matched the documentation, and mTLS added 0.5 ms with an ECDSA P-256 certificate. However, a configuration change took effect 31 to 62 seconds after the call, and connections that were already open stayed open after their certificate was revoked. A rejected client receives no reason, so the cause can be found only in the access logs.</span></p>
+<div class="tags"><span>#Network Load Balancer</span><span>#mTLS</span><span>#Elastic Load Balancing</span><span>#Trust store</span><span>#X.509</span><span>#SPIFFE</span></div>
+<ul class="facts"><li><span class="l-ko"><b>지연 시간</b>: TCP 연결부터 첫 응답까지의 시간은 mTLS 없음 8.1ms, ECDSA P-256 인증서 8.6ms, RSA 2048 11.9ms, RSA 4096 33.0ms였습니다(300회씩 3번 측정한 중앙값의 평균). 늘어난 시간은 클라이언트의 서명 시간과 거의 같았습니다.</span><span class="l-en"><b>Latency</b>: the time from TCP connect to the first response byte was 8.1 ms without mTLS, 8.6 ms with an ECDSA P-256 certificate, 11.9 ms with RSA 2048 and 33.0 ms with RSA 4096 (mean of three medians of 300 connections). The added time was almost the same as the signing time on the client.</span></li><li><span class="l-ko"><b>적용 시간</b>: mTLS 활성화, 필터 변경, CRL 추가 같은 변경 여덟 번이 호출 후 31초에서 48초 사이에 적용되기 시작해 41초에서 62초 사이에 끝났습니다.</span><span class="l-en"><b>Time to take effect</b>: eight changes, such as enabling mTLS, changing filters and adding a CRL, began to apply 31 to 48 seconds after the call and were complete after 41 to 62 seconds.</span></li><li><span class="l-ko"><b>기존 연결</b>: 변경 전에 맺은 연결은 끊기지 않았습니다. 필터에 맞지 않는 인증서의 연결 12개와 폐기된 인증서의 연결 8개가 변경 뒤에도 모두 유지됐습니다.</span><span class="l-en"><b>Open connections</b>: connections opened before a change were not cut. All 12 connections with a certificate that no longer matched a filter and all 8 with a certificate that was then revoked stayed open after the change.</span></li><li><span class="l-ko"><b>거부 사유</b>: NLB는 사유와 관계없이 평문 <code>close_notify</code> 7바이트를 보내고 연결을 닫습니다. 사유는 액세스 로그의 <code>tls_verify_status</code>에 남고, 실패 항목에는 인증서의 주체가 기록되지 않았습니다.</span><span class="l-en"><b>Reason for rejection</b>: the NLB sends seven bytes of a plaintext <code>close_notify</code> and closes the connection, whatever the reason. The reason is in <code>tls_verify_status</code> of the access logs, and failed entries did not carry the certificate subject.</span></li><li><span class="l-ko"><b>한도의 기준</b>: 체인 깊이 4와 크기 16KB는 클라이언트가 보내는 인증서에 적용됩니다. 루트를 함께 보내면 그것도 포함됩니다.</span><span class="l-en"><b>How the limits are counted</b>: the chain depth of 4 and the size of 16 KB apply to the certificates the client sends. A root sent along with the chain counts as well.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">NLB 뒤에서 mTLS를 직접 운영하던 기존 방식</a><a href="#ko-s2">mTLS로 늘어난 시간 0.5ms, 설정이 적용되기까지 30초에서 60초</a><a href="#ko-s3">신뢰 체인, 인증서 필터, 폐기 목록 순서로 검사하는 구조</a><a href="#ko-s4">트러스트 스토어를 만들고 리스너에 연결하는 명령</a><a href="#ko-s5">인증서 48종의 판정과 액세스 로그에 남는 사유</a><a href="#ko-s6">거부된 클라이언트에는 사유가 전달되지 않습니다</a><a href="#ko-s7">인증서 필터와 폐기 목록의 동작</a><a href="#ko-s8">설정 변경은 30초에서 60초 뒤에 적용되고 기존 연결은 유지됩니다</a><a href="#ko-s9">지연 시간은 클라이언트의 키 종류가 결정합니다</a><a href="#ko-s10">NLB mTLS를 활용하는 경우</a><a href="#ko-s11">테스트하지 못한 구성과 확인하지 못한 항목</a><a href="#ko-s12">적용할 조건과 적용 전에 확인할 항목</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Running mTLS yourself behind an NLB, the earlier way</a><a href="#en-s2">0.5 ms added by mTLS, 30 to 60 seconds for a setting to apply</a><a href="#en-s3">The order of checks: trust chain, identity filters, revocation list</a><a href="#en-s4">Commands that create a trust store and attach it to a listener</a><a href="#en-s5">Verdicts for 48 certificates and the reasons left in the access log</a><a href="#en-s6">A rejected client is not told the reason</a><a href="#en-s7">How identity filters and revocation lists behave</a><a href="#en-s8">A change applies after 30 to 60 seconds and open connections stay</a><a href="#en-s9">The client key type decides the latency</a><a href="#en-s10">Where NLB mTLS fits</a><a href="#en-s11">Setups I did not test and items I could not confirm</a><a href="#en-s12">When to apply it and what to check first</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>NLB 뒤에서 mTLS를 직접 운영하던 기존 방식</h2></header><div class="prose">
+<p>Network Load Balancer(NLB)는 2026년 11월 19일부터 클라이언트 인증서를 검증하는 상호 TLS 인증(mTLS)을 지원합니다. 그전에는 TCP 서비스 앞에서 클라이언트 인증서를 확인하려면 검증용 프록시를 직접 운영해야 했습니다.</p>
+<p>mTLS는 서버만 인증서를 제시하는 일반 TLS와 달리 클라이언트도 인증서를 제시해 서로를 확인하는 방식입니다. 이 방식이 필요한 서비스는 HTTP가 아닌 경우가 많습니다. TCP로 접속하는 IoT 장비군, 협력사가 전용 프로토콜로 접속하는 시스템, 워크로드마다 SPIFFE ID를 발급하는 내부 플랫폼이 그 예입니다. Application Load Balancer(ALB)도 <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/mutual-authentication.html" target="_blank" rel="noopener">mTLS를 지원</a>하지만 HTTPS 리스너에서 동작하므로 이런 서비스에는 적용하기 어렵습니다.</p>
+<p>그래서 NLB는 TCP 리스너로 연결을 그대로 넘기고 그 뒤의 NGINX, HAProxy, Envoy 같은 프록시가 TLS를 종료하면서 인증서를 검증하는 구성을 많이 사용했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig01-legacy.png" alt="mTLS가 필요한 TCP 서비스의 사례 네 가지, NLB의 TCP 리스너 뒤에서 프록시가 TLS를 종료하고 클라이언트 인증서를 검증하던 기존 구성, 그 구성의 어려움 네 가지를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 프록시가 클라이언트 인증서를 검증하던 기존 구성과 어려웠던 점</figcaption></figure>
+<p>이 구성에서는 프록시가 운영 대상이 됩니다. X.509 검증 라이브러리의 보안 패치를 프록시마다 적용해야 하고 CA 번들과 인증서 폐기 목록(CRL)을 모든 프록시에 같은 시점에 배포해야 합니다. 핸드셰이크 연산에 맞춰 프록시 용량을 따로 관리하고 서비스마다 다른 접근 범위는 프록시 설정이나 애플리케이션 코드로 구현합니다.</p>
+<p><a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/introducing-mtls-for-network-load-balancer/" target="_blank" rel="noopener">발표 블로그</a>도 직접 만든 솔루션과 서드파티 프록시의 유지 부담을 이 기능의 배경으로 설명합니다. 새 기능은 이 검증을 NLB의 TLS 리스너로 옮깁니다. 이 글은 그 동작을 서울 리전에서 테스트한 기록입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>mTLS로 늘어난 시간 0.5ms, 설정이 적용되기까지 30초에서 60초</h2></header><div class="prose">
+<p>서울 리전(ap-northeast-2)의 내부 NLB에 mTLS를 활성화하고 조건이 다른 클라이언트 인증서 48종으로 접속했습니다. ECDSA P-256 인증서를 제시한 연결은 mTLS가 없는 연결보다 첫 응답까지 0.5ms 더 걸렸습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig02-setup.png" alt="lab-vpc01의 전용 서브넷 두 개에 둔 클라이언트 1대, 2개 가용 영역의 내부 NLB와 리스너 세 개, 대상 2대, 트러스트 스토어와 액세스 로그용 S3 버킷으로 이루어진 테스트 구성과 측정 방법 세 가지, 테스트 순서" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 전체 테스트 구성, 측정 방법, 테스트 순서</figcaption></figure>
+<p>테스트 전에는 두 가지를 예상했습니다. 인증서 검증이 연결 지연을 뚜렷하게 늘린다는 것과 인증서를 폐기하면 그 인증서로 맺은 연결이 곧 끊긴다는 것입니다. 두 예상 모두 맞지 않았습니다. 지연은 클라이언트가 개인 키로 서명하는 시간만큼 늘었고 폐기는 새로 맺는 연결에만 적용됐습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>결과</th></tr>
+</thead>
+<tbody>
+<tr><td>mTLS로 늘어난 시간</td><td>ECDSA P-256 0.5ms, RSA 2048 3.8ms, RSA 4096 24.9ms</td></tr>
+<tr><td>필터 100개, CRL 10만 건의 영향</td><td>지연 시간 변화 없음</td></tr>
+<tr><td>설정 변경이 적용되는 시간</td><td>호출 후 31초에서 62초</td></tr>
+<tr><td>변경 전에 맺은 연결</td><td>유지 (폐기된 인증서의 연결 포함)</td></tr>
+<tr><td>거부된 클라이언트에 보이는 것</td><td>사유 없는 연결 종료</td></tr>
+<tr><td>거부 사유를 확인하는 곳</td><td>액세스 로그의 <code>tls_verify_status</code></td></tr>
+<tr><td>체인 깊이 4의 기준</td><td>클라이언트가 보내는 인증서 수</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 주요 결과. 2026년 11월 23일 서울 리전, 지연 시간은 같은 가용 영역의 클라이언트에서 조건마다 300회씩 3번 측정한 중앙값 평균의 차이</p>
+<p>운영에서 먼저 알아 둘 결과는 거부 사유입니다. 사유가 클라이언트에 전달되지 않으므로 접속에 실패한 쪽에서는 원인을 알 수 없고 NLB의 액세스 로그가 유일한 단서입니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>신뢰 체인, 인증서 필터, 폐기 목록 순서로 검사하는 구조</h2></header><div class="prose">
+<p>NLB의 mTLS는 TLS 리스너에서 verify 모드로만 동작합니다. 리스너에 트러스트 스토어(Trust store)를 연결하면 NLB가 핸드셰이크 중에 클라이언트 인증서를 요청하고 검증합니다. 트러스트 스토어는 Amazon S3에 올린 CA 인증서 번들과 CRL로 만드는 리소스입니다.</p>
+<p><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">사용 설명서</a>에 따르면 검사는 세 단계입니다. 먼저 인증서가 트러스트 스토어의 CA까지 이어지는지 확인합니다. 다음으로 클라이언트 인증서 필터(Client certificate identity filters)가 있으면 그중 하나 이상과 일치하는지 봅니다. 마지막으로 CRL에 올라 있는지 확인합니다. 세 단계를 통과한 연결만 대상으로 전달되고 대상에는 인증서 정보가 전달되지 않습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig03-order.png" alt="클라이언트 인증서가 신뢰 체인과 유효 기간과 용도 검사, 인증서 필터, 폐기 목록 검사를 차례로 거치는 흐름과 단계마다 액세스 로그에 남는 사유 코드를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> NLB가 클라이언트 인증서를 검사하는 순서와 단계별 액세스 로그 사유</figcaption></figure>
+<p>건물 출입에 비유하면 이해하기 쉽습니다. 트러스트 스토어는 출입증을 발급할 수 있는 기관의 목록이고 인증서 필터는 이 층에 들어올 수 있는 부서의 명단이며 CRL은 분실 신고된 출입증의 목록입니다. 경비원은 출입증이 진짜인지 먼저 확인하고 명단을 본 다음 분실 신고 여부를 봅니다. 통과시킨 사람이 누구인지는 사무실에 알려 주지 않습니다. 다만 실제 NLB는 통과시킨 연결의 인증서 주체를 액세스 로그에 남깁니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>트러스트 스토어를 만들고 리스너에 연결하는 명령</h2></header><div class="prose">
+<p>설정은 두 단계입니다. CA 번들을 S3에 올려 트러스트 스토어를 만들고 TLS 리스너의 상호 인증 모드를 <code>verify</code>로 바꿉니다. 테스트에는 AWS CLI 2.42.1을 사용했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ aws elbv2 create-trust-store \
+    --name nlb-mtls-lab-ts \
+    --ca-certificates-bundle-s3-bucket amzn-s3-demo-bucket \
+    --ca-certificates-bundle-s3-key trust/bundle-root.pem
+{
+    "TrustStores": [
+        {
+            "Name": "nlb-mtls-lab-ts",
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+            "Status": "CREATING",
+            "NumberOfCaCertificates": 1,
+            "TotalRevokedEntries": 0
+        }
+    ]
+}</code></pre></div>
+<p>트러스트 스토어가 <code>ACTIVE</code>가 된 뒤 리스너를 수정합니다. 활성화 전과 후의 설정을 같은 조회 항목으로 확인했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 활성화 전
+$ aws elbv2 describe-listeners --listener-arns $LISTENER_ARN \
+    --query 'Listeners[0].MutualAuthentication'
+{
+    "Mode": "off"
+}
+
+# 활성화
+$ aws elbv2 modify-listener --listener-arn $LISTENER_ARN \
+    --mutual-authentication Mode=verify,TrustStoreArn=$TRUST_STORE_ARN \
+    --query 'Listeners[0].MutualAuthentication'
+{
+    "Mode": "verify",
+    "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+    "IgnoreClientCertificateExpiry": false,
+    "TrustStoreAssociationStatus": "active",
+    "AdvertiseTrustStoreCaNames": "off",
+    "ClientCertificateIdentityFilters": []
+}</code></pre></div>
+<p>호출은 0.67초 만에 끝났고 응답의 <code>TrustStoreAssociationStatus</code>도 바로 <code>active</code>였습니다. 하지만 인증서 없는 접속이 실제로 거부되기 시작한 시점은 그보다 뒤였습니다. 적용 시간은 뒤의 챕터에서 따로 다룹니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>인증서 48종의 판정과 액세스 로그에 남는 사유</h2></header><div class="prose">
+<p>루트 CA 하나만 넣은 트러스트 스토어에 인증서 48종을 TLS 1.3과 TLS 1.2로 한 번씩 제시했습니다. 접속 114건을 클라이언트 포트 번호로 액세스 로그와 대조해 건마다 사유를 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>인증서 조건</th><th>결과</th><th>액세스 로그 사유</th></tr>
+</thead>
+<tbody>
+<tr><td>루트 CA 발급, EKU clientAuth</td><td><span class="pill good">통과</span></td><td><code>Success</code></td></tr>
+<tr><td>인증서 없음</td><td><span class="pill bad">거부</span></td><td><code>ClientCertMissing</code></td></tr>
+<tr><td>자체 서명, 다른 CA 발급</td><td><span class="pill bad">거부</span></td><td><code>ClientCertUntrusted</code></td></tr>
+<tr><td>만료, 유효 기간 시작 전</td><td><span class="pill bad">거부</span></td><td><code>ClientCertExpired</code>, <code>ClientCertNotYetValid</code></td></tr>
+<tr><td>EKU 없음, KU가 digitalSignature나 keyAgreement</td><td><span class="pill good">통과</span></td><td><code>Success</code></td></tr>
+<tr><td>EKU가 serverAuth, emailProtection, anyExtendedKeyUsage뿐</td><td><span class="pill bad">거부</span></td><td><code>ClientCertPurposeInvalid</code></td></tr>
+<tr><td>KU가 keyEncipherment뿐</td><td><span class="pill bad">거부</span></td><td><code>ClientCertPurposeInvalid</code></td></tr>
+<tr><td>RSA 2048부터 8192, ECDSA P-256, P-384, P-521</td><td><span class="pill good">통과</span></td><td><code>Success</code></td></tr>
+<tr><td>RSA 1024</td><td><span class="pill bad">거부</span></td><td><code>ClientCertTypeUnsupported</code></td></tr>
+<tr><td>Ed25519</td><td><span class="pill bad">거부</span></td><td><code>ClientCertMissing</code></td></tr>
+<tr><td>SHA-1 서명</td><td><span class="pill bad">거부</span></td><td><code>ClientCertUntrusted</code>(TLS 1.3), <code>ClientCertIncompatible</code>(TLS 1.2)</td></tr>
+<tr><td>주체 DN 1,583바이트</td><td><span class="pill bad">거부</span></td><td><code>ClientCertInvalid</code></td></tr>
+<tr><td>인증서 5장을 보냄</td><td><span class="pill bad">거부</span></td><td><code>ClientCertMaxChainDepthExceeded</code></td></tr>
+<tr><td>체인 16,006바이트</td><td><span class="pill bad">거부</span></td><td><code>ClientCertMaxSizeExceeded</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 인증서 조건별 판정과 액세스 로그의 <code>tls_verify_status</code> 값. 트러스트 스토어에 루트 CA 하나, 필터와 CRL 없음. EKU는 확장 키 용도, KU는 키 용도 확장</p>
+<p>판정은 <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">사용 설명서의 요구 사항</a>과 일치했습니다. 문서에서 읽을 수 없던 동작은 세 가지입니다. 인증서를 내지 않은 접속은 <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-access-logs.html" target="_blank" rel="noopener">사유 코드 표</a>에 없는 <code>ClientCertMissing</code>으로 기록됩니다. 확장 키 용도(EKU)가 <code>anyExtendedKeyUsage</code>뿐인 인증서는 <code>clientAuth</code>로 인정되지 않습니다. Ed25519 인증서는 NLB가 요청하는 서명 알고리즘에 없어서 클라이언트가 보내지 못하고 인증서 없음으로 기록됩니다.</p>
+<p>만료된 인증서를 허용하는 설정(<code>IgnoreClientCertificateExpiry</code>)을 활성화하면 유효 기간이 시작되지 않은 인증서도 함께 통과했습니다.</p>
+<h3>체인 깊이 4는 클라이언트가 보내는 인증서 수입니다</h3>
+<p>문서의 한도인 체인 깊이 4와 체인 크기 16KB는 검증 경로가 아니라 클라이언트가 보내는 인증서를 기준으로 적용됐습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig04-limits.png" alt="클라이언트가 보내는 인증서가 4장 이하이면 통과하고 5장이면 거부되는 사례 여섯 가지와, 보내는 체인의 크기가 15,793바이트이면 통과하고 16,006바이트이면 거부되는 크기 한도를 나타낸 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 체인 깊이와 크기 한도가 적용되는 기준</figcaption></figure>
+<p>중간 CA가 세 개인 체인은 리프와 중간 CA 세 장을 보내면 통과하고 루트까지 다섯 장을 보내면 거부됩니다. 중간 CA를 트러스트 스토어에 넣으면 클라이언트가 그 인증서를 보내지 않아도 됩니다. 이 방법으로 검증 경로가 6단계인 체인도 네 장만 보내 통과했습니다. 크기는 15,793바이트까지 통과했고 16,006바이트부터 거부됐습니다. 리프와 중간 CA를 합쳐 16,061바이트인 경우도 거부됐습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>거부된 클라이언트에는 사유가 전달되지 않습니다</h2></header><div class="prose">
+<p>거부된 접속이 클라이언트에 어떻게 보이는지 curl 8.21로 확인했습니다. 서버 인증서도 검증하려고 <code>--resolve</code>로 NLB 주소를 서버 인증서의 이름에 연결했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ R="--cacert srv-ca.pem --resolve nlb.mtls-lab.example.com:443:10.1.200.73"
+
+# 유효한 인증서
+$ curl -sS $R --cert c01-eng.pem --key c01-eng.key https://nlb.mtls-lab.example.com/
+{"msg": "hello from mtls-lab target", "host": "ip-10-1-201-161.ap-northeast-2.compute.internal", "port": 8080, ...}
+
+# 인증서 없음, TLS 1.3
+$ curl -sS $R --tlsv1.3 https://nlb.mtls-lab.example.com/
+curl: (56) Send failure: Connection reset by peer
+
+# 인증서 없음, TLS 1.2
+$ curl -sS $R --tls-max 1.2 https://nlb.mtls-lab.example.com/
+curl: (35) TLS connect error: error:0A00010B:SSL routines::wrong version number
+
+# 자체 서명 인증서, TLS 1.3
+$ curl -sS $R --tlsv1.3 --cert c04-selfsigned.pem --key c04-selfsigned.key https://nlb.mtls-lab.example.com/
+curl: (56) Send failure: Connection reset by peer</code></pre></div>
+<p>인증서가 없는 경우와 신뢰하지 않는 인증서, 만료된 인증서의 오류가 모두 같았습니다. 패킷을 캡처해 보니 NLB는 사유와 관계없이 평문 <code>close_notify</code> 7바이트를 보내고 연결을 닫습니다. TLS 1.3에서는 클라이언트의 핸드셰이크가 먼저 끝나므로 첫 요청에서 연결이 끊기고 TLS 1.2에서는 핸드셰이크 도중에 실패합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig05-reject.png" alt="거부될 때 TLS 1.3과 TLS 1.2 클라이언트가 받는 메시지 순서와 오류 문구, NLB가 보내는 7바이트의 구성, 액세스 로그의 성공 항목과 실패 항목에 남는 필드를 비교한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> 거부된 클라이언트가 보는 것과 액세스 로그에 남는 것</figcaption></figure>
+<p>사유는 액세스 로그의 <code>tls_verify_status</code> 필드에 남습니다. 로그를 S3에서 내려받아 사유별로 집계한 명령과 결과입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ aws s3 sync s3://amzn-s3-demo-bucket/access-logs/ ./logs --exclude "*" --include "*.log.gz"
+$ find ./logs -name '*.log.gz' | xargs zcat \
+    | awk '{for(i=1;i&lt;=NF;i++) if($i ~ /^(Success|Failed:)/){print $i; break}}' \
+    | sort | uniq -c | sort -rn
+  25457 Success
+   3163 Failed:CertificateFilterNoMatch
+   1938 Failed:ClientCertCrlHit
+   1379 Failed:ClientCertMissing
+    994 Failed:ClientCertUntrusted
+     20 Failed:ClientCertMaxChainDepthExceeded
+      8 Failed:ClientCertPurposeInvalid
+      6 Failed:ClientCertMaxSizeExceeded
+      4 Failed:ClientCertExpired
+      2 Failed:ClientCertTypeUnsupported
+      2 Failed:ClientCertNotYetValid
+      2 Failed:ClientCertInvalid
+      1 Failed:ClientCertIncompatible</code></pre></div>
+<p>성공한 접속에는 인증서의 주체, 유효 기간, 일련번호가 기록됩니다. 실패한 접속 7,519건은 이 세 필드와 TLS 버전, 암호 스위트, SNI가 모두 <code>-</code>였습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>tls 3.0 2026-11-23T02:32:51 net/nlb-mtls-lab/0123456789abcdef 0123456789abcdef 10.1.200.81:54978 10.1.201.5:443 13 7 50 259 - arn:aws:acm:ap-northeast-2:111122223333:certificate/EXAMPLE - TLS_AES_128_GCM_SHA256 tlsv13 x25519 nlb.mtls-lab.example.com - - - 2026-11-23T02:32:51 Success "CN=client01.example.com,OU=Engineering,O=MTLS Lab,C=KR" NotBefore=2026-11-23T01:20:40Z;NotAfter=2026-12-23T02:20:40Z 3e2518c1979d1658f941d2f9e9a07dc455cfd8c4
+tls 3.0 2026-11-23T02:36:44 net/nlb-mtls-lab/0123456789abcdef 0123456789abcdef 10.1.200.81:46768 10.1.200.73:443 7 - 0 0 - - - - - - - - - - 2026-11-23T02:36:44 Failed:ClientCertExpired "-" - -</code></pre></div>
+<p>따라서 실패 로그로 알 수 있는 것은 시각, 클라이언트 주소와 포트, 사유입니다. 어떤 인증서가 거부됐는지는 클라이언트 주소로 추적해야 합니다. 거부된 접속은 대상에 도달하지 않았습니다. 200건을 거부시키는 동안 대상에 열린 클라이언트 연결은 0건이었습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>인증서 필터와 폐기 목록의 동작</h2></header><div class="prose">
+<p>인증서 필터는 같은 CA가 발급한 인증서 가운데 일부만 통과시킵니다. 발표 블로그의 예와 같이 조직 단위(OU)가 Production이거나 SPIFFE ID가 prod 네임스페이스인 인증서만 허용했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ cat filters.json
+{
+  "Mode": "verify",
+  "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+  "ClientCertificateIdentityFilters": [
+    { "Field": "subject-ou", "Action": "accept", "MatchType": "exact",  "Value": "Production" },
+    { "Field": "san-uri",    "Action": "accept", "MatchType": "prefix", "Value": "spiffe://example.com/ns/prod/" }
+  ]
+}
+$ aws elbv2 modify-listener --listener-arn $LISTENER_ARN \
+    --mutual-authentication file://filters.json \
+    --query 'Listeners[0].MutualAuthentication.ClientCertificateIdentityFilters[].Value'
+[
+    "Production",
+    "spiffe://example.com/ns/prod/"
+]</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>인증서</th><th>결과</th><th>근거</th></tr>
+</thead>
+<tbody>
+<tr><td>OU=Engineering, SAN 없음</td><td><span class="pill bad">거부</span></td><td><code>CertificateFilterNoMatch</code></td></tr>
+<tr><td>OU=Production, prod SPIFFE ID</td><td><span class="pill good">통과</span></td><td>두 필터에 일치</td></tr>
+<tr><td>OU=Engineering, prod SPIFFE ID</td><td><span class="pill good">통과</span></td><td>필터 하나에 일치 (OR)</td></tr>
+<tr><td>OU가 Engineering과 Production 두 개</td><td><span class="pill good">통과</span></td><td>값 하나만 맞으면 일치</td></tr>
+<tr><td>OU=production (소문자)</td><td><span class="pill good">통과</span></td><td>OU는 대소문자를 구분하지 않음</td></tr>
+<tr><td>SPIFFE ID 경로가 <code>/ns/PROD/</code></td><td><span class="pill bad">거부</span></td><td>URI의 경로는 대소문자를 구분</td></tr>
+<tr><td>OU=Production, 만료</td><td><span class="pill bad">거부</span></td><td><code>ClientCertExpired</code> (필터보다 먼저 검사)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 필터 두 개를 적용한 상태의 판정. 마지막 행은 검사 순서에 따른 사유</p>
+<p>API를 호출할 때 알아 둘 점이 두 가지 있습니다. <code>modify-listener</code>에서 필터 항목을 생략하면 기존 필터가 유지됩니다. 필터를 지우려면 빈 목록을 명시해야 합니다. 값에는 인쇄 가능한 ASCII만 허용되므로 한글 OU는 필터로 지정할 수 없습니다.</p>
+<p>폐기는 CRL을 트러스트 스토어에 추가하는 방식입니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ aws elbv2 add-trust-store-revocations --trust-store-arn $TRUST_STORE_ARN \
+    --revocation-contents RevocationType=CRL,S3Bucket=amzn-s3-demo-bucket,S3Key=crl/crl-root-1.pem
+{
+    "TrustStoreRevocations": [
+        {
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+            "RevocationId": 1,
+            "RevocationType": "CRL",
+            "NumberOfRevokedEntries": 2
+        }
+    ]
+}</code></pre></div>
+<p>검사 순서는 로그로 확인했습니다. 폐기됐지만 필터에도 맞지 않는 인증서는 <code>CertificateFilterNoMatch</code>로, 폐기됐고 필터에 맞는 인증서는 <code>ClientCertCrlHit</code>로 기록됐습니다. 중간 CA의 인증서를 폐기하면 그 아래에서 발급한 인증서가 모두 거부됩니다. 트러스트 스토어의 CA가 서명하지 않은 CRL은 추가하는 시점에 거부됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>설정 변경은 30초에서 60초 뒤에 적용되고 기존 연결은 유지됩니다</h2></header><div class="prose">
+<p>설정을 바꾸는 API는 1초 안에 끝나지만 동작이 바뀌는 데는 시간이 걸립니다. 0.25초마다 새 연결을 맺는 관찰자를 NLB 주소마다 두고 변경 여덟 번의 적용 시점을 측정했습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig06-timeline.png" alt="mTLS 활성화, CA 번들 교체, 필터 추가와 제거, CRL 추가, mTLS 비활성화를 포함한 여덟 번의 변경이 가용 영역별 NLB 노드에서 호출 후 몇 초에 적용되기 시작하고 끝났는지를 나타낸 시간표와 기존 연결의 유지 결과" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 6.</b> 설정 변경 여덟 번이 NLB 노드별로 적용된 시점</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>변경</th><th>노드 A: 시작, 완료</th><th>노드 B: 시작, 완료</th></tr>
+</thead>
+<tbody>
+<tr><td>mTLS 활성화</td><td class="num">42.6초, 57.9초</td><td class="num">31.6초, 46.6초</td></tr>
+<tr><td>CA 번들 교체</td><td class="num">40.2초, 51.8초</td><td class="num">39.5초, 45.2초</td></tr>
+<tr><td>필터 추가</td><td class="num">41.5초, 51.0초</td><td class="num">33.7초, 43.2초</td></tr>
+<tr><td>필터 제거</td><td class="num">44.7초, 54.5초</td><td class="num">31.0초, 42.2초</td></tr>
+<tr><td>필터 추가 (2회차)</td><td class="num">44.0초, 57.7초</td><td class="num">41.4초, 45.9초</td></tr>
+<tr><td>CRL 추가</td><td class="num">45.4초, 61.7초</td><td class="num">32.5초, 45.8초</td></tr>
+<tr><td>mTLS 비활성화</td><td class="num">46.2초, 58.5초</td><td class="num">30.7초, 40.7초</td></tr>
+<tr><td>필터 추가 (3회차)</td><td class="num">48.0초, 57.5초</td><td class="num">36.7초, 41.2초</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> API 호출 시각을 0초로 한 적용 시점. 시작은 새 동작이 처음 관찰된 시각, 완료는 이전 동작이 마지막으로 관찰된 시각</p>
+<p>모든 변경이 호출 후 31초에서 48초 사이에 적용되기 시작해 41초에서 62초 사이에 끝났습니다. 가용 영역별 NLB 노드마다 시점이 달랐고 한 노드 안에서도 5초에서 16초 동안 이전 동작과 새 동작이 섞였습니다. 변경과 무관한 클라이언트의 접속은 전환 중에 한 건도 실패하지 않았습니다.</p>
+<p>변경 전에 맺은 연결은 끊기지 않았습니다. 필터를 추가한 뒤에도 필터에 맞지 않는 인증서로 맺어 둔 연결 12개가 유지됐습니다. CRL을 추가한 뒤에도 폐기된 인증서로 맺어 둔 연결 8개가 측정을 마친 288초까지 모두 유지됐습니다. 폐기는 새 핸드셰이크에만 적용되므로 이미 연결된 클라이언트를 내보내려면 대상에서 연결을 끊는 절차가 따로 필요합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>지연 시간은 클라이언트의 키 종류가 결정합니다</h2></header><div class="prose">
+<p>같은 가용 영역의 클라이언트에서 TCP 연결부터 첫 응답 바이트까지의 시간을 조건마다 900회 측정했습니다. 수치는 300회씩 3번 측정한 중앙값의 평균입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig07-latency.png" alt="mTLS가 없는 리스너와 ECDSA P-256, P-384, RSA 2048, RSA 4096 인증서를 사용한 mTLS 리스너의 첫 응답까지의 시간을 비교한 막대 그래프와 클라이언트 서명 시간, 필터 100개와 CRL 10만 건 조건의 결과" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 7.</b> 클라이언트 키 종류별 첫 응답까지의 시간(TLS 1.3)</figcaption></figure>
+<p>mTLS가 없는 리스너는 8.1ms였습니다. ECDSA P-256 인증서는 8.6ms, RSA 2048은 11.9ms, RSA 4096은 33.0ms였습니다. 늘어난 시간은 클라이언트의 서명 시간과 거의 같습니다. 클라이언트로 사용한 t4g.small에서 <code>openssl speed</code>로 측정한 서명 시간은 RSA 2048이 3.4ms, RSA 4096이 24.0ms였습니다. 필터 100개를 적용하거나 10만 건짜리 CRL을 추가해도 수치는 달라지지 않았습니다.</p>
+<p>연결을 자주 새로 맺는 장비군에서는 인증서의 키 종류가 지연과 장비의 연산 부담을 정합니다. 요금에도 차이가 있습니다. <a href="https://aws.amazon.com/ko/elasticloadbalancing/pricing/" target="_blank" rel="noopener">요금 페이지</a>에 따르면 NLB 용량 단위(NLCU) 하나는 일반 TLS 신규 연결을 초당 50건, mTLS 신규 연결을 초당 25건으로 계산합니다. 서울 리전에서는 NLB에 연결한 트러스트 스토어마다 시간당 0.005 USD가 부과됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>NLB mTLS를 활용하는 경우</h2></header><div class="prose">
+<p>가장 잘 맞는 경우는 HTTP가 아닌 TCP 서비스에서 인증서 검증용 프록시를 운영하고 있는 환경입니다. 대상이 인증서 내용을 읽을 필요가 없다면 프록시를 없애고 NLB에 검증을 맡길 수 있습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig08-usecases.png" alt="NLB mTLS를 활용하는 경우 네 가지인 TCP 장비군, 중앙 PKI의 트러스트 스토어 공유, 루트를 유지한 개별 인증서 폐기, 리스너별 접근 범위와 각 경우에 사용하는 기능, 맞지 않는 경우 세 가지를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 8.</b> NLB mTLS를 활용하는 경우와 맞지 않는 경우</figcaption></figure>
+<p>인증서 필터를 사용하거나 중간 CA만 넣은 트러스트 스토어를 사용하면 CA를 나누지 않고도 리스너마다 접근 범위를 다르게 할 수 있습니다. 테스트에서 중간 CA만 넣은 트러스트 스토어는 그 CA가 발급한 인증서만 통과시켰습니다. 이미 ALB에서 mTLS를 사용한다면 차이를 먼저 확인합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>ALB</th><th>NLB</th></tr>
+</thead>
+<tbody>
+<tr><td>리스너</td><td>HTTPS</td><td>TLS</td></tr>
+<tr><td>모드</td><td>passthrough, verify</td><td>verify</td></tr>
+<tr><td>대상에 전달되는 인증서 정보</td><td><code>X-Amzn-Mtls</code> 헤더</td><td>없음</td></tr>
+<tr><td>인증서 필터</td><td>지원하지 않음</td><td>리스너당 100개</td></tr>
+<tr><td>같은 트러스트 스토어 연결</td><td>가능</td><td>가능 (ALB와 동시에 연결)</td></tr>
+<tr><td>EKU가 serverAuth뿐인 인증서</td><td>통과</td><td>거부</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> ALB와 NLB의 mTLS 비교. 위 세 행은 문서 기준, 아래 세 행은 같은 트러스트 스토어로 테스트한 결과</p>
+<p>ALB에서 사용하던 트러스트 스토어를 NLB에도 연결할 수 있으므로 CA 번들과 CRL을 한곳에서 관리합니다. 다만 판정이 같지는 않았습니다. ALB에서 옮겨 올 때는 클라이언트 인증서의 EKU를 먼저 확인하는 것을 권고합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>테스트하지 못한 구성과 확인하지 못한 항목</h2></header><div class="prose">
+<p>이 글의 결과는 내부 NLB 한 대와 클라이언트 한 대로 얻은 것입니다. 아래 항목은 테스트하지 않았거나 결과를 얻지 못했습니다.</p>
+<ul>
+<li>AWS PrivateLink 엔드포인트 서비스를 거치는 접속과 인터넷 연결형 NLB</li>
+<li>AWS Private CA가 발급한 인증서와 AWS RAM으로 다른 계정에 공유한 트러스트 스토어</li>
+<li>AWS CloudFormation과 AWS Load Balancer Controller로 구성하는 방법</li>
+<li>동시 연결이 많은 조건의 처리량</li>
+<li>세션 재개. <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">문서</a>는 verify 모드에서 지원하지 않는다고 설명합니다. 테스트에서는 mTLS가 없는 리스너에서도 12회 중 한 번도 재개되지 않아 차이를 비교하지 못했습니다.</li>
+<li>mTLS 전용 CloudWatch 지표. 발표 블로그는 핸드셰이크 수와 오류 수 같은 지표를 언급하지만 테스트한 NLB에는 생기지 않았습니다. 거부는 기존 지표인 <code>ClientTLSNegotiationErrorCount</code>에 집계됐고 합계 7,519는 실패 로그 수와 같았습니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>적용할 조건과 적용 전에 확인할 항목</h2></header><div class="prose">
+<p>NLB mTLS는 TCP 서비스의 클라이언트 인증을 프록시 없이 처리하려는 경우에 적용할 만합니다. 대상이 인증서의 주체나 일련번호를 받아야 한다면 맞지 않습니다. 이 경우 HTTP 서비스는 ALB를 사용하고 그 밖의 서비스는 대상에서 TLS를 종료하는 구성을 유지합니다. 한 NLB에 mTLS 리스너가 세 개 이상 필요한 경우에도 맞지 않습니다. <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-limits.html" target="_blank" rel="noopener">할당량</a>은 NLB당 두 개이고 늘릴 수 없습니다.</p>
+<ol>
+<li>클라이언트 인증서의 키 종류, EKU, 보내는 체인의 장수와 크기를 앞의 인증서 조건 표와 대조합니다.</li>
+<li>클라이언트가 중간 CA를 함께 보내는지 확인합니다. 보내지 않는다면 중간 CA를 트러스트 스토어에 넣습니다.</li>
+<li>mTLS를 활성화하기 전에 액세스 로그를 먼저 활성화합니다. 거부 사유를 확인하는 방법이 로그뿐입니다.</li>
+<li>설정을 바꾼 뒤에는 1분 이상 지난 다음에 결과를 검증합니다.</li>
+<li>인증서 폐기 절차에 이미 맺은 연결을 끊는 단계를 넣습니다.</li>
+<li>재접속이 잦은 클라이언트에는 ECDSA 인증서를 검토합니다.</li>
+</ol>
+<p>이 글의 지연 시간과 적용 시간은 같은 가용 영역의 클라이언트 한 대에서 측정한 값입니다. 클라이언트의 CPU, 네트워크 거리, 동시 연결 수가 다르면 수치도 달라집니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Running mTLS yourself behind an NLB, the earlier way</h2></header><div class="prose">
+<p>Since November 19, 2026, Network Load Balancer (NLB) supports mutual TLS authentication (mTLS), which verifies client certificates. Before that, checking client certificates in front of a TCP service meant running a verifying proxy yourself.</p>
+<p>In ordinary TLS only the server presents a certificate. In mTLS the client presents one as well, so each side verifies the other. Services that need this are often not HTTP: fleets of IoT devices that connect over TCP, systems that partners reach with their own protocol, and internal platforms that issue a SPIFFE ID to every workload. Application Load Balancer (ALB) <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/mutual-authentication.html" target="_blank" rel="noopener">supports mTLS</a> too, but on HTTPS listeners, so it is hard to apply to such services.</p>
+<p>A common setup was therefore an NLB that passes the connection on through a TCP listener, with a proxy such as NGINX, HAProxy or Envoy behind it that ends TLS and verifies the certificate.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig01-legacy-en.png" alt="Four examples of TCP services that need mTLS, the earlier setup where a proxy behind the TCP listener of an NLB ends TLS and verifies client certificates, and four things that were hard about it" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The earlier setup where a proxy verified client certificates, and what was hard about it</figcaption></figure>
+<p>In that setup the proxy is something you operate. Security patches of the X.509 verification library go onto every proxy, and the CA bundle and the certificate revocation list (CRL) have to reach every proxy at the same moment. Proxy capacity is managed separately for the handshake load, and the access scope of each service is written in proxy settings or in application code.</p>
+<p>The <a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/introducing-mtls-for-network-load-balancer/" target="_blank" rel="noopener">announcement blog post</a> also names the burden of maintaining home-grown solutions and third-party proxies as the background of the feature. The new feature moves this verification into the TLS listener of the NLB. This post is a record of testing that behaviour in the Seoul Region.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>0.5 ms added by mTLS, 30 to 60 seconds for a setting to apply</h2></header><div class="prose">
+<p>I enabled mTLS on an internal NLB in the Seoul Region (ap-northeast-2) and connected with 48 kinds of client certificates, each made for a different condition. A connection that presented an ECDSA P-256 certificate took 0.5 ms longer to the first response than a connection without mTLS.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig02-setup-en.png" alt="The test setup: one client in two dedicated subnets of lab-vpc01, an internal NLB in two Availability Zones with three listeners, two targets, trust stores and an S3 bucket for access logs, with the three ways of measuring and the order of the tests" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> The whole test setup, how it was measured and the order of the tests</figcaption></figure>
+<p>Before the test I expected two things: that certificate verification would add clearly to the connection latency, and that revoking a certificate would soon cut the connections opened with it. Neither was right. Latency grew by the time the client takes to sign with its private key, and revocation applied only to connections opened afterwards.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>Time added by mTLS</td><td>ECDSA P-256 0.5 ms, RSA 2048 3.8 ms, RSA 4096 24.9 ms</td></tr>
+<tr><td>Effect of 100 filters or a CRL with 100,000 entries</td><td>No change in latency</td></tr>
+<tr><td>Time for a configuration change to apply</td><td>31 to 62 seconds after the call</td></tr>
+<tr><td>Connections opened before a change</td><td>Stay open (including those of a revoked certificate)</td></tr>
+<tr><td>What a rejected client sees</td><td>The connection ends without a reason</td></tr>
+<tr><td>Where the reason is found</td><td><code>tls_verify_status</code> in the access log</td></tr>
+<tr><td>What the chain depth of 4 counts</td><td>The certificates the client sends</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Main results. Seoul Region, November 23, 2026. Latency is the difference of the mean of three medians of 300 connections per condition, from a client in the same Availability Zone</p>
+<p>The result to know first for operations is about the reason for a rejection. It is not passed to the client, so the side that failed to connect cannot tell the cause, and the access log of the NLB is the only clue.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>The order of checks: trust chain, identity filters, revocation list</h2></header><div class="prose">
+<p>mTLS on NLB works on TLS listeners, in verify mode only. When a trust store is attached to a listener, the NLB requests a client certificate during the handshake and verifies it. A trust store is a resource built from a CA certificate bundle and CRLs uploaded to Amazon S3.</p>
+<p>According to the <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">User Guide</a> there are three checks. First the NLB verifies that the certificate chains to a CA in the trust store. Next, if client certificate identity filters are configured, it checks that the certificate matches at least one of them. Finally it checks whether the certificate is in a CRL. Only connections that pass all three reach the targets, and no certificate data is passed to the targets.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig03-order-en.png" alt="The flow of a client certificate through the trust chain, validity and purpose check, the identity filters and the revocation list, with the reason code left in the access log at each step" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> The order in which the NLB checks a client certificate and the access log reason at each step</figcaption></figure>
+<p>Entering a building is a useful comparison. The trust store is the list of organisations allowed to issue passes, the identity filters are the list of departments allowed on this floor, and the CRL is the list of passes reported lost. The guard first checks that the pass is genuine, then looks at the list, then checks whether it was reported lost. The guard does not tell the office who was let in. The real NLB differs in one point: it records the certificate subject of an admitted connection in the access log.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Commands that create a trust store and attach it to a listener</h2></header><div class="prose">
+<p>There are two steps. Upload the CA bundle to S3 and create a trust store from it, then set the mutual authentication mode of the TLS listener to <code>verify</code>. I used AWS CLI 2.42.1.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ aws elbv2 create-trust-store \
+    --name nlb-mtls-lab-ts \
+    --ca-certificates-bundle-s3-bucket amzn-s3-demo-bucket \
+    --ca-certificates-bundle-s3-key trust/bundle-root.pem
+{
+    "TrustStores": [
+        {
+            "Name": "nlb-mtls-lab-ts",
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+            "Status": "CREATING",
+            "NumberOfCaCertificates": 1,
+            "TotalRevokedEntries": 0
+        }
+    ]
+}</code></pre></div>
+<p>Once the trust store is <code>ACTIVE</code>, modify the listener. I read the setting before and after with the same query.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># before enabling
+$ aws elbv2 describe-listeners --listener-arns $LISTENER_ARN \
+    --query 'Listeners[0].MutualAuthentication'
+{
+    "Mode": "off"
+}
+
+# enable
+$ aws elbv2 modify-listener --listener-arn $LISTENER_ARN \
+    --mutual-authentication Mode=verify,TrustStoreArn=$TRUST_STORE_ARN \
+    --query 'Listeners[0].MutualAuthentication'
+{
+    "Mode": "verify",
+    "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+    "IgnoreClientCertificateExpiry": false,
+    "TrustStoreAssociationStatus": "active",
+    "AdvertiseTrustStoreCaNames": "off",
+    "ClientCertificateIdentityFilters": []
+}</code></pre></div>
+<p>The call returned in 0.67 seconds and <code>TrustStoreAssociationStatus</code> in the response was already <code>active</code>. But connections without a certificate actually began to be rejected later than that. A later chapter covers the time to apply.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Verdicts for 48 certificates and the reasons left in the access log</h2></header><div class="prose">
+<p>With a trust store that held a single root CA, I presented 48 kinds of certificates once over TLS 1.3 and once over TLS 1.2. I matched the 114 connections to the access log by client port and read the reason for each one.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Certificate condition</th><th>Result</th><th>Reason in the access log</th></tr>
+</thead>
+<tbody>
+<tr><td>Issued by the root CA, EKU clientAuth</td><td><span class="pill good">Accepted</span></td><td><code>Success</code></td></tr>
+<tr><td>No certificate</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertMissing</code></td></tr>
+<tr><td>Self-signed, issued by another CA</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertUntrusted</code></td></tr>
+<tr><td>Expired, not yet valid</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertExpired</code>, <code>ClientCertNotYetValid</code></td></tr>
+<tr><td>No EKU, KU digitalSignature or keyAgreement</td><td><span class="pill good">Accepted</span></td><td><code>Success</code></td></tr>
+<tr><td>EKU only serverAuth, emailProtection or anyExtendedKeyUsage</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertPurposeInvalid</code></td></tr>
+<tr><td>KU only keyEncipherment</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertPurposeInvalid</code></td></tr>
+<tr><td>RSA 2048 to 8192, ECDSA P-256, P-384, P-521</td><td><span class="pill good">Accepted</span></td><td><code>Success</code></td></tr>
+<tr><td>RSA 1024</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertTypeUnsupported</code></td></tr>
+<tr><td>Ed25519</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertMissing</code></td></tr>
+<tr><td>SHA-1 signature</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertUntrusted</code> (TLS 1.3), <code>ClientCertIncompatible</code> (TLS 1.2)</td></tr>
+<tr><td>Subject DN of 1,583 bytes</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertInvalid</code></td></tr>
+<tr><td>5 certificates sent</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertMaxChainDepthExceeded</code></td></tr>
+<tr><td>Chain of 16,006 bytes</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertMaxSizeExceeded</code></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Verdict per certificate condition and the <code>tls_verify_status</code> value in the access log. One root CA in the trust store, no filters, no CRL. EKU is the Extended Key Usage extension and KU the Key Usage extension</p>
+<p>The verdicts matched the <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">requirements in the User Guide</a>. Three behaviours could not be read from the documentation. A connection that presents no certificate is logged as <code>ClientCertMissing</code>, which is not in the <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-access-logs.html" target="_blank" rel="noopener">table of reason codes</a>. A certificate whose Extended Key Usage (EKU) is only <code>anyExtendedKeyUsage</code> is not taken as <code>clientAuth</code>. An Ed25519 certificate is not among the signature algorithms the NLB requests, so the client cannot send it and the connection is logged as having no certificate.</p>
+<p>With the setting that admits expired certificates (<code>IgnoreClientCertificateExpiry</code>) enabled, a certificate that was not yet valid was admitted as well.</p>
+<h3>The chain depth of 4 counts the certificates the client sends</h3>
+<p>The documented limits, a chain depth of 4 and a chain size of 16 KB, applied to the certificates the client sends, not to the validated path.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig04-limits-en.png" alt="Six examples in which four or fewer certificates sent by the client are accepted and five are rejected, and the size limit where a chain of 15,793 bytes is accepted and one of 16,006 bytes is rejected" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> What the chain depth and size limits count</figcaption></figure>
+<p>A chain with three intermediate CAs is accepted when the client sends the leaf and the three intermediates, and rejected when it sends five certificates including the root. If an intermediate CA is in the trust store, the client does not have to send that certificate. In this way a chain whose validated path has six levels passed with four certificates sent. For size, 15,793 bytes passed and 16,006 bytes did not. A leaf and an intermediate that add up to 16,061 bytes were rejected too.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>A rejected client is not told the reason</h2></header><div class="prose">
+<p>I used curl 8.21 to see how a rejected connection looks to the client. To verify the server certificate as well, <code>--resolve</code> maps the name in the server certificate to an NLB address.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ R="--cacert srv-ca.pem --resolve nlb.mtls-lab.example.com:443:10.1.200.73"
+
+# a valid certificate
+$ curl -sS $R --cert c01-eng.pem --key c01-eng.key https://nlb.mtls-lab.example.com/
+{"msg": "hello from mtls-lab target", "host": "ip-10-1-201-161.ap-northeast-2.compute.internal", "port": 8080, ...}
+
+# no certificate, TLS 1.3
+$ curl -sS $R --tlsv1.3 https://nlb.mtls-lab.example.com/
+curl: (56) Send failure: Connection reset by peer
+
+# no certificate, TLS 1.2
+$ curl -sS $R --tls-max 1.2 https://nlb.mtls-lab.example.com/
+curl: (35) TLS connect error: error:0A00010B:SSL routines::wrong version number
+
+# a self-signed certificate, TLS 1.3
+$ curl -sS $R --tlsv1.3 --cert c04-selfsigned.pem --key c04-selfsigned.key https://nlb.mtls-lab.example.com/
+curl: (56) Send failure: Connection reset by peer</code></pre></div>
+<p>The error was the same with no certificate, with an untrusted certificate and with an expired one. A packet capture showed that the NLB sends seven bytes of a plaintext <code>close_notify</code> and closes the connection, whatever the reason. In TLS 1.3 the client finishes its handshake first, so the connection breaks on the first request. In TLS 1.2 it fails during the handshake.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig05-reject-en.png" alt="The sequence of messages and the error text a TLS 1.3 and a TLS 1.2 client get when rejected, the seven bytes the NLB sends, and the fields kept in successful and failed access log entries" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> What a rejected client sees and what the access log keeps</figcaption></figure>
+<p>The reason is in the <code>tls_verify_status</code> field of the access log. These are the commands that download the logs from S3 and count the reasons, with their output.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ aws s3 sync s3://amzn-s3-demo-bucket/access-logs/ ./logs --exclude "*" --include "*.log.gz"
+$ find ./logs -name '*.log.gz' | xargs zcat \
+    | awk '{for(i=1;i&lt;=NF;i++) if($i ~ /^(Success|Failed:)/){print $i; break}}' \
+    | sort | uniq -c | sort -rn
+  25457 Success
+   3163 Failed:CertificateFilterNoMatch
+   1938 Failed:ClientCertCrlHit
+   1379 Failed:ClientCertMissing
+    994 Failed:ClientCertUntrusted
+     20 Failed:ClientCertMaxChainDepthExceeded
+      8 Failed:ClientCertPurposeInvalid
+      6 Failed:ClientCertMaxSizeExceeded
+      4 Failed:ClientCertExpired
+      2 Failed:ClientCertTypeUnsupported
+      2 Failed:ClientCertNotYetValid
+      2 Failed:ClientCertInvalid
+      1 Failed:ClientCertIncompatible</code></pre></div>
+<p>A successful connection is logged with the subject, the validity period and the serial number of the certificate. In all 7,519 failed entries these three fields, the TLS version, the cipher suite and the SNI were <code>-</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>tls 3.0 2026-11-23T02:32:51 net/nlb-mtls-lab/0123456789abcdef 0123456789abcdef 10.1.200.81:54978 10.1.201.5:443 13 7 50 259 - arn:aws:acm:ap-northeast-2:111122223333:certificate/EXAMPLE - TLS_AES_128_GCM_SHA256 tlsv13 x25519 nlb.mtls-lab.example.com - - - 2026-11-23T02:32:51 Success "CN=client01.example.com,OU=Engineering,O=MTLS Lab,C=KR" NotBefore=2026-11-23T01:20:40Z;NotAfter=2026-12-23T02:20:40Z 3e2518c1979d1658f941d2f9e9a07dc455cfd8c4
+tls 3.0 2026-11-23T02:36:44 net/nlb-mtls-lab/0123456789abcdef 0123456789abcdef 10.1.200.81:46768 10.1.200.73:443 7 - 0 0 - - - - - - - - - - 2026-11-23T02:36:44 Failed:ClientCertExpired "-" - -</code></pre></div>
+<p>So a failed entry tells the time, the client address and port, and the reason. Which certificate was rejected has to be traced from the client address. Rejected connections did not reach the targets. While 200 connections were rejected, no client connection was opened to a target.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>How identity filters and revocation lists behave</h2></header><div class="prose">
+<p>Identity filters admit only some of the certificates issued by the same CA. As in the example of the announcement blog post, I admitted only certificates whose Organizational Unit (OU) is Production or whose SPIFFE ID is in the prod namespace.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ cat filters.json
+{
+  "Mode": "verify",
+  "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+  "ClientCertificateIdentityFilters": [
+    { "Field": "subject-ou", "Action": "accept", "MatchType": "exact",  "Value": "Production" },
+    { "Field": "san-uri",    "Action": "accept", "MatchType": "prefix", "Value": "spiffe://example.com/ns/prod/" }
+  ]
+}
+$ aws elbv2 modify-listener --listener-arn $LISTENER_ARN \
+    --mutual-authentication file://filters.json \
+    --query 'Listeners[0].MutualAuthentication.ClientCertificateIdentityFilters[].Value'
+[
+    "Production",
+    "spiffe://example.com/ns/prod/"
+]</code></pre></div>
+<div class="scroll"><table>
+<thead>
+<tr><th>Certificate</th><th>Result</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td>OU=Engineering, no SAN</td><td><span class="pill bad">Rejected</span></td><td><code>CertificateFilterNoMatch</code></td></tr>
+<tr><td>OU=Production, prod SPIFFE ID</td><td><span class="pill good">Accepted</span></td><td>Matches both filters</td></tr>
+<tr><td>OU=Engineering, prod SPIFFE ID</td><td><span class="pill good">Accepted</span></td><td>Matches one filter (OR)</td></tr>
+<tr><td>Two OUs, Engineering and Production</td><td><span class="pill good">Accepted</span></td><td>One matching value is enough</td></tr>
+<tr><td>OU=production (lower case)</td><td><span class="pill good">Accepted</span></td><td>The OU is not case-sensitive</td></tr>
+<tr><td>SPIFFE ID path <code>/ns/PROD/</code></td><td><span class="pill bad">Rejected</span></td><td>The path of a URI is case-sensitive</td></tr>
+<tr><td>OU=Production, expired</td><td><span class="pill bad">Rejected</span></td><td><code>ClientCertExpired</code> (checked before the filters)</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Verdicts with the two filters in place. The last row shows the reason that follows from the order of checks</p>
+<p>Two points are worth knowing when calling the API. If <code>modify-listener</code> is called without the filter list, the existing filters stay. To remove them, pass an empty list. Values may contain printable ASCII only, so an OU written in Korean cannot be used in a filter.</p>
+<p>Revocation works by adding a CRL to the trust store.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ aws elbv2 add-trust-store-revocations --trust-store-arn $TRUST_STORE_ARN \
+    --revocation-contents RevocationType=CRL,S3Bucket=amzn-s3-demo-bucket,S3Key=crl/crl-root-1.pem
+{
+    "TrustStoreRevocations": [
+        {
+            "TrustStoreArn": "arn:aws:elasticloadbalancing:ap-northeast-2:111122223333:truststore/nlb-mtls-lab-ts/1a2b3c4d5e6f7a8b",
+            "RevocationId": 1,
+            "RevocationType": "CRL",
+            "NumberOfRevokedEntries": 2
+        }
+    ]
+}</code></pre></div>
+<p>The logs confirmed the order of checks. A certificate that was revoked and matched no filter was logged as <code>CertificateFilterNoMatch</code>, and one that was revoked and matched a filter as <code>ClientCertCrlHit</code>. Revoking the certificate of an intermediate CA rejects every certificate issued under it. A CRL that is not signed by a CA in the trust store is refused when it is added.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>A change applies after 30 to 60 seconds and open connections stay</h2></header><div class="prose">
+<p>An API call that changes a setting returns within a second, but the behaviour takes longer to change. I placed an observer that opens a new connection every 0.25 seconds on each NLB address and measured when eight changes took effect.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig06-timeline-en.png" alt="A timeline of eight changes, including enabling mTLS, replacing the CA bundle, adding and removing filters, adding a CRL and disabling mTLS, showing how many seconds after the call each began and finished applying on the NLB node of each Availability Zone, and how many open connections stayed" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 6.</b> When eight configuration changes took effect on each NLB node</figcaption></figure>
+<div class="scroll"><table>
+<thead>
+<tr><th>Change</th><th>Node A: start, complete</th><th>Node B: start, complete</th></tr>
+</thead>
+<tbody>
+<tr><td>Enable mTLS</td><td class="num">42.6 s, 57.9 s</td><td class="num">31.6 s, 46.6 s</td></tr>
+<tr><td>Replace the CA bundle</td><td class="num">40.2 s, 51.8 s</td><td class="num">39.5 s, 45.2 s</td></tr>
+<tr><td>Add filters</td><td class="num">41.5 s, 51.0 s</td><td class="num">33.7 s, 43.2 s</td></tr>
+<tr><td>Remove filters</td><td class="num">44.7 s, 54.5 s</td><td class="num">31.0 s, 42.2 s</td></tr>
+<tr><td>Add filters (2nd time)</td><td class="num">44.0 s, 57.7 s</td><td class="num">41.4 s, 45.9 s</td></tr>
+<tr><td>Add a CRL</td><td class="num">45.4 s, 61.7 s</td><td class="num">32.5 s, 45.8 s</td></tr>
+<tr><td>Disable mTLS</td><td class="num">46.2 s, 58.5 s</td><td class="num">30.7 s, 40.7 s</td></tr>
+<tr><td>Add filters (3rd time)</td><td class="num">48.0 s, 57.5 s</td><td class="num">36.7 s, 41.2 s</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> When each change took effect, with the API call at 0 s. Start is when the new behaviour was first seen, complete is when the old behaviour was last seen</p>
+<p>Every change began to apply 31 to 48 seconds after the call and was complete after 41 to 62 seconds. The NLB node of each Availability Zone switched at a different time, and on one node the old and the new behaviour were mixed for 5 to 16 seconds. No connection of a client that the change did not concern failed during the switch.</p>
+<p>Connections opened before a change were not cut. After filters were added, 12 connections opened with a certificate that did not match the filters stayed open. After a CRL was added, all 8 connections opened with the revoked certificate stayed open until the measurement ended at 288 seconds. Revocation applies only to new handshakes, so removing a client that is already connected needs a separate step that closes the connection at the target.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>The client key type decides the latency</h2></header><div class="prose">
+<p>From a client in the same Availability Zone I measured the time from TCP connect to the first response byte, 900 times per condition. Each figure is the mean of three medians of 300 connections.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig07-latency-en.png" alt="A bar chart of the time to the first response for a listener without mTLS and for mTLS with ECDSA P-256, P-384, RSA 2048 and RSA 4096 certificates, with the signing time on the client and the results with 100 filters and a CRL of 100,000 entries" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 7.</b> Time to the first response by client key type (TLS 1.3)</figcaption></figure>
+<p>The listener without mTLS took 8.1 ms. An ECDSA P-256 certificate gave 8.6 ms, RSA 2048 gave 11.9 ms and RSA 4096 gave 33.0 ms. The added time is almost the same as the signing time on the client. On the t4g.small used as the client, <code>openssl speed</code> measured 3.4 ms for an RSA 2048 signature and 24.0 ms for RSA 4096. Applying 100 filters or adding a CRL with 100,000 entries did not change the figures.</p>
+<p>For a device fleet that reconnects often, the key type of the certificate decides the latency and the computing load on the device. The price differs as well. According to the <a href="https://aws.amazon.com/ko/elasticloadbalancing/pricing/" target="_blank" rel="noopener">pricing page</a>, one NLB capacity unit (NLCU) covers 50 new TLS connections per second but 25 new mTLS connections per second. In the Seoul Region each trust store associated with an NLB is charged 0.005 USD per hour.</p>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Where NLB mTLS fits</h2></header><div class="prose">
+<p>The best fit is a TCP service that is not HTTP and runs a proxy only to verify certificates. If the targets do not need to read the certificate, the proxy can go and the NLB can do the verification.</p>
+<figure class="fig"><div class="canvas wide"><img src="aws-network-load-balancer-mtls-assets/fig08-usecases-en.png" alt="Four cases where NLB mTLS fits, TCP device fleets, a trust store shared from a central PKI, revoking single certificates while the root stays, and an access scope per listener, with the feature each one uses, and three cases where it does not fit" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 8.</b> Where NLB mTLS fits and where it does not</figcaption></figure>
+<p>With identity filters, or with a trust store that holds only an intermediate CA, each listener can have its own access scope without splitting the CA. In the test a trust store with only an intermediate CA admitted only certificates issued by that CA. If you already use mTLS on ALB, check the differences first.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>ALB</th><th>NLB</th></tr>
+</thead>
+<tbody>
+<tr><td>Listener</td><td>HTTPS</td><td>TLS</td></tr>
+<tr><td>Modes</td><td>passthrough, verify</td><td>verify</td></tr>
+<tr><td>Certificate data passed to targets</td><td><code>X-Amzn-Mtls</code> headers</td><td>None</td></tr>
+<tr><td>Identity filters</td><td>Not supported</td><td>100 per listener</td></tr>
+<tr><td>Attaching the same trust store</td><td>Possible</td><td>Possible (together with the ALB)</td></tr>
+<tr><td>Certificate with EKU serverAuth only</td><td>Accepted</td><td>Rejected</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> mTLS on ALB and on NLB. The first three rows follow the documentation, the last three are results of testing with the same trust store</p>
+<p>A trust store used on an ALB can be attached to an NLB as well, so the CA bundle and the CRLs are managed in one place. The verdicts were not the same, though. When moving from ALB, I recommend checking the EKU of the client certificates first.</p>
+</div></section>
+
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>Setups I did not test and items I could not confirm</h2></header><div class="prose">
+<p>The results in this post come from one internal NLB and one client. I did not test the items below, or did not get a result for them.</p>
+<ul>
+<li>Connections through an AWS PrivateLink endpoint service, and an internet-facing NLB</li>
+<li>Certificates issued by AWS Private CA, and a trust store shared with another account through AWS RAM</li>
+<li>Configuration with AWS CloudFormation and the AWS Load Balancer Controller</li>
+<li>Throughput with many concurrent connections</li>
+<li>Session resumption. The <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">documentation</a> says it is not supported in verify mode. In the test no session was resumed in 12 attempts even on the listener without mTLS, so I could not compare the two.</li>
+<li>CloudWatch metrics specific to mTLS. The announcement blog post mentions metrics such as handshake counts and error counts, but none appeared for the NLB I tested. Rejections were counted in the existing metric <code>ClientTLSNegotiationErrorCount</code>, and its sum of 7,519 equalled the number of failed log entries.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>When to apply it and what to check first</h2></header><div class="prose">
+<p>NLB mTLS is worth applying when you want to authenticate the clients of a TCP service without a proxy. It does not fit when the targets must receive the subject or the serial number of the certificate. In that case use ALB for an HTTP service and keep ending TLS at the target for other services. It does not fit either when one NLB needs three or more mTLS listeners. The <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-limits.html" target="_blank" rel="noopener">quota</a> is two per NLB and cannot be raised.</p>
+<ol>
+<li>Compare the key type, the EKU, and the number and size of the certificates the clients send with the table of certificate conditions above.</li>
+<li>Check whether the clients send the intermediate CA. If they do not, put the intermediate CA in the trust store.</li>
+<li>Enable access logs before enabling mTLS. The logs are the only way to learn the reason for a rejection.</li>
+<li>After changing a setting, wait at least a minute before verifying the result.</li>
+<li>Add a step to the revocation procedure that closes connections that are already open.</li>
+<li>Consider ECDSA certificates for clients that reconnect often.</li>
+</ol>
+<p>The latency and the time to apply in this post were measured from one client in the same Availability Zone. They change with the client CPU, the network distance and the number of concurrent connections.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/11/network-load-balancer-mtls/" target="_blank" rel="noopener">AWS Network Load Balancer now supports mutual TLS authentication</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://aws.amazon.com/ko/blogs/networking-and-content-delivery/introducing-mtls-for-network-load-balancer/" target="_blank" rel="noopener">Introducing mTLS for Network Load Balancer</a></td><td class="nowrap"><span class="l-ko">AWS 블로그</span><span class="l-en">AWS blog</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/mutual-authentication.html" target="_blank" rel="noopener">Authenticate clients using mutual TLS for Network Load Balancers</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/configure-mutual-authentication.html" target="_blank" rel="noopener">Configure mutual TLS</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/client-certificate-filters.html" target="_blank" rel="noopener">Client certificate identity filters</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-access-logs.html" target="_blank" rel="noopener">Access logs for your Network Load Balancer</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-limits.html" target="_blank" rel="noopener">Quotas for your Network Load Balancers</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-listeners.html" target="_blank" rel="noopener">Listeners for your Network Load Balancers</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-cloudwatch-metrics.html" target="_blank" rel="noopener">CloudWatch metrics for your Network Load Balancer</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/mutual-authentication.html" target="_blank" rel="noopener">Mutual authentication with TLS in Application Load Balancer</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-23</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://aws.amazon.com/ko/elasticloadbalancing/pricing/" target="_blank" rel="noopener">Elastic Load Balancing pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-23</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 23일 서울 리전(ap-northeast-2)의 한 계정에서 직접 테스트한 결과입니다. 조건은 2개 가용 영역의 내부 NLB와 보안 정책 ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09입니다. 클라이언트는 t4g.small 1대(OpenSSL 3.5.8, curl 8.21.0), 대상은 2대였고 AWS CLI 2.42.1을 사용했습니다. 지연 시간과 적용 시간은 클라이언트의 CPU, 네트워크 거리, 동시 연결 수에 따라 달라집니다. 직접 운영하는 프록시 구성은 구축하지 않고 발표 블로그의 설명을 바탕으로 정리했습니다. AWS의 설명은 같은 날 확인한 What's New 게시물, 발표 블로그, NLB 사용 설명서를 기준으로 합니다.</span><span class="l-en">The figures in this post come from my own test in one account in the Seoul Region (ap-northeast-2) on November 23, 2026. The conditions were an internal NLB in two Availability Zones, the security policy ELBSecurityPolicy-TLS13-1-2-Res-PQ-2025-09, one t4g.small client (OpenSSL 3.5.8, curl 8.21.0), two targets and AWS CLI 2.42.1. Latency and the time for a change to take effect depend on the client CPU, the network distance and the number of concurrent connections. I did not build the self-managed proxy setup; it is described from the announcement blog post. Statements about AWS follow the What's New post, the announcement blog post and the NLB User Guide as read on the same day.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
