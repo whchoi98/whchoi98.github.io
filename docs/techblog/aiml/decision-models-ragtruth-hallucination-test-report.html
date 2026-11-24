@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>결정 모델 소개와 오픈소스 8종의 환각 탐지 테스트</title>
+<meta name="description" content="결정 모델(Decision Model)이 무엇인지, 오픈소스 모델 네 가지와 Strands Decider v2가 어떻게 다른지 정리하고 8종을 RAGTruth 환각 탐지로 테스트했습니다. Strands Decider v2 12B는 Jeeves 9B와 같은 균형 정확도 87.6%를 요청당 0.13초에 냈습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/decision-models-ragtruth-hallucination-test/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-24</span><span class="l-en">Published 2026-11-24</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 8분</span><span class="l-en">8 min read</span></span></div>
+<h1><span class="l-ko">결정 모델 소개와 오픈소스 8종의 환각 탐지 테스트</span><span class="l-en">Decision models: an introduction and a hallucination detection test of eight open models</span></h1>
+<p class="thesis"><span class="l-ko">결정 모델(Decision Model)은 글을 생성하지 않고 보기마다 확률을 돌려주는 작은 모델입니다. 결정 모델이 무엇인지, 직접 실행할 수 있는 오픈소스 모델 네 가지와 Strands Decider v2가 어떻게 다른지 정리하고 8종을 RAGTruth 환각 탐지로 테스트해 보았습니다. 정확도가 가장 높은 Strands Decider v2 12B와 Jeeves 9B는 같은 87.6%였고 요청당 시간은 0.13초와 13.3초였습니다.</span><span class="l-en">A decision model is a small model that generates no text and returns a probability for each option. This post explains what a decision model is and how four open models you can run yourself and Strands Decider v2 differ, and then tests eight of them on RAGTruth hallucination detection. The two most accurate, Strands Decider v2 12B and Jeeves 9B, scored the same 87.6%, at 0.13 s and 13.3 s per request.</span></p>
+<div class="tags"><span>#Decision model</span><span>#Hallucination detection</span><span>#RAGTruth</span><span>#Strands Decider</span><span>#Amazon EKS</span><span>#NVIDIA L40S</span></div>
+<ul class="facts"><li><span class="l-ko"><b>결정 모델</b>: 상태와 질문, 보기를 받아 forward pass 한 번으로 보기마다 확률을 돌려줍니다. 질문 유형은 예 또는 아니오, 보기 선택, 척도 세 가지입니다.</span><span class="l-en"><b>Decision model</b>: it takes a state, a question and options and returns a probability for each option in one forward pass. The question types are yes or no, a choice among options, and a scale.</span></li><li><span class="l-ko"><b>오픈소스 네 가지</b>: Jeeves 9B, Kev 9B, Strands Decider, Laya multilingual을 테스트했습니다. 네 모델 모두 같은 요청 형식을 따릅니다.</span><span class="l-en"><b>Four open models</b>: Jeeves 9B, Kev 9B, Strands Decider and Laya multilingual were tested. All four follow the same request format.</span></li><li><span class="l-ko"><b>Strands Decider v2</b>: Gemma 4 기반 다섯 크기로 나왔습니다. 답 코드를 읽는 token readout, 양방향 attention, 병합된 가중치, 1,748만 행의 학습 데이터가 v1과 다릅니다.</span><span class="l-en"><b>Strands Decider v2</b>: five sizes built on Gemma 4. It differs from v1 in a token readout over answer codes, attention in both directions, merged weights and 17.48 million rows of training data.</span></li><li><span class="l-ko"><b>테스트 결과</b>: 상위 네 모델의 균형 정확도는 86.2%에서 87.6%로 95% 구간이 겹쳤고 요청당 p50은 0.07초에서 13.3초까지 달랐습니다.</span><span class="l-en"><b>Test results</b>: the top four models scored 86.2% to 87.6% in balanced accuracy with overlapping 95% intervals, while their p50 per request ranged from 0.07 s to 13.3 s.</span></li><li><span class="l-ko"><b>확인할 점</b>: 질문을 부정형으로 바꾸자 세 모델의 AUC가 0.5 아래였고 점수를 0.5에서 자르면 여덟 모델 모두 정확도가 내려갔습니다.</span><span class="l-en"><b>What to check</b>: with the question negated, three models had an AUC under 0.5, and cutting the score at 0.5 lowered the accuracy of all eight models.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">요청마다 필요한 작은 판단을 맡는 모델</a><a href="#ko-s2">결정 모델은 보기 가운데 하나를 고르고 확률을 돌려줍니다</a><a href="#ko-s3">테스트한 오픈소스 결정 모델 네 가지</a><a href="#ko-s4">Strands Decider v1과 v2의 차이</a><a href="#ko-s5">RAGTruth 답변 2,675건으로 테스트한 방법</a><a href="#ko-s6">정확도는 비슷하고 요청당 시간이 100배 달랐습니다</a><a href="#ko-s7">질문 문구와 임계값은 모델마다 확인해야 합니다</a><a href="#ko-s8">31B는 12B보다 높지 않았습니다</a><a href="#ko-s9">테스트의 한계</a><a href="#ko-s10">상황별로 먼저 확인할 모델과 임계값</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">A model for the small decisions every request needs</a><a href="#en-s2">A decision model picks one of the options and returns a probability</a><a href="#en-s3">The four open decision models tested</a><a href="#en-s4">How Strands Decider v1 and v2 differ</a><a href="#en-s5">How I tested on 2,675 RAGTruth answers</a><a href="#en-s6">Accuracy was close, and the time per request differed by 100 times</a><a href="#en-s7">Check the question wording and the threshold for each model</a><a href="#en-s8">31B was not above 12B</a><a href="#en-s9">Limits of the test</a><a href="#en-s10">Which model to check first in each situation, and the threshold</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>요청마다 필요한 작은 판단을 맡는 모델</h2></header><div class="prose">
+<p>RAG 애플리케이션은 답변이 검색한 문서에 근거하는지를 요청마다 확인해야 하고 이 확인을 큰 LLM에 맡기면 요청마다 시간과 비용이 더 듭니다. 결정 모델(Decision Model)은 이런 판단만 빠르게 처리하도록 만든 작은 모델이고 2026년 9월에 TypeSafe의 Jev가 나온 뒤로 오픈소스 모델이 잇달아 공개됐습니다.</p>
+<p>오픈소스 결정 모델은 여러 가지이고 크기도 322M부터 31B까지 다양합니다. 어느 모델을 고를지 판단하려고 여덟 개를 같은 환각 탐지 문제로 테스트했습니다. 정확도가 가장 높은 두 모델은 같은 87.6%였고 요청당 시간은 0.13초와 13.3초로 약 100배 차이였습니다.</p>
+<p>테스트 결과를 보기 전에 결정 모델이 무엇인지, 테스트한 오픈소스 모델이 어떻게 다른지부터 설명합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>결정 모델은 보기 가운데 하나를 고르고 확률을 돌려줍니다</h2></header><div class="prose">
+<p>결정 모델은 글을 생성하지 않습니다. 읽을 내용(상태)과 질문, 보기를 받으면 보기마다 확률을 계산해 돌려줍니다. LLM 평가기가 판정을 문장으로 작성하는 동안 결정 모델은 forward pass 한 번으로 답을 냅니다.</p>
+<p>Arize의 벤치마크에 따르면 상위 결정 모델의 환각 탐지 정확도는 LLM 평가기와 오차 범위 안에 있고 LLM 평가기는 비용이 60배에서 400배 더 듭니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig01-decision-model.png" alt="LLM 평가기는 문장을 생성해 판정문을 내고 결정 모델은 상태와 질문, 보기를 받아 forward pass 한 번으로 보기마다 확률을 돌려준다는 비교, 질문 유형 noul, choice, score, 결정 모델이 쓰이는 곳 여섯 가지를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 결정 모델이 하는 일. 확률 0.71은 이번 테스트에서 받은 응답의 예</figcaption></figure>
+<p>질문 유형은 세 가지입니다. 예 또는 아니오로 답하는 <code>noul</code>, 보기 가운데 하나를 고르는 <code>choice</code>, 순서가 있는 척도에서 단계를 고르는 <code>score</code>입니다. 답이 정해진 보기 안에 있는 판단에 맞는 모델이어서 근거 확인, 가드레일, 모델 라우팅, 도구 선택, 답변 평가에 사용합니다.</p>
+<p>환각 탐지에서는 검색한 문서와 답변을 상태로 주고 예 또는 아니오 질문 하나를 묻습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">http</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>POST /v1/systemone
+{
+  "state": {"context": "...", "answer": "..."},
+  "questions": {
+    "q": {"type": "noul", "instructions": "Is every claim in the answer supported by the context?"}
+  }
+}</code></pre></div>
+<p>Strands Decider v2 E2B는 이 요청에 이렇게 응답했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{
+  "model": "strands-decider-E2B-gemma4-v2-2611",
+  "answers": {"q": {"type": "noul", "noul": 0.7146}},
+  "usage": {"input_tokens": 1186, "output_tokens": 1},
+  "latency_ms": 59.43
+}</code></pre></div>
+<p><code>noul</code> 값 0.7146이 예일 확률입니다. 이 값이 임계값 이상이면 답변이 문서에 근거한다고 판정합니다. 출력 토큰이 1개여서 이 요청은 0.06초가 걸렸습니다.</p>
+<p>공장의 출하 검사에 비유하면 이해하기 쉽습니다. LLM 평가기는 제품마다 검사 보고서를 작성하는 검사원이고 결정 모델은 제품을 보고 합격일 확률을 숫자 하나로 말하는 검사원입니다. 몇 점부터 합격으로 처리할지는 검사원이 아니라 공장이 정하며 이 기준선이 임계값입니다. 실제 검사원과 다른 점도 있습니다. 결정 모델은 같은 제품을 두고도 질문의 문구가 바뀌면 다른 숫자를 말합니다.</p>
+<p>이 요청 형식은 TypeSafe의 호스팅 모델인 Jev가 정한 것입니다. 뒤에 나온 오픈소스 모델도 같은 형식을 따르므로 이번 테스트에서는 클라이언트 코드 하나로 모든 모델을 호출했습니다. Strands는 이런 모델을 system one 모델이라고 부릅니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>테스트한 오픈소스 결정 모델 네 가지</h2></header><div class="prose">
+<p>가중치가 공개돼 자체 GPU에서 실행할 수 있는 모델 네 가지를 테스트했습니다. Arize가 2026년 10월 7일에 공개한 <a href="https://arize.com/blog/decision-model-benchmark/" target="_blank" rel="noopener">결정 모델 벤치마크</a>(이하 원문)가 비교한 여덟 모델 가운데 로컬에서 실행한 네 모델과 같습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig02-open-models.png" alt="Jeeves 9B, Kev 9B, Strands Decider, Laya multilingual 네 모델의 만든 곳, 기반 모델, 판정 방식, 크기, 라이선스, 이번 테스트에 사용한 버전을 카드 네 장으로 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 테스트한 오픈소스 결정 모델 네 가지. 네 모델 모두 같은 요청 형식을 따름</figcaption></figure>
+<ul>
+<li><b>Jeeves 9B</b>: PostHog가 공개한 모델입니다. 확신이 없을 때는 짧게 추론한 뒤에 판정합니다. 공개 데이터만으로 학습했고 이번 테스트에서는 저장소의 기본값대로 모든 요청에서 추론했습니다.</li>
+<li><b>Kev 9B</b>: Jared Palmer가 직접 학습하고 실행할 수 있게 공개한 모델로 0.8B부터 27B까지 네 크기가 있습니다. 글을 생성하지 않고 pointer head가 보기의 점수를 계산합니다. 원문에 따르면 세 크기의 첫 학습에 GPU 임대료 약 95달러가 들었습니다.</li>
+<li><b>Strands Decider</b>: Strands Labs(AWS)가 공개한 모델로 에이전트 안의 작은 판단을 맡습니다. Amazon Bedrock AgentCore Evaluations의 사용자 정의 평가기에도 사용됩니다. 원문이 테스트한 2B와 2026년 11월에 나온 v2를 함께 테스트했습니다.</li>
+<li><b>Laya multilingual</b>: Convai Innovations가 공개한 모델입니다. LLM이 아니라 322M 크기의 인코더 모델이고 보기마다 점수를 계산합니다. 100개가 넘는 언어를 지원합니다.</li>
+</ul>
+<p>판정 전에 추론하는 모델은 Jeeves 9B 하나입니다. 이 차이가 뒤에 나오는 요청당 시간을 갈랐습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Strands Decider v1과 v2의 차이</h2></header><div class="prose">
+<p><a href="https://strandsagents.com/blog/introducing-strands-decider-v2/" target="_blank" rel="noopener">Strands Decider v2</a>는 2026년 11월 23일에 공개됐습니다. v1은 Qwen3.5-2B와 Gemma 4를 기반으로 했고 v2는 Gemma 4만 사용하며 가장 큰 31B가 추가됐습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig03-strands-v1-v2.png" alt="Strands Decider v1과 v2를 기반 모델, 답을 읽는 방식, attention, 체크포인트, 입력, 확률 보정, 학습 데이터 일곱 항목으로 비교한 표와 v2 다섯 크기의 가중치, 모델 카드의 GPU 안내, 이번 테스트의 측정 여부를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> Strands Decider v1과 v2의 차이와 v2의 다섯 크기. 소개 글과 모델 카드 기준 (2026-11-24 확인)</figcaption></figure>
+<ul>
+<li><b>답을 읽는 방식</b>: v1은 디코더에 pointer head를 더했고 v2는 LM head 자리에 답 코드 255개를 읽는 token readout을 넣었습니다. 보기 구성이 바뀌어도 모델을 수정하지 않습니다.</li>
+<li><b>상태를 읽는 방식</b>: v2는 상태를 양방향 attention으로 한 번만 읽습니다. 같은 상태에 질문을 더하면 그 질문의 토큰만 더 처리합니다.</li>
+<li><b>배포 형태</b>: v1은 기반 모델에 LoRA 어댑터와 head를 더해 사용했고 v2는 어댑터를 병합한 전체 모델 하나로 받습니다.</li>
+<li><b>학습 데이터와 보정</b>: 학습 데이터가 135,602행에서 1,748만 행으로 늘었고 확률을 보정하는 temperature가 체크포인트에 들어 있습니다.</li>
+</ul>
+<p>Strands는 공개 벤치마크 6종의 평균이 v1 26B-A4B의 70.0에서 v2 31B의 82.1로 올랐다고 밝혔습니다. Strands가 측정한 값이고 이 글의 테스트와는 데이터가 다릅니다.</p>
+<p>이번 테스트의 2B는 v1 이전에 공개된 hobson-v19 체크포인트입니다. v1은 테스트하지 않았으므로 뒤의 결과는 이전 2B와 v2를 비교한 것입니다. v2는 E2B, E4B, 12B를 측정했고 31B는 가중치를 8-bit로 저장해 측정했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>RAGTruth 답변 2,675건으로 테스트한 방법</h2></header><div class="prose">
+<p>문제는 RAGTruth의 환각 탐지입니다. RAGTruth는 검색한 문서와 LLM의 답변, 그리고 답변에서 문서에 근거하지 않은 구간을 표시해 둔 데이터입니다. test split에서 품질 표시가 good인 2,675행을 사용했고 이 가운데 35.3%에 환각이 있습니다.</p>
+<p>모든 모델에 같은 질문을 보냈습니다. 답변의 모든 주장이 문맥에 근거하는지를 영어로 묻고 예일 확률을 받았습니다. 데이터의 절반(1,337행)으로 모델마다 임계값을 정하고 나머지 절반(1,338행)으로 정확도를 계산했습니다.</p>
+<p>정확도는 균형 정확도로 비교했습니다. 근거 있는 답변을 통과시킨 비율과 환각이 있는 답변을 잡아낸 비율의 평균이고 모든 답변을 통과시키는 판정은 50%가 됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig04-setup.png" alt="작업용 EC2 인스턴스가 kubectl exec로 Amazon EKS의 GPU 노드에 있는 Pod에 접근하고 Pod 안에서 측정 클라이언트와 모델 서버가 루프백 주소로 통신하는 구성, 패스 세 가지, 두 측정일의 노드와 비용을 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 테스트 구성. 모델 서버와 측정 클라이언트는 같은 Pod 안에서 루프백 주소로만 통신</figcaption></figure>
+<p>모델 서버는 Amazon EKS의 NVIDIA L40S(48GB) 한 장에서 실행했습니다. Karpenter가 g6e 노드를 만들고 Pod 안에서 측정 클라이언트가 같은 Pod의 모델 서버에 요청을 보냅니다. 2026년 11월 12일에 원문의 네 모델을, 11월 24일에 Strands Decider v2를 테스트했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>정확도는 비슷하고 요청당 시간이 100배 달랐습니다</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig05-accuracy-latency.png" alt="가로는 요청당 p50을 로그 눈금으로, 세로는 균형 정확도로 놓고 결정 모델 8종을 점으로 나타낸 그림. Strands Decider v2 12B와 Jeeves 9B가 같은 87.6%에 있고 p50은 0.13초와 13.3초" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> 결정 모델 8종의 균형 정확도와 요청당 p50. 세로선은 95% 구간이고 31B는 가중치를 8-bit로 저장해 측정한 값</figcaption></figure>
+<p>정확도가 가장 높은 Strands Decider v2 12B와 Jeeves 9B는 둘 다 87.6%였습니다. 31B (8-bit)와 E4B까지 상위 네 모델은 95% 구간이 서로 겹쳐 이 데이터로는 순위를 정할 수 없습니다.</p>
+<p>차이는 시간에서 났습니다. Jeeves 9B는 요청마다 평균 1,434토큰을 추론한 뒤 판정해 p50이 13.3초였습니다. 나머지 일곱 모델은 0.02초에서 0.47초 사이였고 12B는 Jeeves 9B와 같은 정확도를 0.13초에 냈습니다. 가장 작은 Laya multilingual은 0.02초로 가장 빨랐지만 정확도는 61.0%였습니다.</p>
+<p>Strands Decider는 세대가 바뀌며 정확도가 올랐습니다. 이전 2B가 70.0%였고 v2는 가장 작은 E2B도 82.9%입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>모델</th><th>균형 정확도 [95% 구간]</th><th>요청당 p50</th><th>부정 문구 AUC</th><th>조정된 임계값</th></tr>
+</thead>
+<tbody>
+<tr><td>Strands Decider v2 12B</td><td class="num">87.6% [85.7%, 89.6%]</td><td class="num">0.13초</td><td class="num">0.92</td><td class="num">0.2438</td></tr>
+<tr><td>Jeeves 9B</td><td class="num">87.6% [85.7%, 89.5%]</td><td class="num">13.3초</td><td class="num">0.94</td><td class="num">0.0900</td></tr>
+<tr><td>Strands Decider v2 31B (8-bit)</td><td class="num">87.1% [85.2%, 88.8%]</td><td class="num">0.47초</td><td class="num">0.92</td><td class="num">0.3568</td></tr>
+<tr><td>Strands Decider v2 E4B</td><td class="num">86.2% [84.1%, 88.1%]</td><td class="num">0.07초</td><td class="num">0.43</td><td class="num">0.3862</td></tr>
+<tr><td>Strands Decider v2 E2B</td><td class="num">82.9% [80.9%, 85.0%]</td><td class="num">0.05초</td><td class="num">0.68</td><td class="num">0.3178</td></tr>
+<tr><td>Kev 9B</td><td class="num">81.1% [78.9%, 83.4%]</td><td class="num">0.09초</td><td class="num">0.89</td><td class="num">0.6976</td></tr>
+<tr><td>Strands Decider 2B</td><td class="num">70.0% [67.5%, 72.6%]</td><td class="num">0.07초</td><td class="num">0.20</td><td class="num">0.5552</td></tr>
+<tr><td>Laya multilingual</td><td class="num">61.0% [58.4%, 63.4%]</td><td class="num">0.02초</td><td class="num">0.42</td><td class="num">0.9537</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 여덟 모델의 결과 (측정용 1,338행). p50은 요청을 하나씩 보낸 200건의 중앙값이고 부정 문구 AUC와 임계값은 다음 챕터에서 설명</p>
+<p>원문과 비교하면 네 모델의 순위는 같았습니다. Strands Decider 2B와 Laya multilingual은 원문 값이 95% 구간 안에 있었고 Jeeves 9B와 Kev 9B는 원문보다 7.3%p와 4.3%p 높았습니다. Jeeves는 원문 뒤에 나온 v2이고 v2의 학습 데이터에 RAGTruth가 추가됐으므로 같은 조건의 비교가 아닙니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>질문 문구와 임계값은 모델마다 확인해야 합니다</h2></header><div class="prose">
+<p>결정 모델을 적용하기 전에 확인할 것이 두 가지 있었습니다. 첫째는 질문 문구입니다. 같은 판단을 근거 없는 주장이 있는지 묻는 부정형으로 바꾸면 예와 아니오의 뜻이 뒤집힙니다. 질문을 이해한 모델이라면 점수도 뒤집혀야 합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig06-phrasing.png" alt="모델 여덟 개의 긍정 문구 AUC와 부정 문구 AUC를 한 줄씩 점 두 개로 나타낸 그림. Strands Decider v2 E4B 0.43, Laya multilingual 0.42, Strands Decider 2B 0.20은 부정 문구에서 0.5 아래" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 6.</b> 질문 문구별 ROC AUC (측정용 1,338행). 0.5가 무작위 수준</figcaption></figure>
+<p>Strands Decider v2 E4B(0.43), Laya multilingual(0.42), Strands Decider 2B(0.20)는 부정형 질문에서 AUC가 0.5 아래였습니다. 질문이 바뀌었는데도 점수는 이전과 같은 방향으로 나왔다는 뜻입니다. Jeeves 9B, v2 12B와 31B (8-bit), Kev 9B는 두 문구에서 비슷한 AUC를 냈습니다.</p>
+<p>둘째는 임계값입니다. 결정 모델이 돌려주는 값은 확률이지만 0.5를 기준으로 자르면 여덟 모델 모두 정확도가 내려갔습니다. 데이터에 맞춘 임계값은 Jeeves 9B의 0.0900에서 Laya multilingual의 0.9537까지 모델마다 달랐습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>31B는 12B보다 높지 않았습니다</h2></header><div class="prose">
+<p>31B는 bf16 가중치가 63GB여서 48GB인 L40S 한 장에 올라가지 않습니다. 모델 카드에 따르면 v2는 GPU 여러 장에 나눠 올릴 수 없습니다. 그래서 선형 계층의 가중치만 8-bit로 저장하는 로더를 만들어 측정했고 패키지가 지원하는 구성이 아니므로 31B (8-bit)로 구분해 적었습니다.</p>
+<p>8-bit 저장이 답을 얼마나 바꾸는지는 12B로 확인했습니다. 12B를 bf16과 8-bit로 각각 측정하니 균형 정확도 차이는 -0.4%p이고 판정의 99.3%가 같았습니다. 31B의 수치도 bf16과 가까울 것으로 추정하지만 직접 확인한 것은 아닙니다.</p>
+<p>31B (8-bit)와 12B의 균형 정확도 차이는 -0.5%p이고 95% 구간 [-2.0%p, +0.9%p]가 0을 포함합니다. 12B가 틀린 148행 가운데 112행은 31B (8-bit)도 틀렸습니다. 놓친 환각은 구간이 하나뿐인 답변에 몰려 있었고 상위 네 모델 모두 이런 답변의 16.4%에서 23.7%를 놓쳤습니다. 이 데이터에서는 모델 크기보다 환각이 얼마나 짧고 미묘한지가 판정을 갈랐습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>테스트의 한계</h2></header><div class="prose">
+<ul>
+<li><b>데이터와 질문</b>: RAGTruth 한 데이터셋과 영어 질문 하나로 비교했고 행마다 한 번씩만 요청했습니다.</li>
+<li><b>측정하지 않은 모델</b>: 31B는 패키지가 지원하지 않는 8-bit 구성의 값입니다. bf16 31B, 26B-A4B, Strands Decider v1은 테스트하지 않았습니다.</li>
+<li><b>학습 데이터</b>: Jeeves v2는 RAGTruth를 학습에 사용했습니다. Strands Decider v2는 데이터 카드에 데이터셋 이름이 없어 포함 여부를 확인할 수 없습니다.</li>
+<li><b>지연 시간</b>: 요청을 하나씩 보낸 값입니다. 11월 12일의 모델은 g6e.2xlarge에서, v2는 g6e.4xlarge에서 측정했습니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>상황별로 먼저 확인할 모델과 임계값</h2></header><div class="prose">
+<p>이번 결과를 상황별로 정리했습니다. 수치는 모두 RAGTruth와 L40S 한 장에서 나온 값입니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>상황</th><th>먼저 확인할 모델</th><th>이번 테스트의 값</th></tr>
+</thead>
+<tbody>
+<tr><td>정확도가 가장 중요할 때</td><td>Strands Decider v2 12B</td><td>87.6%, p50 0.13초. Jeeves 9B와 같은 정확도</td></tr>
+<tr><td>요청당 0.1초 안에 답해야 할 때</td><td>Strands Decider v2 E4B</td><td>86.2%, p50 0.07초. 질문은 긍정형으로 고정</td></tr>
+<tr><td>질문을 부정형으로도 사용할 때</td><td>Strands Decider v2 12B, Kev 9B, Jeeves 9B</td><td>부정 문구 AUC 0.92, 0.89, 0.94</td></tr>
+<tr><td>GPU 메모리가 작을 때</td><td>Strands Decider v2 E2B</td><td>82.9%, p50 0.05초, GPU 메모리 10.0GiB</td></tr>
+<tr><td>31B를 검토할 때</td><td>Strands Decider v2 12B와 먼저 비교</td><td>이 데이터에서는 12B보다 높지 않음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 상황별로 먼저 확인할 모델</p>
+<p>모델을 바꿀 때는 임계값을 다시 정해야 합니다. 이전 2B의 임계값은 0.5552이고 v2는 0.2438에서 0.3862여서 그대로 옮기면 판정이 달라집니다. 질문 문구를 바꿀 때도 같은 데이터로 다시 측정해야 합니다. 어느 모델이든 운영 데이터 일부로 임계값을 정하고 나머지 데이터에서 확인하는 것을 권고합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>A model for the small decisions every request needs</h2></header><div class="prose">
+<p>A RAG application has to check on every request whether the answer is grounded in the retrieved documents, and handing that check to a large LLM adds time and cost to every request. A decision model is a small model built to make only this kind of decision quickly, and since Jev from TypeSafe came out in September 2026, open models have followed one after another.</p>
+<p>There are several open decision models, and they range from 322M to 31B in size. To decide which one to pick, I tested eight of them on the same hallucination detection problem. The two most accurate models scored the same 87.6%, and their time per request was 0.13 s and 13.3 s, about 100 times apart.</p>
+<p>Before the results, this post explains what a decision model is and how the open models in the test differ.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>A decision model picks one of the options and returns a probability</h2></header><div class="prose">
+<p>A decision model does not generate text. Given something to read (the state), a question and the options, it computes a probability for each option and returns it. Where an LLM judge writes its verdict in sentences, a decision model answers in one forward pass.</p>
+<p>According to the Arize benchmark, the top decision models are within the noise of an LLM judge on hallucination detection, and the LLM judge costs 60 to 400 times more.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig01-decision-model-en.png" alt="A comparison in which an LLM judge generates sentences to give a verdict and a decision model takes the state, a question and options and returns a probability for each option in one forward pass, together with the question types noul, choice and score and six places where a decision model is used" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> What a decision model does. The probability 0.71 is from a response in this test</figcaption></figure>
+<p>There are three question types: <code>noul</code> for yes or no, <code>choice</code> for one of several options, and <code>score</code> for a level on an ordered scale. The model fits decisions whose answer is among known options, so it is used for grounding checks, guardrails, model routing, tool selection and judging answers.</p>
+<p>For hallucination detection, the state holds the retrieved document and the answer, and there is one yes-or-no question.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">http</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>POST /v1/systemone
+{
+  "state": {"context": "...", "answer": "..."},
+  "questions": {
+    "q": {"type": "noul", "instructions": "Is every claim in the answer supported by the context?"}
+  }
+}</code></pre></div>
+<p>This is what Strands Decider v2 E2B returned for that request.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{
+  "model": "strands-decider-E2B-gemma4-v2-2611",
+  "answers": {"q": {"type": "noul", "noul": 0.7146}},
+  "usage": {"input_tokens": 1186, "output_tokens": 1},
+  "latency_ms": 59.43
+}</code></pre></div>
+<p>The <code>noul</code> value, 0.7146, is the probability of yes. At or above the threshold the answer is judged as grounded in the document. The output is 1 token, so this request took 0.06 s.</p>
+<p>An outgoing inspection at a factory is a useful comparison. An LLM judge is an inspector who writes a report for every product, and a decision model is an inspector who looks at a product and states the probability that it passes as one number. Where the passing line sits is decided by the factory, not by the inspector, and that line is the threshold. One thing differs from a real inspector. A decision model gives a different number for the same product when the question is worded differently.</p>
+<p>This request format was set by Jev, the hosted model from TypeSafe. The open models that came later follow the same format, so one piece of client code called every model in this test. Strands calls this kind of model a system one model.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>The four open decision models tested</h2></header><div class="prose">
+<p>I tested four models whose weights are public and run on your own GPU. They are the four that the <a href="https://arize.com/blog/decision-model-benchmark/" target="_blank" rel="noopener">decision model benchmark</a> Arize published on October 7, 2026 (the original, from here on) ran locally out of its eight models.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig02-open-models-en.png" alt="Four cards for Jeeves 9B, Kev 9B, Strands Decider and Laya multilingual, each with the publisher, the base model, how it decides, the size, the license and the version used in this test" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> The four open decision models tested. All four follow the same request format</figcaption></figure>
+<ul>
+<li><b>Jeeves 9B</b>: published by PostHog. When it is unsure it reasons briefly before it decides. It was trained on public data only, and in this test it reasoned on every request, which is the default of the repository.</li>
+<li><b>Kev 9B</b>: published by Jared Palmer as a model you can train and run yourself, in four sizes from 0.8B to 27B. It generates no text, and a pointer head scores the options. The original says its first training run, across three model sizes, cost about $95 of rented GPU time.</li>
+<li><b>Strands Decider</b>: published by Strands Labs (AWS) for the small decisions inside an agent. It also powers custom evaluators in Amazon Bedrock AgentCore Evaluations. I tested the 2B that the original tested together with v2, released in November 2026.</li>
+<li><b>Laya multilingual</b>: published by Convai Innovations. It is not an LLM but an encoder model of 322M parameters, and it computes a score for each option. It covers more than 100 languages.</li>
+</ul>
+<p>Jeeves 9B is the only model that reasons before it decides. That difference is what separated the time per request below.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>How Strands Decider v1 and v2 differ</h2></header><div class="prose">
+<p><a href="https://strandsagents.com/blog/introducing-strands-decider-v2/" target="_blank" rel="noopener">Strands Decider v2</a> was released on November 23, 2026. v1 was built on Qwen3.5-2B and Gemma 4, while v2 uses Gemma 4 only and adds 31B as its largest size.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig03-strands-v1-v2-en.png" alt="A table comparing Strands Decider v1 and v2 on seven items, base models, readout, attention, checkpoint, inputs, calibration and training data, and a table of the five v2 sizes with their weights, the GPU on the model card and whether this test measured them" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> How Strands Decider v1 and v2 differ, and the five v2 sizes. From the release post and the model cards (checked 2026-11-24)</figcaption></figure>
+<ul>
+<li><b>Readout</b>: v1 added a pointer head to the decoder, and v2 puts a token readout over 255 answer codes in place of the LM head. A new set of options needs no change to the model.</li>
+<li><b>Reading the state</b>: v2 reads the state once with attention in both directions. Adding a question to the same state only processes the tokens of that question.</li>
+<li><b>Checkpoint</b>: v1 was a LoRA adapter and a head next to the base model, and v2 comes as one full model with the adapter merged in.</li>
+<li><b>Training data and calibration</b>: the training data grew from 135,602 rows to 17.48 million, and the temperature that calibrates the probabilities ships in the checkpoint.</li>
+</ul>
+<p>Strands reports that the average of six public benchmarks rose from 70.0 for v1 26B-A4B to 82.1 for v2 31B. Those are Strands' own measurements, on data other than the test in this post.</p>
+<p>The 2B in this test is hobson-v19, a checkpoint published before v1. I did not test v1, so the results below compare the earlier 2B with v2. Of v2 I measured E2B, E4B and 12B, and 31B with its weights stored in 8 bits.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>How I tested on 2,675 RAGTruth answers</h2></header><div class="prose">
+<p>The problem is hallucination detection on RAGTruth. RAGTruth holds retrieved documents, the answers of LLMs, and marks on the spans of an answer that the documents do not support. I used the 2,675 rows of the test split whose quality is marked good, and 35.3% of them contain a hallucination.</p>
+<p>Every model got the same question. It asks, in English, whether every claim in the answer is supported by the context, and the model returns the probability of yes. Half of the data (1,337 rows) set the threshold for each model, and the other half (1,338 rows) gave the accuracy.</p>
+<p>Accuracy is compared as balanced accuracy. It is the mean of the share of supported answers that pass and the share of hallucinated answers that are caught, and a judge that passes every answer scores 50%.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig04-setup-en.png" alt="The setup in which a work EC2 instance reaches a Pod on a GPU node in Amazon EKS with kubectl exec and, inside the Pod, the benchmark client and the model server talk over the loopback address, together with the three passes and the nodes and cost of the two days" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> Test setup. The model server and the benchmark client talk over the loopback address inside one Pod</figcaption></figure>
+<p>The model servers ran on one NVIDIA L40S (48 GB) in Amazon EKS. Karpenter creates a g6e node, and inside the Pod the benchmark client sends requests to the model server in the same Pod. I tested the four models of the original on November 12, 2026 and Strands Decider v2 on November 24.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Accuracy was close, and the time per request differed by 100 times</h2></header><div class="prose">
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig05-accuracy-latency-en.png" alt="A plot of eight decision models with the p50 per request on a log scale across and balanced accuracy up. Strands Decider v2 12B and Jeeves 9B sit at the same 87.6%, at 0.13 s and 13.3 s" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> Balanced accuracy and p50 per request of the eight decision models. The vertical lines are 95% intervals, and 31B was measured with its weights stored in 8 bits</figcaption></figure>
+<p>The two most accurate models, Strands Decider v2 12B and Jeeves 9B, both scored 87.6%. With 31B (8-bit) and E4B, the 95% intervals of the top four overlap, so this data cannot put them in an order.</p>
+<p>The difference was in time. Jeeves 9B reasons for 1,434 tokens on average before each decision, and its p50 was 13.3 s. The other seven were between 0.02 s and 0.47 s, and 12B reached the accuracy of Jeeves 9B in 0.13 s. Laya multilingual, the smallest, was the fastest at 0.02 s but scored 61.0%.</p>
+<p>The accuracy of Strands Decider rose with the new generation. The earlier 2B scored 70.0%, and E2B, the smallest v2, scores 82.9%.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Model</th><th>Balanced accuracy [95% interval]</th><th>p50 per request</th><th>AUC, negative phrasing</th><th>Tuned threshold</th></tr>
+</thead>
+<tbody>
+<tr><td>Strands Decider v2 12B</td><td class="num">87.6% [85.7%, 89.6%]</td><td class="num">0.13 s</td><td class="num">0.92</td><td class="num">0.2438</td></tr>
+<tr><td>Jeeves 9B</td><td class="num">87.6% [85.7%, 89.5%]</td><td class="num">13.3 s</td><td class="num">0.94</td><td class="num">0.0900</td></tr>
+<tr><td>Strands Decider v2 31B (8-bit)</td><td class="num">87.1% [85.2%, 88.8%]</td><td class="num">0.47 s</td><td class="num">0.92</td><td class="num">0.3568</td></tr>
+<tr><td>Strands Decider v2 E4B</td><td class="num">86.2% [84.1%, 88.1%]</td><td class="num">0.07 s</td><td class="num">0.43</td><td class="num">0.3862</td></tr>
+<tr><td>Strands Decider v2 E2B</td><td class="num">82.9% [80.9%, 85.0%]</td><td class="num">0.05 s</td><td class="num">0.68</td><td class="num">0.3178</td></tr>
+<tr><td>Kev 9B</td><td class="num">81.1% [78.9%, 83.4%]</td><td class="num">0.09 s</td><td class="num">0.89</td><td class="num">0.6976</td></tr>
+<tr><td>Strands Decider 2B</td><td class="num">70.0% [67.5%, 72.6%]</td><td class="num">0.07 s</td><td class="num">0.20</td><td class="num">0.5552</td></tr>
+<tr><td>Laya multilingual</td><td class="num">61.0% [58.4%, 63.4%]</td><td class="num">0.02 s</td><td class="num">0.42</td><td class="num">0.9537</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Results of the eight models (1,338 test rows). The p50 is the median of 200 requests sent one at a time, and the next chapter explains the AUC on the negative phrasing and the threshold</p>
+<p>Against the original, the four models rank in the same order. For Strands Decider 2B and Laya multilingual the original value is inside the 95% interval, and Jeeves 9B and Kev 9B came out 7.3 pp and 4.3 pp above the original. Jeeves is v2, released after the original, and RAGTruth was added to the training data of v2, so this is not a like-for-like comparison.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Check the question wording and the threshold for each model</h2></header><div class="prose">
+<p>Two things have to be checked before applying a decision model. The first is the wording of the question. If the same judgment is asked in a negative form, whether there is a claim that is not supported, the meaning of yes and no is reversed. A model that understands the question should reverse its scores too.</p>
+<figure class="fig"><div class="canvas wide"><img src="decision-models-ragtruth-hallucination-test-assets/fig06-phrasing-en.png" alt="A plot with one row per model and two points per row, the AUC under the positive phrasing and under the negative phrasing. Strands Decider v2 E4B 0.43, Laya multilingual 0.42 and Strands Decider 2B 0.20 are under 0.5 on the negative phrasing" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 6.</b> ROC AUC by question phrasing (1,338 test rows). 0.5 is the chance level</figcaption></figure>
+<p>Strands Decider v2 E4B (0.43), Laya multilingual (0.42) and Strands Decider 2B (0.20) had an AUC under 0.5 on the negative question. That means the scores kept their earlier direction although the question had changed. Jeeves 9B, v2 12B and 31B (8-bit), and Kev 9B had about the same AUC on both phrasings.</p>
+<p>The second is the threshold. What a decision model returns is a probability, but cutting it at 0.5 lowered the accuracy of all eight models. The threshold fitted to the data differed by model, from 0.0900 for Jeeves 9B to 0.9537 for Laya multilingual.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>31B was not above 12B</h2></header><div class="prose">
+<p>31B has 63 GB of bf16 weights and does not fit one L40S with 48 GB. According to the model cards, v2 cannot be split over several GPUs. So I wrote a loader that stores only the weights of the linear layers in 8 bits and measured with that, and because the package does not support this configuration the result is labeled 31B (8-bit).</p>
+<p>I used 12B to check how far 8-bit storage moves the answers. Measured in bf16 and in 8 bits, 12B differs by -0.4 pp in balanced accuracy, and 99.3% of the decisions are the same. I estimate that the 31B figures are close to bf16 as well, but I did not confirm it directly.</p>
+<p>The difference in balanced accuracy between 31B (8-bit) and 12B is -0.5 pp, and the 95% interval [-2.0 pp, +0.9 pp] includes 0. Of the 148 rows 12B got wrong, 31B (8-bit) also got 112 wrong. The missed hallucinations were concentrated in answers with a single hallucinated span, and each of the top four models missed 16.4% to 23.7% of those answers. On this data, how short and subtle the hallucination is decided the outcome more than the size of the model.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>Limits of the test</h2></header><div class="prose">
+<ul>
+<li><b>Data and question</b>: the comparison used one dataset, RAGTruth, and one question in English, with one request per row.</li>
+<li><b>Models not measured</b>: the 31B figures are for an 8-bit configuration that the package does not support. bf16 31B, 26B-A4B and Strands Decider v1 were not tested.</li>
+<li><b>Training data</b>: Jeeves v2 was trained on RAGTruth. For Strands Decider v2 the data card names no datasets, so whether RAGTruth is included cannot be confirmed.</li>
+<li><b>Latency</b>: it is for requests sent one at a time. The models of November 12 ran on g6e.2xlarge and v2 on g6e.4xlarge.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Which model to check first in each situation, and the threshold</h2></header><div class="prose">
+<p>Here are the results by situation. Every figure comes from RAGTruth and one L40S.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Situation</th><th>Model to check first</th><th>Value in this test</th></tr>
+</thead>
+<tbody>
+<tr><td>Accuracy matters most</td><td>Strands Decider v2 12B</td><td>87.6%, p50 0.13 s; the same accuracy as Jeeves 9B</td></tr>
+<tr><td>An answer is needed within 0.1 s</td><td>Strands Decider v2 E4B</td><td>86.2%, p50 0.07 s; keep the question positive</td></tr>
+<tr><td>Questions are also asked in a negative form</td><td>Strands Decider v2 12B, Kev 9B, Jeeves 9B</td><td>AUC 0.92, 0.89, 0.94 on the negative phrasing</td></tr>
+<tr><td>GPU memory is small</td><td>Strands Decider v2 E2B</td><td>82.9%, p50 0.05 s, 10.0GiB of GPU memory</td></tr>
+<tr><td>31B is being considered</td><td>Compare with Strands Decider v2 12B first</td><td>Not higher than 12B on this data</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Which model to check first in each situation</p>
+<p>Changing the model means setting the threshold again. The threshold of the earlier 2B is 0.5552 and those of v2 run from 0.2438 to 0.3862, so carrying the old value over changes the decisions. When the wording of the question changes, the measurement has to be repeated on the same data. Whichever model is used, I recommend setting the threshold on part of the production data and checking it on the rest.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://arize.com/blog/decision-model-benchmark/" target="_blank" rel="noopener">Decision model benchmark: Jev, Kev, Liquid d1, and more</a></td><td class="nowrap"><span class="l-ko">원문 벤치마크</span><span class="l-en">Original benchmark</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://strandsagents.com/blog/introducing-strands-decider-v2/" target="_blank" rel="noopener">Introducing Strands Decider v2: open, calibrated system one models</a></td><td class="nowrap"><span class="l-ko">공식 블로그</span><span class="l-en">Project blog</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-E2B-gemma4-v2-2611" target="_blank" rel="noopener">StrandsAgents/strands-decider-E2B-gemma4-v2-2611</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-E4B-gemma4-v2-2611" target="_blank" rel="noopener">StrandsAgents/strands-decider-E4B-gemma4-v2-2611</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-12B-gemma4-v2-2611" target="_blank" rel="noopener">StrandsAgents/strands-decider-12B-gemma4-v2-2611</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-26B-A4B-gemma4-v2-2611" target="_blank" rel="noopener">StrandsAgents/strands-decider-26B-A4B-gemma4-v2-2611</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-31B-gemma4-v2-2611" target="_blank" rel="noopener">StrandsAgents/strands-decider-31B-gemma4-v2-2611</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://github.com/strands-labs/strands-decider/blob/main/docs/data-card.md" target="_blank" rel="noopener">Strands Decider v2 data card</a></td><td class="nowrap"><span class="l-ko">데이터 카드</span><span class="l-en">Data card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://github.com/strands-labs/strands-decider" target="_blank" rel="noopener">strands-labs/strands-decider</a></td><td class="nowrap"><span class="l-ko">코드 저장소</span><span class="l-en">Code repository</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://pypi.org/project/strands-decider/" target="_blank" rel="noopener">strands-decider</a></td><td class="nowrap"><span class="l-ko">PyPI 패키지</span><span class="l-en">PyPI package</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://huggingface.co/StrandsAgents/strands-decider-2B-hobson-v19" target="_blank" rel="noopener">StrandsAgents/strands-decider-2B-hobson-v19</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://huggingface.co/PostHog/jeeves" target="_blank" rel="noopener">PostHog/jeeves</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://github.com/PostHog/jeeves" target="_blank" rel="noopener">PostHog/jeeves</a></td><td class="nowrap"><span class="l-ko">코드 저장소</span><span class="l-en">Code repository</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://huggingface.co/jaredpalmer/kev-9b" target="_blank" rel="noopener">jaredpalmer/kev-9b</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://github.com/jaredpalmer/kev" target="_blank" rel="noopener">jaredpalmer/kev</a></td><td class="nowrap"><span class="l-ko">코드 저장소</span><span class="l-en">Code repository</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://huggingface.co/convaiinnovations/laya" target="_blank" rel="noopener">convaiinnovations/laya</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://pypi.org/project/laya/" target="_blank" rel="noopener">laya</a></td><td class="nowrap"><span class="l-ko">PyPI 패키지</span><span class="l-en">PyPI package</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://github.com/ParticleMedia/RAGTruth" target="_blank" rel="noopener">ParticleMedia/RAGTruth</a></td><td class="nowrap"><span class="l-ko">데이터셋</span><span class="l-en">Dataset</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-19"><td class="num"><b>19</b></td><td class="t"><a href="https://arxiv.org/abs/2401.00396" target="_blank" rel="noopener">RAGTruth: A Hallucination Corpus for Developing Trustworthy Retrieval-Augmented Language Models</a></td><td class="nowrap"><span class="l-ko">논문</span><span class="l-en">Paper</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-20"><td class="num"><b>20</b></td><td class="t"><a href="https://aws.amazon.com/ec2/instance-types/g6e/" target="_blank" rel="noopener">Amazon EC2 G6e Instances</a></td><td class="nowrap"><span class="l-ko">제품 페이지</span><span class="l-en">Product page</span></td><td class="nowrap num">2026-11-24</td></tr>
+<tr id="src-21"><td class="num"><b>21</b></td><td class="t"><a href="https://aws.amazon.com/ec2/pricing/on-demand/" target="_blank" rel="noopener">Amazon EC2 On-Demand Pricing</a></td><td class="nowrap"><span class="l-ko">요금 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-24</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 12일과 11월 24일(UTC)에 서울 리전(ap-northeast-2)의 한 계정에서 직접 테스트한 결과입니다. RAGTruth 한 데이터셋과 질문 문구 두 가지, 행마다 한 번 요청한 조건의 값이며 데이터, 질문 문구, 모델 버전에 따라 달라집니다. Strands Decider v2 31B는 패키지가 지원하지 않는 8-bit 가중치 구성으로 측정했고 bf16 31B, 26B-A4B, Strands Decider v1은 측정하지 않았습니다. 그림의 비용은 2026년 11월 24일에 AWS Price List API로 조회한 서울 리전 On-Demand 가격으로 계산한 추정치이고 청구서로 확인한 값이 아닙니다. 모델과 벤치마크의 설명은 2026년 11월 24일에 확인한 원문 벤치마크, 소개 글, 모델 카드, 데이터 카드를 기준으로 합니다. 테스트에 사용한 GPU 노드는 모두 삭제했습니다.</span><span class="l-en">The figures in this post come from my own tests in one account in the Seoul Region (ap-northeast-2) on November 12 and November 24, 2026 (UTC). They hold for one dataset, RAGTruth, two question phrasings and one request per row, and they change with the data, the wording of the question and the model version. Strands Decider v2 31B was measured in an 8-bit weight configuration that the package does not support; bf16 31B, 26B-A4B and Strands Decider v1 were not measured. The costs in the figure are estimates from the Seoul On-Demand prices looked up with the AWS Price List API on November 24, 2026, not values from a bill. What is said about the models and the benchmark is taken from the original benchmark, the release post, the model cards and the data card as checked on November 24, 2026. All GPU nodes used in the tests have been deleted.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
