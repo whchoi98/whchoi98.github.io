@@ -239,8 +239,8 @@ html[data-lang="en"] .l-ko{display:none!important}
 </div></section>
 
 <section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>용어와 구성 요소의 역할</h2></header><div class="prose">
-<p>이 글에는 Envoy의 용어와 Kubernetes Gateway API의 용어가 함께 나옵니다. 구조를 보기 전에 용어를 세 묶음으로 나눠 정리합니다. 요청이 실제로 지나가는 쪽, 설정을 만들어 내려 주는 쪽, 테스트에 사용한 도구입니다. 앞의 둘은 각각 데이터 플레인과 컨트롤 플레인이라고 부릅니다.</p>
-<p>요청이 지나가는 쪽의 중심은 Envoy입니다. Envoy의 설정에는 세 부분이 있습니다. 리스너(listener)가 연결을 받고 필터(filter)가 요청을 검사하거나 바꾸며 클러스터(cluster)가 요청을 보낼 백엔드 묶음을 가리킵니다. ELB for Envoy는 이 Envoy를 AWS의 인스턴스에서 실행합니다.</p>
+<p>이 글에는 Envoy의 용어와 Kubernetes Gateway API의 용어가 함께 나옵니다. 구조를 보기 전에 용어를 세 묶음으로 나눠 정리합니다. 요청이 실제로 지나가는 부분, 설정을 만들어 내려 주는 부분, 테스트에 사용한 도구입니다. 앞의 둘은 각각 데이터 플레인과 컨트롤 플레인이라고 부릅니다.</p>
+<p>요청이 지나가는 부분의 중심은 Envoy입니다. Envoy의 설정에는 세 부분이 있습니다. 리스너(listener)가 연결을 받고 필터(filter)가 요청을 검사하거나 바꾸며 클러스터(cluster)가 요청을 보낼 백엔드 묶음을 가리킵니다. ELB for Envoy는 이 Envoy를 AWS의 인스턴스에서 실행합니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>용어</th><th>뜻</th><th>이 테스트에서</th></tr>
@@ -257,15 +257,15 @@ html[data-lang="en"] .l-ko{display:none!important}
 <tr><td>external processing</td><td>요청과 응답을 외부 gRPC 서비스로 보내 처리를 맡기는 필터</td><td>테스트하지 않음</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 2.</b> 요청이 지나가는 쪽(데이터 플레인)의 용어</p>
-<p>설정을 만드는 쪽에서 먼저 알아야 할 용어는 xDS입니다. Envoy는 시작할 때 읽은 설정 파일만으로도 동작하지만 실행 중에 컨트롤 플레인에 접속해 설정을 계속 받아 올 수도 있습니다. 이때 사용하는 API 묶음이 xDS입니다. 이름의 x는 받아 오는 대상이 들어가는 자리이고 DS는 discovery service의 약자입니다. 리스너는 LDS로, 라우트는 RDS로, 클러스터는 CDS로, 클러스터에 속한 파드 주소는 EDS로, 인증서는 SDS로 받습니다. 백엔드 파드가 교체되면 새 주소가 EDS로 내려오므로 Envoy를 다시 시작할 필요가 없습니다.</p>
+<p class="cap"><b>표 2.</b> 요청이 지나가는 부분(데이터 플레인)의 용어</p>
+<p>설정을 만드는 부분에서 먼저 알아야 할 용어는 xDS입니다. Envoy는 시작할 때 읽은 설정 파일만으로도 동작하지만 실행 중에 컨트롤 플레인에 접속해 설정을 계속 받아 올 수도 있습니다. 이때 사용하는 API 묶음이 xDS입니다. 이름의 x는 받아 오는 대상이 들어가는 자리이고 DS는 discovery service의 약자입니다. 리스너는 LDS로, 라우트는 RDS로, 클러스터는 CDS로, 클러스터에 속한 파드 주소는 EDS로, 인증서는 SDS로 받습니다. 백엔드 파드가 교체되면 새 주소가 EDS로 내려오므로 Envoy를 다시 시작할 필요가 없습니다.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>용어</th><th>뜻</th><th>이 테스트에서</th></tr>
 </thead>
 <tbody>
-<tr><td>컨트롤 플레인</td><td>설정을 계산해 내려 주는 쪽. 요청은 지나가지 않음</td><td>Envoy Gateway</td></tr>
-<tr><td>데이터 플레인</td><td>요청이 실제로 지나가는 쪽</td><td>ELB for Envoy의 프록시 노드</td></tr>
+<tr><td>컨트롤 플레인</td><td>설정을 계산해 내려 주는 부분. 요청은 지나가지 않음</td><td>Envoy Gateway</td></tr>
+<tr><td>데이터 플레인</td><td>요청이 실제로 지나가는 부분</td><td>ELB for Envoy의 프록시 노드</td></tr>
 <tr><td>xDS</td><td>Envoy가 실행 중에 설정을 받아 오는 API 묶음(LDS, RDS, CDS, EDS, SDS)</td><td>프록시가 Envoy Gateway의 18000 포트에 접속해 사용</td></tr>
 <tr><td>ADS, 델타 xDS</td><td>ADS는 여러 xDS를 연결 하나로 묶는 방식, 델타는 바뀐 부분만 받는 방식</td><td>컨트롤러가 만든 부트스트랩이 두 방식을 함께 사용</td></tr>
 <tr><td>mTLS</td><td>양쪽이 서로의 인증서를 확인하는 TLS</td><td>프록시와 Envoy Gateway 사이의 xDS 연결</td></tr>
@@ -276,7 +276,7 @@ html[data-lang="en"] .l-ko{display:none!important}
 <tr><td><code>ELBProxyConfiguration</code></td><td>프록시의 AWS 설정(IAM 역할, 주소 방식, 서브넷, 접근을 허용할 대역)을 적어 Gateway에 붙이는 리소스</td><td>이 리소스가 붙은 Gateway만 프록시로 생성</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>표 3.</b> 설정을 만드는 쪽(컨트롤 플레인)과 Kubernetes 리소스의 용어</p>
+<p class="cap"><b>표 3.</b> 설정을 만드는 부분(컨트롤 플레인)과 Kubernetes 리소스의 용어</p>
 <p>Envoy Gateway와 컨트롤러의 관계는 혼동하기 쉽습니다. Envoy Gateway는 원래 두 가지 일을 합니다. Gateway API 리소스를 Envoy 설정으로 바꿔 xDS로 내려 주는 일과, 그 설정을 받을 Envoy 파드를 클러스터에 만드는 일입니다. ELB for Envoy를 사용하면 앞의 일은 Envoy Gateway가 그대로 하고 뒤의 일만 컨트롤러가 넘겨받아 파드 대신 프록시를 만듭니다.</p>
 <p>Lua와 WebAssembly는 둘 다 Envoy에 사용자 로직을 넣는 방법이고 쓰임이 다릅니다. Lua는 설정 안에 스크립트를 직접 적으므로 헤더를 추가하거나 조건에 따라 응답을 바꾸는 짧은 처리에 맞습니다. WebAssembly는 Rust나 Go 같은 언어로 작성해 모듈로 빌드한 뒤 올리므로 인증처럼 규모가 있는 로직에 맞습니다. 이번 테스트에서는 Lua만 확인했습니다.</p>
 <div class="scroll"><table>
@@ -798,8 +798,8 @@ $ aws cloudwatch get-metric-statistics --namespace AWS/ProxyELB --metric-name Re
 </div></section>
 
 <section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Terms and what each component does</h2></header><div class="prose">
-<p>This post mixes Envoy terms with Kubernetes Gateway API terms. Before looking at the structure I sort them into three groups: the side that requests actually pass through, the side that builds configuration and hands it down, and the tools used in the test. The first two are called the data plane and the control plane.</p>
-<p>Envoy is at the center of the side that requests pass through. An Envoy configuration has three parts. A listener accepts connections, filters inspect or change requests, and a cluster points at a group of backends to send requests to. ELB for Envoy runs this Envoy on instances that AWS owns.</p>
+<p>This post mixes Envoy terms with Kubernetes Gateway API terms. Before looking at the structure I sort them into three groups: the part that requests actually pass through, the part that builds configuration and hands it down, and the tools used in the test. The first two are called the data plane and the control plane.</p>
+<p>Envoy is at the center of the part that requests pass through. An Envoy configuration has three parts. A listener accepts connections, filters inspect or change requests, and a cluster points at a group of backends to send requests to. ELB for Envoy runs this Envoy on instances that AWS owns.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>Term</th><th>Meaning</th><th>In this test</th></tr>
@@ -816,15 +816,15 @@ $ aws cloudwatch get-metric-statistics --namespace AWS/ProxyELB --metric-name Re
 <tr><td>external processing</td><td>A filter that sends requests and responses to an external gRPC service for processing</td><td>Not tested</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 2.</b> Terms on the side that requests pass through (data plane)</p>
-<p>On the side that builds configuration, the first term to know is xDS. Envoy can work from the configuration file it read at startup alone, but it can also connect to a control plane while running and keep receiving configuration. The set of APIs for that is xDS. The x stands for whatever is being fetched and DS is short for discovery service. Listeners come through LDS, routes through RDS, clusters through CDS, the pod addresses in a cluster through EDS and certificates through SDS. When backend pods are replaced the new addresses arrive through EDS, so Envoy does not have to restart.</p>
+<p class="cap"><b>Table 2.</b> Terms for the part that requests pass through (data plane)</p>
+<p>In the part that builds configuration, the first term to know is xDS. Envoy can work from the configuration file it read at startup alone, but it can also connect to a control plane while running and keep receiving configuration. The set of APIs for that is xDS. The x stands for whatever is being fetched and DS is short for discovery service. Listeners come through LDS, routes through RDS, clusters through CDS, the pod addresses in a cluster through EDS and certificates through SDS. When backend pods are replaced the new addresses arrive through EDS, so Envoy does not have to restart.</p>
 <div class="scroll"><table>
 <thead>
 <tr><th>Term</th><th>Meaning</th><th>In this test</th></tr>
 </thead>
 <tbody>
-<tr><td>Control plane</td><td>The side that computes configuration and hands it down. Requests do not pass through it</td><td>Envoy Gateway</td></tr>
-<tr><td>Data plane</td><td>The side that requests actually pass through</td><td>The proxy nodes of ELB for Envoy</td></tr>
+<tr><td>Control plane</td><td>The part that computes configuration and hands it down. Requests do not pass through it</td><td>Envoy Gateway</td></tr>
+<tr><td>Data plane</td><td>The part that requests actually pass through</td><td>The proxy nodes of ELB for Envoy</td></tr>
 <tr><td>xDS</td><td>The set of APIs through which a running Envoy fetches configuration (LDS, RDS, CDS, EDS, SDS)</td><td>The proxy connects to port 18000 of Envoy Gateway</td></tr>
 <tr><td>ADS, delta xDS</td><td>ADS carries several xDS APIs over one connection; delta sends only what changed</td><td>The bootstrap the controller builds uses both</td></tr>
 <tr><td>mTLS</td><td>TLS in which each side checks the other's certificate</td><td>The xDS connection between the proxy and Envoy Gateway</td></tr>
@@ -835,7 +835,7 @@ $ aws cloudwatch get-metric-statistics --namespace AWS/ProxyELB --metric-name Re
 <tr><td><code>ELBProxyConfiguration</code></td><td>A resource that holds the proxy's AWS settings (IAM role, addressing, subnets, the ranges allowed in) and attaches to a Gateway</td><td>Only a Gateway with this resource becomes a proxy</td></tr>
 </tbody>
 </table></div>
-<p class="cap"><b>Table 3.</b> Terms on the side that builds configuration (control plane) and Kubernetes resources</p>
+<p class="cap"><b>Table 3.</b> Terms for the part that builds configuration (control plane) and Kubernetes resources</p>
 <p>The relationship between Envoy Gateway and the controller is easy to mix up. Envoy Gateway normally does two jobs. It turns Gateway API resources into Envoy configuration and serves it over xDS, and it creates the Envoy pods that receive that configuration. With ELB for Envoy the first job stays with Envoy Gateway, and the controller takes over only the second job and creates a proxy instead of pods.</p>
 <p>Lua and WebAssembly are both ways to put your own logic into Envoy, and they suit different jobs. A Lua script is written straight into the configuration, so it fits short work such as adding a header or changing a response on a condition. A WebAssembly module is written in a language such as Rust or Go, built and then loaded, so it fits larger logic such as authentication. This test checked Lua only.</p>
 <div class="scroll"><table>
