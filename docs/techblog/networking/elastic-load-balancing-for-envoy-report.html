@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elastic Load Balancing for Envoy</title>
+<meta name="description" content="Envoy 프록시를 AWS가 운영하는 ELB for Envoy를 도쿄 리전의 Amazon EKS 클러스터에서 테스트했습니다. 10분 부하에서 노드가 3개에서 23개로 늘며 4,568만 건을 오류 없이 처리했고 지연 시간은 평균 1.7ms 늘었습니다. Envoy Gateway가 멈춘 동안 백엔드가 교체되면 요청이 실패했습니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/networking/elastic-load-balancing-for-envoy/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-26</span><span class="l-en">Published 2026-11-26</span></span><span>Networking</span><span><span class="l-ko">읽는 시간 12분</span><span class="l-en">12 min read</span></span></div>
+<h1><span class="l-ko">Elastic Load Balancing for Envoy</span><span class="l-en">Elastic Load Balancing for Envoy</span></h1>
+<p class="thesis"><span class="l-ko">AWS가 2026년 11월 25일에 정식 출시한 Elastic Load Balancing for Envoy를 도쿄 리전의 Amazon EKS 클러스터에서 직접 테스트해 보았습니다. 10분 부하에서 프록시 노드가 3개에서 23개로 늘며 45,687,745건을 오류 없이 처리했고 지연 시간은 프록시를 거치지 않는 호출보다 평균 1.7ms 늘었습니다. 하지만 컨트롤 플레인인 Envoy Gateway는 클러스터에 남습니다. 이 파드가 멈춘 동안 백엔드 파드가 교체되면 요청이 실패했고 복구에 약 30초가 걸렸습니다. Envoy의 기능이 필요한 팀에게는 적용할 만하고 표준 라우팅만 쓴다면 ALB가 더 저렴합니다.</span><span class="l-en">I tested Elastic Load Balancing for Envoy, which AWS made generally available on November 25, 2026, with an Amazon EKS cluster in the Tokyo Region. Under a 10-minute load the proxy grew from 3 to 23 nodes and served 45,687,745 requests without an error, and it added 1.7 ms on average compared with calls that do not pass through a proxy. However, the control plane, Envoy Gateway, stays in the cluster. When backend pods were replaced while that pod was down, requests failed, and recovery took about 30 seconds. It is worth adopting for teams that need what Envoy offers, and ALB is cheaper for standard routing.</span></p>
+<div class="tags"><span>#Elastic Load Balancing</span><span>#Envoy</span><span>#Envoy Gateway</span><span>#Gateway API</span><span>#Amazon EKS</span><span>#AWS WAF</span></div>
+<ul class="facts"><li><span class="l-ko"><b>확장과 처리량</b>: 연결 512개로 10분 동안 부하를 유지하자 프록시의 네트워크 인터페이스가 3개에서 23개로 늘었고 처리량은 초당 29,131건에서 100,661건으로 올라갔습니다. 확장 설정은 하지 않았습니다.</span><span class="l-en"><b>Scaling and throughput</b>: under a 10-minute load over 512 connections the proxy's network interfaces grew from 3 to 23 and throughput rose from 29,131 to 100,661 requests per second. I configured no scaling.</span></li><li><span class="l-ko"><b>지연 시간</b>: 초당 2,000건에서 파드가 직접 호출한 요청은 평균 1.118ms, 프록시를 거친 요청은 평균 2.840ms였습니다.</span><span class="l-en"><b>Latency</b>: at 2,000 requests per second a direct call from a pod averaged 1.118 ms and a call through the proxy averaged 2.840 ms.</span></li><li><span class="l-ko"><b>변경 반영</b>: HTTPRoute 변경은 <code>kubectl apply</code>가 끝난 0.03초 뒤부터 적용되었습니다. CLI로 만든 프록시의 설정 파일 교체는 16초 만에 전파되었고 그동안 보낸 25,116건에 실패가 없었습니다.</span><span class="l-en"><b>Changes</b>: an HTTPRoute change applied 0.03 seconds after <code>kubectl apply</code> returned. Replacing the configuration file of the proxy created with the CLI propagated in 16 seconds, and none of the 25,116 requests sent meanwhile failed.</span></li><li><span class="l-ko"><b>컨트롤 플레인</b>: Envoy Gateway가 멈춰도 백엔드가 그대로면 518건이 모두 정상이었습니다. 그 사이 백엔드 파드가 교체되자 63건 중 37건이 실패했고 Envoy Gateway를 2개로 운영했을 때는 832건이 모두 정상이었습니다.</span><span class="l-en"><b>Control plane</b>: with Envoy Gateway down and backends unchanged, all 518 requests succeeded. When backend pods were replaced meanwhile, 37 of 63 requests failed, and with two Envoy Gateway replicas all 832 requests succeeded.</span></li><li><span class="l-ko"><b>설치할 때 확인할 것</b>: 컨트롤러는 LoadBalancer 유형 Service를 만들고 프런트엔드 보안 그룹의 기본 소스는 <code>0.0.0.0/0</code>이며 Envoy Gateway v1.10에서 Lua는 기본값이 비활성화입니다.</span><span class="l-en"><b>What to check when installing</b>: the controller creates a Service of type LoadBalancer, the frontend security group allows <code>0.0.0.0/0</code> by default, and Lua is disabled by default in Envoy Gateway v1.10.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">Envoy를 직접 운영하던 기존 방식</a><a href="#ko-s2">노드 3개에서 23개로 확장하며 4,568만 건을 오류 없이 처리</a><a href="#ko-s3">Envoy Gateway는 클러스터에 남고 Envoy는 AWS가 운영하는 구조</a><a href="#ko-s4">CLI로 프록시를 만들고 설정을 교체하는 명령</a><a href="#ko-s5">EKS에 설치하면서 확인한 네 가지</a><a href="#ko-s6">Gateway API로 사용한 Envoy 기능</a><a href="#ko-s7">컨트롤 플레인이 멈추면 새 백엔드를 알지 못합니다</a><a href="#ko-s8">지연 시간은 평균 1.7ms 늘고 2분 안에 확장을 시작합니다</a><a href="#ko-s9">ACM 인증서, AWS WAF, CloudWatch 지표</a><a href="#ko-s10">ELB for Envoy를 활용하는 경우</a><a href="#ko-s11">제약과 테스트하지 못한 항목</a><a href="#ko-s12">비용과 성능으로 본 판단</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">Running Envoy yourself: the setup until now</a><a href="#en-s2">From 3 to 23 nodes while serving 45.7 million requests without an error</a><a href="#en-s3">Envoy Gateway stays in the cluster and AWS runs Envoy</a><a href="#en-s4">Commands to create a proxy with the CLI and replace its configuration</a><a href="#en-s5">Four things I found while installing on EKS</a><a href="#en-s6">Envoy features used through the Gateway API</a><a href="#en-s7">When the control plane stops, the proxy does not learn about new backends</a><a href="#en-s8">Latency grows by 1.7 ms on average and scaling starts within 2 minutes</a><a href="#en-s9">ACM certificates, AWS WAF and CloudWatch metrics</a><a href="#en-s10">Where ELB for Envoy is used</a><a href="#en-s11">Constraints and what I did not test</a><a href="#en-s12">A verdict on cost and performance</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>Envoy를 직접 운영하던 기존 방식</h2></header><div class="prose">
+<p>Envoy의 필터와 세밀한 트래픽 제어가 필요한 팀은 그동안 Envoy 프록시를 직접 실행하고 운영해야 했습니다. AWS는 2026년 11월 25일에 이 Envoy를 대신 운영하는 로드 밸런서 유형인 Elastic Load Balancing for Envoy(ELB for Envoy)를 정식 출시했습니다.</p>
+<p>Envoy는 요청을 받아 백엔드로 전달하는 오픈소스 프록시입니다. 인증이나 요청 변환을 필터로 구현하고 가중치 분산과 재시도, rate limit 같은 규칙을 경로마다 다르게 적용하려는 팀이 주로 사용합니다. Kubernetes에서는 Gateway API 리소스를 Envoy 설정으로 바꿔 주는 Envoy Gateway와 함께 쓰는 구성이 많습니다. 이때 Envoy는 클러스터 안의 파드로 실행됩니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig01-legacy.png" alt="Envoy가 필요한 경우 네 가지, 클러스터 안에서 Envoy 파드를 실행하고 Envoy Gateway가 xDS로 설정을 내려 주던 기존 구성, 플랫폼 팀이 직접 맡아야 했던 일 네 가지를 정리한 그림" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 클러스터 안에서 Envoy를 실행하던 기존 구성과 직접 맡아야 했던 일</figcaption></figure>
+<p>이 구성에서는 Envoy 파드가 운영 대상입니다. <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/kubernetes-overview.html" target="_blank" rel="noopener">사용 설명서</a>는 그 일을 Envoy 파드의 크기 산정, 확장, 업그레이드, 보안 취약점(CVE) 패치로 정리합니다. 트래픽이 늘면 파드와 노드를 함께 늘려야 하고 Envoy에 취약점이 나오면 모든 프록시를 교체해야 합니다.</p>
+<p>ELB for Envoy는 이 Envoy 프록시를 AWS가 운영하는 인스턴스로 옮깁니다. 설정과 컨트롤 플레인은 그대로 사용자가 관리합니다. 출시 시점에 14개 리전에서 제공되고 서울 리전은 포함되지 않아, 이 글은 도쿄 리전에서 테스트한 기록입니다. 기존 구성은 직접 구축하지 않고 문서의 설명을 바탕으로 정리했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>노드 3개에서 23개로 확장하며 4,568만 건을 오류 없이 처리</h2></header><div class="prose">
+<p>10분 동안 부하를 유지하자 프록시의 노드가 3개에서 23개로 늘었고 처리량은 초당 29,131건에서 100,661건으로 올라갔습니다. 그동안 보낸 45,687,745건은 모두 200으로 응답했습니다. 확장 설정은 하나도 하지 않았습니다. 노드 수는 VPC에 보이는 프록시의 네트워크 인터페이스 수로 셌습니다.</p>
+<p>반대로 주의할 결과도 있었습니다. Kubernetes에서는 Envoy Gateway가 컨트롤 플레인으로 클러스터에 남는데, 이 파드가 멈춘 동안 백엔드 파드가 교체되면 프록시가 새 주소를 받지 못해 요청이 실패했습니다. 복구에는 Envoy Gateway가 돌아온 뒤 약 30초가 걸렸습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig02-setup.png" alt="도쿄 리전 VPC의 프라이빗 서브넷 세 개에 걸친 Amazon EKS 클러스터와 Envoy Gateway 파드, 클라이언트 파드, 백엔드 파드, CLI로 만든 프록시와 Gateway로 만든 프록시 두 개로 이루어진 테스트 구성과 측정 방법 네 가지, 테스트 순서 여덟 단계" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> 테스트 구성과 측정 방법, 테스트 순서</figcaption></figure>
+<p>프록시는 두 개를 만들었습니다. 하나는 AWS CLI로 정적 설정을 넣어 만들었고 다른 하나는 Amazon EKS 클러스터의 Gateway 리소스로 만들었습니다. 두 프록시 모두 VPC 안에서만 접근하는 내부(internal) 프록시이고 요청은 클러스터 안의 클라이언트 파드에서 보냈습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>항목</th><th>값</th></tr>
+</thead>
+<tbody>
+<tr><td>ELB for Envoy</td><td>Envoy 1.40, 내부 IPv4, 가용 영역 3개</td></tr>
+<tr><td>Amazon EKS</td><td>1.37, Amazon VPC CNI, EKS Pod Identity</td></tr>
+<tr><td>Envoy Gateway</td><td>v1.10.0</td></tr>
+<tr><td>컨트롤러</td><td><code>elb-envoy-remote-infra-provider</code> v1.0.0</td></tr>
+<tr><td>Gateway API CRD</td><td>표준 채널 v1.6.3</td></tr>
+<tr><td>AWS CLI</td><td>2.42.4</td></tr>
+<tr><td>클라이언트와 백엔드 노드</td><td>c7i-flex.xlarge 3대, 부하 발생기용 c7i-flex.2xlarge 1대</td></tr>
+<tr><td>도구</td><td>fortio 1.77.0, curl 8.14.1</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 테스트 환경. 2026년 11월 26일 도쿄 리전(ap-northeast-1)</p>
+<p><code>aws elb-proxy</code> 명령은 AWS CLI 2.42.4에 처음 들어갔습니다. 2.42.3 이하에서는 명령을 찾지 못하므로 CLI부터 올려야 합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Envoy Gateway는 클러스터에 남고 Envoy는 AWS가 운영하는 구조</h2></header><div class="prose">
+<p>ELB for Envoy에서 만드는 리소스는 프록시(proxy)입니다. 프록시를 만들 때 Envoy 부트스트랩 설정 파일, Envoy 버전, IAM 역할, 서로 다른 가용 영역의 서브넷 두 개 이상, 보안 그룹을 지정합니다. AWS는 그 설정으로 Envoy를 실행하는 노드를 운영하고 사용자의 서브넷에 네트워크 인터페이스를 두어 DNS 이름 하나로 묶습니다. 테스트에서 이 네트워크 인터페이스는 내 계정에 보였지만 연결된 인스턴스는 AWS 서비스 계정의 것이었습니다.</p>
+<p>설정을 넣는 방법은 세 가지입니다. 콘솔이나 CLI로 정적 설정을 넣거나, 직접 운영하는 xDS 컨트롤 플레인에 프록시를 연결하거나, Amazon EKS의 Envoy Gateway를 사용합니다. 세 번째 방법에서는 오픈소스 컨트롤러 <code>elb-envoy-remote-infra-provider</code>가 Envoy Gateway 파드의 사이드카로 실행됩니다. Gateway에 <code>ELBProxyConfiguration</code> 리소스를 붙이면 이 사이드카가 ELB for Envoy API를 호출해 프록시를 만듭니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig03-structure.png" alt="Gateway와 ELBProxyConfiguration을 적용하면 Envoy Gateway 파드의 컨트롤러 사이드카가 프록시와 보안 그룹을 만들고 프록시가 Envoy Gateway에서 xDS로 설정을 받아 요청을 파드 IP로 직접 전달하는 다섯 단계와 컨트롤러가 관리하는 보안 그룹 세 가지, 측정값 세 개" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> Gateway가 프록시가 되는 과정과 요청이 지나는 경로</figcaption></figure>
+<p>프랜차이즈 식당에 비유하면 이해하기 쉽습니다. 메뉴와 조리법을 정하는 본사(Envoy Gateway)는 우리 건물(클러스터)에 그대로 있고 주방과 조리 인력(Envoy 프록시)만 전문 업체(AWS)가 맡습니다. 손님이 늘면 업체가 인력을 늘리고 주방 설비의 점검도 업체가 합니다. 본사와 연락이 끊겨도 주방은 마지막으로 받은 조리법대로 음식을 내지만 새 메뉴는 받지 못합니다. 실제 동작에서는 본사가 주방에 지시를 보내는 것이 아니라 프록시가 Envoy Gateway에 먼저 접속해 설정을 받아 간다는 점이 다릅니다.</p>
+<p>요청은 프록시에서 파드 IP로 직접 전달됩니다. 백엔드 파드가 본 상대 주소는 프록시의 네트워크 인터페이스 주소였고 클라이언트 주소는 <code>X-Forwarded-For</code> 헤더에 들어 있었습니다. 그래서 파드 IP가 VPC에서 라우팅되어야 하고 Amazon VPC CNI가 이 조건을 충족합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>CLI로 프록시를 만들고 설정을 교체하는 명령</h2></header><div class="prose">
+<p>프록시 하나는 Kubernetes 없이 CLI로 만들었습니다. 네트워크 설정은 JSON 파일로, Envoy 설정은 파일 참조로 넘깁니다. 요청 뒤 169초 만에 <code>active</code>가 되었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ cat create.json
+{
+  "name": "elblab-static",
+  "type": "envoy",
+  "proxyVersion": "1.40",
+  "roleArn": "arn:aws:iam::111122223333:role/elb-envoy-lab-proxy-role",
+  "networkConfiguration": {
+    "ipConfiguration": {"ipAddressingConfiguration": {"ipv4Addressability": "internal", "ipv6Addressability": "off"}},
+    "vpcConfiguration": {
+      "subnets": [{"subnetId": "subnet-0aaaaaaaaaaaaaaaa"}, {"subnetId": "subnet-0bbbbbbbbbbbbbbbb"}, {"subnetId": "subnet-0cccccccccccccccc"}],
+      "securityGroups": [{"securityGroupId": "sg-0123456789abcdef0"}]
+    }
+  }
+}
+
+$ aws elb-proxy create-proxy \
+    --cli-input-json file://create.json \
+    --configuration "configurationFile={configurationBytes@=file://config-v1.yaml}" \
+    --cli-binary-format raw-in-base64-out \
+    --query '{name:name,dnsName:dnsName,status:status.code}'
+{
+    "name": "elblab-static",
+    "dnsName": "internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws",
+    "status": "create-in-progress"
+}
+
+# 169초 뒤
+$ aws elb-proxy get-proxy --proxy-identifier $PROXY_ARN --query status.code --output text
+active
+
+$ dig +noall +answer A internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.1.10
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.2.10
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.3.10
+
+$ curl http://internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws/
+config v1</code></pre></div>
+<p>DNS 이름은 가용 영역마다 하나씩 A 레코드 세 개를 돌려주었고 TTL은 30초였습니다. 이어서 요청을 계속 보내는 상태에서 설정 파일을 교체했습니다. 교체 전과 후의 상태는 <code>list-proxy-updates</code>로 확인했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 응답 본문만 "config v2"로 바꾼 설정으로 교체
+$ aws elb-proxy update-proxy-configuration --proxy-identifier $PROXY_ARN \
+    --configuration-file "configurationBytes@=file://config-v2.yaml" \
+    --cli-binary-format raw-in-base64-out --query updateId --output text
+a1b2c3d4-5678-90ab-cdef-EXAMPLE11111
+
+# 교체 직후
+$ aws elb-proxy list-proxy-updates --proxy-identifier $PROXY_ARN --query 'items[0]'
+{
+    "updateId": "a1b2c3d4-5678-90ab-cdef-EXAMPLE11111",
+    "type": "update-proxy-configuration",
+    "validationStatus": "valid",
+    "propagationStatus": "in-progress",
+    "submittedAt": "2026-11-26T05:17:29.530000+00:00",
+    "validatedAt": "2026-11-26T05:17:33.648000+00:00"
+}
+
+# 16초 뒤
+    "propagationStatus": "complete",
+    "completedAt": "2026-11-26T05:17:45.460000+00:00"</code></pre></div>
+<p>설정 파일을 바꾸면 Envoy가 hot restart로 다시 시작합니다. 새 연결로 0.2초마다 보낸 1,116건과 유지 연결로 초당 100건씩 보낸 24,000건이 모두 200이었습니다. 새 설정의 첫 응답은 호출 3.1초 뒤에 왔고 이전 설정의 마지막 응답은 7.1초 뒤였습니다. 노드는 가용 영역 하나씩 차례로 바뀌었고 유지 연결 8개는 각각 한 번씩 다시 맺어졌습니다.</p>
+<p>지원하지 않는 설정은 프록시에 도달하기 전에 API 호출에서 거부됩니다. 문서에 적힌 제약을 그대로 넣어 확인했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>넣은 설정</th><th>CreateProxy의 응답 (ValidationException)</th></tr>
+</thead>
+<tbody>
+<tr><td><code>proxyVersion</code> 1.39</td><td>Proxy version '1.39' is not supported</td></tr>
+<tr><td>파일 액세스 로그 <code>envoy.access_loggers.file</code></td><td>field 'access_log' must not use the file access logger</td></tr>
+<tr><td>부트스트랩 필드 <code>layered_runtime</code></td><td>field 'layered_runtime' is not a supported bootstrap field</td></tr>
+<tr><td><code>node.id</code></td><td>field 'node.id' is not a supported bootstrap field</td></tr>
+<tr><td><code>admin.access_log_path</code></td><td>field 'admin.access_log_path' is not supported</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 거부되는 설정과 API의 응답. 모두 호출 즉시 반환</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>EKS에 설치하면서 확인한 네 가지</h2></header><div class="prose">
+<p>Kubernetes 쪽은 컨트롤러 차트와 Envoy Gateway 차트를 설치하고 Gateway에 <code>ELBProxyConfiguration</code>을 붙이면 됩니다. 컨트롤러의 AWS 권한은 EKS Pod Identity로 Envoy Gateway의 서비스 계정에 주었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># Envoy Gateway 자체 CRD만 설치 (Gateway API CRD는 이미 있는 것을 사용)
+$ helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version v1.10.0 \
+    --set crds.gatewayAPI.enabled=false --set crds.envoyGateway.enabled=true \
+    | kubectl apply --server-side -f -
+
+# 컨트롤러 차트: CRD와 사이드카용 RBAC
+$ helm install elb-envoy-remote-infra-provider \
+    oci://public.ecr.aws/aws-elb-proxy/elb-envoy-remote-infra-provider-chart --version 1.0.0 \
+    -n elb-envoy-remote-infra-provider-system --create-namespace
+
+# Envoy Gateway: 사이드카와 Remote 인프라 설정이 든 values 파일 사용
+$ helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.10.0 \
+    -n envoy-gateway-system --create-namespace --set crds.enabled=false -f eg-values.yaml
+
+$ kubectl get pods -n envoy-gateway-system -l control-plane=envoy-gateway
+NAME                             READY   STATUS    RESTARTS   AGE
+envoy-gateway-6bb9765477-5fm72   2/2     Running   0          10s</code></pre></div>
+<p>설치하면서 문서만으로는 알기 어려웠던 점이 네 가지 있었습니다.</p>
+<p><b>첫째, Gateway API CRD가 이미 있으면 그대로 두고 설치합니다.</b> 컨트롤러의 설치 안내는 이 경우 Gateway API CRD v1.6.1을 다시 적용하게 합니다. 테스트한 클러스터는 다른 컨트롤러가 v1.6.3 CRD를 쓰고 있어서 Envoy Gateway 자체 CRD만 따로 넣고 차트는 <code>crds.enabled=false</code>로 설치했습니다. 이 조합에서도 정상으로 동작했습니다.</p>
+<p><b>둘째, 컨트롤러는 LoadBalancer 유형 Service를 만듭니다.</b> 프록시의 DNS 이름을 Gateway 주소로 전달하는 용도이고 <code>loadBalancerClass</code>가 <code>aws.elbproxy.internal</code>이어서 다른 로드 밸런서가 생기지는 않습니다. 하지만 LoadBalancer 유형을 금지하는 승인 정책을 둔 클러스터에서는 이 클래스에 예외를 두어야 Gateway가 주소를 받습니다.</p>
+<p><b>셋째, 보안 그룹의 기본 소스는 <code>0.0.0.0/0</code>입니다.</b> 컨트롤러가 만드는 프런트엔드 보안 그룹은 내부 프록시에서도 모든 주소를 허용합니다. <code>ingressCidrs</code>에 VPC 대역을 지정했습니다.</p>
+<p><b>넷째, Lua는 기본값이 비활성화입니다.</b> Envoy Gateway v1.10은 <code>extensionApis.enableLua</code>를 설정해야 Lua 정책을 받습니다. 비활성화 상태에서 Lua 정책을 붙이자 정책이 거부되었고 그 경로는 정책을 지울 때까지 500을 돌려주었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>apiVersion: gateway.elbproxy.aws/v1alpha1
+kind: ELBProxyConfiguration
+metadata:
+  name: web-proxy
+  namespace: elb-lab
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: web
+  roleArn: arn:aws:iam::111122223333:role/elb-envoy-lab-proxy-role
+  ingressCidrs: ["10.0.0.0/16"]        # 지정하지 않으면 0.0.0.0/0
+  networkConfiguration:
+    ipConfiguration:
+      ipAddressingConfiguration:
+        ipv4Addressability: internal
+        ipv6Addressability: "off"       # 따옴표가 없으면 false로 읽힌다</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># ELBProxyConfiguration을 붙이기 전: 주소가 없고 AWS에는 아무것도 생기지 않는다
+$ kubectl get gateway web -n elb-lab
+NAME   CLASS           ADDRESS   PROGRAMMED   AGE
+web    elb-proxy-aws             False        20s
+
+$ kubectl apply -f proxy.yaml
+elbproxyconfiguration.gateway.elbproxy.aws/web-proxy created
+
+# 약 4분 뒤
+$ kubectl get gateway web -n elb-lab
+NAME   CLASS           ADDRESS                                                                PROGRAMMED   AGE
+web    elb-proxy-aws   internal-elblab-web-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws   True         4m38s</code></pre></div>
+<p>프록시는 생성 148초 뒤에 <code>active</code>가 되었지만 Gateway가 주소를 받은 것은 약 243초 뒤였습니다. 컨트롤러가 생성 중인 프록시를 2분마다 다시 확인하기 때문입니다. 그 사이 컨트롤러는 프런트엔드 보안 그룹과 백엔드 보안 그룹을 만들고 노드 보안 그룹에 18000, 18002, 백엔드 포트를 여는 규칙을 더했습니다. 백엔드 포트가 다른 라우트를 추가하자 규칙도 약 5초 안에 늘었습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Gateway API로 사용한 Envoy 기능</h2></header><div class="prose">
+<p>라우팅과 정책은 Envoy Gateway를 쓸 때와 같은 리소스로 작성합니다. 프록시가 AWS로 옮겨 가도 리소스를 수정할 필요가 없었고 변경은 xDS로 바로 전달되었습니다. HTTPRoute를 바꾼 <code>kubectl apply</code>가 끝나고 0.03초 뒤의 요청부터 새 규칙으로 응답했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>기능</th><th>리소스</th><th>결과</th></tr>
+</thead>
+<tbody>
+<tr><td>가중치 분산 90:10</td><td>HTTPRoute <code>weight</code></td><td>1,000건 중 901건과 99건</td></tr>
+<tr><td>헤더 라우팅</td><td>HTTPRoute <code>headers</code></td><td><code>x-canary: true</code> 100건 모두 새 버전으로 전달</td></tr>
+<tr><td>재시도 (503, 최대 3회)</td><td>BackendTrafficPolicy <code>retry</code></td><td>503 비율 28.5%에서 0.9%</td></tr>
+<tr><td>로컬 rate limit (초당 10건)</td><td>BackendTrafficPolicy <code>rateLimit</code></td><td>초당 100건 중 31.1건 통과</td></tr>
+<tr><td>Lua 스크립트</td><td>EnvoyExtensionPolicy <code>lua</code></td><td>응답 헤더 추가. <code>io</code>, <code>os.getenv</code>, <code>require</code>는 사용 불가</td></tr>
+<tr><td>HTTPS 리스너</td><td>Gateway와 Secret</td><td>2.5초 뒤 TLS 1.3, HTTP/2로 응답</td></tr>
+<tr><td>기본 액세스 로그 (파일)</td><td>EnvoyProxy 기본값</td><td>컨트롤러가 거부하고 프록시를 만들지 않음</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> Gateway API와 Envoy Gateway 리소스로 확인한 기능. 요청 수는 각 시험에서 보낸 값</p>
+<p>재시도는 요청의 30%에 503을 돌려주는 백엔드로 확인했습니다. 정책을 붙이기 전과 후에 같은 요청 2,000건을 보냈습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 정책 적용 전
+$ fortio load -qps 0 -c 4 -n 2000 "http://$GATEWAY_HOST/fortio/echo?status=503:30"
+Code 200 : 1430 (71.5 %)
+Code 503 : 570 (28.5 %)
+
+$ cat retry.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: fortio-retry
+  namespace: elb-lab
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: fortio
+  retry:
+    numRetries: 3
+    perRetry:
+      backOff: {baseInterval: 10ms, maxInterval: 100ms}
+      timeout: 1s
+    retryOn:
+      httpStatusCodes: [503]
+      triggers: ["connect-failure", "retriable-status-codes"]
+$ kubectl apply -f retry.yaml
+
+# 정책 적용 후
+$ fortio load -qps 0 -c 4 -n 2000 "http://$GATEWAY_HOST/fortio/echo?status=503:30"
+Code 200 : 1982 (99.1 %)
+Code 503 : 18 (0.9 %)</code></pre></div>
+<p>로컬 rate limit은 프록시 노드마다 따로 셉니다. 초당 10건으로 제한한 경로에 초당 100건을 20초 동안 보내자 1,998건 중 621건이 통과했습니다. 노드 3개가 각각 10건씩 허용한 값입니다. 프록시가 확장되면 허용량도 함께 늘어나므로 전체 한도를 정확히 지켜야 하는 용도에는 맞지 않습니다. 전체를 하나로 세는 글로벌 rate limit은 이 구성에서 지원하지 않습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>컨트롤 플레인이 멈추면 새 백엔드를 알지 못합니다</h2></header><div class="prose">
+<p>Envoy는 AWS가 운영하지만 Envoy Gateway는 여전히 클러스터의 파드입니다. 이 파드가 멈추면 어떻게 되는지 보기 위해 Envoy Gateway를 0개로 줄이고 요청을 계속 보냈습니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig04-outage.png" alt="Envoy Gateway가 정상일 때 161건 모두 200, 컨트롤 플레인이 멈추고 백엔드가 그대로인 61초 동안 518건 모두 200, 중단 중에 백엔드 파드를 교체한 94초 동안 63건 중 정상 26건과 503 9건과 시간 초과 28건, 복구 뒤 약 30초에 정상화된 과정과 Envoy Gateway를 2개로 운영했을 때 832건 모두 200인 결과" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 컨트롤 플레인을 멈춘 동안의 요청 결과와 복구 과정</figcaption></figure>
+<p>백엔드가 그대로인 동안에는 문제가 없었습니다. 프록시는 마지막으로 받은 설정으로 518건을 모두 처리했습니다. 문제는 그 사이에 백엔드 파드가 교체될 때 생겼습니다. 프록시는 새 파드의 주소를 받지 못해 이미 사라진 주소로 요청을 보냈고 94초 동안 63건 가운데 37건이 503이나 시간 초과로 끝났습니다.</p>
+<p>복구에도 시간이 걸렸습니다. 프록시는 Envoy Gateway 파드의 IP를 설정 아카이브에 든 파일에서 읽습니다. Envoy Gateway가 새 IP로 돌아오면 컨트롤러가 아카이브를 교체해야 프록시가 다시 접속합니다. 교체 요청은 새 파드가 준비되고 14초 뒤에 제출되었고 마지막 실패는 약 30초 뒤였습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># 컨트롤 플레인 중단
+$ kubectl scale deployment envoy-gateway -n envoy-gateway-system --replicas=0
+
+# 복구 뒤: 컨트롤러가 제출한 아카이브 교체 (새 파드 준비 05:34:10)
+$ aws elb-proxy list-proxy-updates --proxy-identifier $PROXY_ARN \
+    --query 'items[0].{status:propagationStatus,submittedAt:submittedAt,completedAt:completedAt}'
+{
+    "status": "complete",
+    "submittedAt": "2026-11-26T05:34:24.617000+00:00",
+    "completedAt": "2026-11-26T05:34:40.376000+00:00"
+}
+
+# 프록시 로그: 스트림 이름은 프록시 네트워크 인터페이스의 ID
+$ aws logs filter-log-events --log-group-name /aws/elb-proxy/elblab-web \
+    --filter-pattern '"xds_cluster"' --query 'events[0].message' --output text
+[2026-11-26 05:31:30.916][2648][warning][config] [...grpc_stream.h:189] DeltaAggregatedResources gRPC config stream to xds_cluster closed: 13, upstream_reset_after_response_s...</code></pre></div>
+<p>대책은 Envoy Gateway를 두 개 이상으로 운영하는 것입니다. 2개로 늘린 뒤 한 개를 삭제하면서 백엔드 파드를 교체했을 때는 832건이 모두 200이었습니다. 컨트롤 플레인이 정상인 상태의 백엔드 롤링 교체에서는 722건 중 1건만 503이었습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>지연 시간은 평균 1.7ms 늘고 2분 안에 확장을 시작합니다</h2></header><div class="prose">
+<p>프록시를 거치면 평균 지연 시간이 1.7ms 늘었습니다. 초당 2,000건을 연결 32개로 40초 동안 보냈을 때 파드에서 Service로 직접 보낸 요청은 평균 1.118ms, 프록시를 거친 요청은 평균 2.840ms였습니다. 프록시를 거치지 않는 호출과 비교한 값이고 클러스터 안에서 실행한 Envoy와 비교한 값은 아닙니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig05-scaling.png" alt="2분 구간 다섯 개의 초당 요청 수가 29,131건, 83,156건, 76,910건, 90,855건, 100,661건으로 늘고 구간 끝의 프록시 네트워크 인터페이스가 9개, 12개, 15개, 19개, 23개로 늘어난 막대 차트와 합계 45,687,745건 오류 0건, 초당 2,000건에서 직접 호출 평균 1.118ms와 프록시 경유 평균 2.840ms를 비교한 표" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> 10분 부하 동안의 구간별 처리량과 프록시의 확장, 지연 시간 비교</figcaption></figure>
+<p>확장은 부하를 건 첫 2분 안에 시작되었습니다. 프록시의 네트워크 인터페이스는 3개에서 2분 뒤 9개가 되었고 10분 뒤에는 23개였습니다. 가용 영역 세 곳에서 함께 늘었습니다. 확장 전의 첫 구간에서는 평균 지연이 17.57ms였고 확장된 뒤에는 5ms에서 7ms 사이로 내려갔습니다. 부하가 급증하는 첫 몇 분 동안은 지연이 늘어난다는 뜻이므로 이 구간을 감안해야 합니다.</p>
+<p>부하를 멈춘 뒤 4분 동안은 노드 수가 줄지 않았습니다. 축소에 걸리는 시간은 더 기다려 확인하지 못했습니다. DNS 응답도 달라졌습니다. 노드가 9개 이상일 때 A 레코드는 6개에서 8개만 돌아왔습니다. 클라이언트가 DNS를 한 번만 조회하고 연결을 오래 유지하면 새로 늘어난 노드로 부하가 옮겨 가지 않습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>ACM 인증서, AWS WAF, CloudWatch 지표</h2></header><div class="prose">
+<p>CLI로 만든 프록시에는 AWS Certificate Manager(ACM) 인증서와 AWS WAF를 연결했습니다. 인증서는 프록시에 연결한 뒤 리스너 설정에서 ARN을 이름으로 적어 참조합니다. 개인 키를 설정 파일에 넣지 않아도 됩니다. Gateway로 만든 프록시는 방식이 다릅니다. 인증서를 Kubernetes Secret에 두면 Envoy Gateway가 xDS로 전달합니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># ACM 인증서 연결: 1초 남짓 만에 active
+$ aws elb-proxy associate-certificate --proxy-identifier $PROXY_ARN \
+    --certificate-identifier $CERT_ARN --query certificateAssociation.status.code --output text
+associate-in-progress
+$ aws elb-proxy list-certificate-associations --proxy-identifier $PROXY_ARN \
+    --query 'items[0].status.code' --output text
+active
+
+# AWS WAF 연결 전
+$ curl -s -o /dev/null -w '%{http_code}\n' http://$PROXY_DNS/admin
+200
+
+# web ACL을 만든 지 8초 뒤의 호출은 실패, 1분 38초 뒤의 호출은 성공
+$ aws wafv2 associate-web-acl --web-acl-arn $ACL_ARN --resource-arn $PROXY_ARN
+An error occurred (WAFUnavailableEntityException) when calling the AssociateWebACL operation:
+AWS WAF couldn't retrieve the resource that you requested. Retry your request.
+$ aws wafv2 associate-web-acl --web-acl-arn $ACL_ARN --resource-arn $PROXY_ARN
+
+# 연결 4.6초 뒤부터
+$ curl -s -o /dev/null -w '%{http_code}\n' http://$PROXY_DNS/admin
+403</code></pre></div>
+<p>경로가 <code>/admin</code>으로 시작하면 차단하는 규칙 하나를 넣은 web ACL을 연결하자 4.6초 뒤부터 403이 돌아왔고 세 노드에 모두 적용되기까지 8.9초가 걸렸습니다. 같은 동안 다른 경로의 요청 225건은 모두 200이었습니다.</p>
+<p>지표는 CloudWatch의 <code>AWS/ProxyELB</code> 네임스페이스에 있습니다. 사용 설명서의 예는 <code>LoadBalancer</code> 차원에 프록시 ARN을 넣지만 테스트한 날에는 그 조회가 데이터를 돌려주지 않았습니다. 실제 차원은 <code>Proxy</code>였습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>$ aws cloudwatch list-metrics --namespace AWS/ProxyELB --metric-name RequestCount \
+    --query 'Metrics[].Dimensions'
+[
+    [ { "Name": "Proxy", "Value": "proxy/elblab-web:0123456789abcdef" } ]
+]
+
+$ aws cloudwatch get-metric-statistics --namespace AWS/ProxyELB --metric-name RequestCount \
+    --dimensions Name=Proxy,Value=proxy/elblab-web:0123456789abcdef \
+    --start-time 2026-11-26T05:54:00Z --end-time 2026-11-26T05:57:00Z --period 60 --statistics Sum \
+    --query 'sort_by(Datapoints,&amp;Timestamp)[].[Timestamp,Sum]' --output text
+2026-11-26T05:54:00+00:00	5609328.0
+2026-11-26T05:55:00+00:00	5088734.0
+2026-11-26T05:56:00+00:00	6040254.0</code></pre></div>
+<p>확인한 지표는 <code>RequestCount</code>, 응답 코드별 개수, <code>UpstreamConnectionErrorCount</code>, <code>UpstreamResponseTime</code>입니다. 가격 페이지는 분당 LCU 사용량을 CloudWatch에서 볼 수 있다고 설명하지만 이 네임스페이스에서 LCU 지표는 찾지 못했습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>ELB for Envoy를 활용하는 경우</h2></header><div class="prose">
+<p>AWS는 이 서비스의 용도를 사용자 인증, 요청 변환, 고급 트래픽 라우팅처럼 Envoy의 확장성이 필요한 워크로드와 Kubernetes 인그레스, 직접 운영하던 Envoy의 마이그레이션으로 설명합니다. 테스트 결과를 놓고 보면 다음 경우에 잘 맞습니다.</p>
+<ul>
+<li><b>Envoy Gateway를 이미 쓰는 클러스터</b>: Gateway API 리소스를 그대로 두고 Envoy 파드만 AWS로 옮깁니다. 라우트와 정책을 수정하지 않았는데 같은 동작을 했습니다.</li>
+<li><b>필터가 필요한 인그레스</b>: Lua나 WebAssembly, external processing으로 인증과 요청 변환을 넣으려는 경우입니다. Application Load Balancer(ALB)의 규칙으로는 구현하기 어려운 부분입니다.</li>
+<li><b>재시도와 경로별 제한이 필요한 API</b>: 재시도 정책 하나로 503 비율이 28.5%에서 0.9%로 내려갔습니다. 경로마다 다른 rate limit도 정책 리소스로 붙입니다.</li>
+<li><b>트래픽 변동이 큰 서비스</b>: 확장을 설정하지 않아도 부하에 따라 노드가 늘었습니다. Envoy 파드와 노드의 여유 용량을 미리 잡아 둘 필요가 없습니다.</li>
+<li><b>패치 주기를 맞추기 어려운 팀</b>: Envoy와 운영 체제의 패치를 AWS가 적용합니다. 프록시마다 전용 인스턴스에서 실행되므로 다른 사용자의 프록시와 격리됩니다.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="ko-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>제약과 테스트하지 못한 항목</h2></header><div class="prose">
+<p>문서에 적힌 제약 가운데 설계에 영향을 주는 것을 표로 정리했습니다. 확인 칸은 이번 테스트에서 직접 본 것인지를 나타냅니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>제약</th><th>내용</th><th>확인</th></tr>
+</thead>
+<tbody>
+<tr><td>Envoy 버전</td><td>출시 시점에는 1.40만 선택</td><td><span class="pill good">확인</span></td></tr>
+<tr><td>액세스 로그</td><td>파일, stdout, stderr 로거는 불가. OpenTelemetry 같은 네트워크 싱크만 사용</td><td><span class="pill good">확인</span></td></tr>
+<tr><td>IP 주소 구성</td><td>내부와 인터넷 연결, IPv4와 IPv6 설정은 생성 뒤 변경 불가</td><td><span class="pill info">문서</span></td></tr>
+<tr><td>연결 드레이닝</td><td>설정 교체 때 60초로 고정. 연속 교체는 그 간격 이상으로</td><td><span class="pill info">문서</span></td></tr>
+<tr><td>rate limit</td><td>Envoy Gateway 구성에서 글로벌 방식은 미지원. 로컬 방식은 노드마다 계산</td><td><span class="pill good">로컬만 확인</span></td></tr>
+<tr><td>확장 기능</td><td>dynamic module 미지원, WebAssembly는 V8 런타임만, Lua는 일부 라이브러리 제한</td><td><span class="pill good">Lua만 확인</span></td></tr>
+<tr><td>Kubernetes 연동</td><td>API 버전이 <code>v1alpha1</code>이고 문서가 초기 개발 단계라고 설명</td><td><span class="pill info">문서</span></td></tr>
+<tr><td>할당량</td><td>리전당 프록시 25개, 설정 파일 128 KB</td><td><span class="pill info">문서</span></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 사용 설명서와 컨트롤러 문서의 주요 제약. 2026년 11월 26일 확인</p>
+<p>테스트하지 못한 항목도 있습니다. 인터넷 연결(internet-facing) 프록시와 IPv6는 구성하지 않았습니다. WebAssembly와 external processing, 고객 관리형 KMS 키, OpenTelemetry 액세스 로그, 직접 운영하는 xDS 컨트롤 플레인도 테스트하지 않았습니다. 부하가 끝난 뒤의 축소 시간과 실제 청구 금액도 확인하지 못했습니다. 지연 시간과 처리량은 노드 유형과 요청 크기, 필터 구성에 따라 달라집니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>비용과 성능으로 본 판단</h2></header><div class="prose">
+<p>Envoy의 기능이 필요한 팀에게는 적용할 만한 선택입니다. 고정 요금은 ALB보다 월 3.94 USD 높은 수준이고 지연 시간은 평균 1.7ms 늘어나는 대신, Envoy 파드의 크기 산정과 패치, 확장을 넘깁니다. 표준 라우팅만 쓴다면 ALB가 더 저렴하고 단순합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig06-verdict.png" alt="Application Load Balancer, ELB for Envoy, 직접 운영하는 Envoy 세 가지를 기능, 운영할 것, 고정 요금, 사용량 요금으로 비교한 표와 ELB for Envoy가 맞는 경우와 다른 선택이 맞는 경우" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 6.</b> ALB, ELB for Envoy, 직접 운영하는 Envoy의 비교</figcaption></figure>
+<p>요금은 프록시 시간당 요금과 LCU 요금의 합입니다. LCU는 처리 바이트, flow 수, vCPU, 메모리 가운데 가장 큰 값으로 정해집니다. 아래 표는 처리 바이트만으로 계산한 값입니다. 필터가 무거우면 vCPU 기준이 더 커지고 금액도 늘어납니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>평균 요청 수</th><th>ELB for Envoy</th><th>ALB</th><th>Envoy 전용 노드 2대</th></tr>
+</thead>
+<tbody>
+<tr><td>초당 100건</td><td class="num">월 25.10 USD</td><td class="num">월 20.47 USD</td><td class="num">월 311.67 USD</td></tr>
+<tr><td>초당 1,000건</td><td class="num">월 55.85 USD</td><td class="num">월 45.07 USD</td><td class="num">월 311.67 USD</td></tr>
+<tr><td>초당 10,000건</td><td class="num">월 363.32 USD</td><td class="num">월 291.05 USD</td><td class="num">월 311.67 USD</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 5.</b> 계산으로 구한 월 요금. 도쿄 리전 단가, 730시간, 요청과 응답을 합쳐 1.3 KB로 가정하고 처리 바이트 기준 LCU만 적용. 전용 노드는 c7i-flex.xlarge 2대의 요금이고 운영 인력 비용은 제외</p>
+<p>이 계산에서는 평균 초당 약 8,500건부터 전용 노드 2대로 직접 운영하는 쪽의 요금이 낮아집니다. 다만 그 노드 2대가 같은 부하를 처리하는지는 측정하지 않았고 직접 운영에는 패치와 확장을 맡을 사람의 시간이 들어갑니다. 요금만으로 결정하기보다 운영 부담을 함께 놓고 판단해야 합니다.</p>
+<p>적용하기 전에는 다섯 가지를 확인합니다.</p>
+<ul>
+<li>필요한 기능이 ALB의 규칙으로 되는지 먼저 봅니다. 된다면 ALB를 사용합니다.</li>
+<li>Envoy Gateway는 두 개 이상으로 운영합니다. 한 개로 운영하면 그 파드가 바뀔 때 약 30초 동안 프록시가 새 설정을 받지 못합니다.</li>
+<li>보안 그룹의 소스(<code>ingressCidrs</code>)를 정하고 클러스터 정책이 LoadBalancer 유형 Service를 허용하는지 설치 전에 확인합니다.</li>
+<li>액세스 로그는 네트워크 싱크로, rate limit은 노드 수에 따라 달라지는 로컬 방식으로 설계합니다.</li>
+<li>부하가 급증하는 서비스라면 확장 전 몇 분의 지연을 자기 트래픽으로 측정합니다.</li>
+</ul>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>Running Envoy yourself: the setup until now</h2></header><div class="prose">
+<p>Teams that need Envoy's filters and fine-grained traffic control have had to run and operate Envoy proxies themselves. On November 25, 2026, AWS made Elastic Load Balancing for Envoy (ELB for Envoy) generally available, a load balancer type that runs those Envoy proxies for you.</p>
+<p>Envoy is an open source proxy that receives requests and forwards them to backends. Teams use it when they want to implement authentication or request transformation as filters, or to apply rules such as weighted splitting, retries and rate limiting differently for each route. On Kubernetes it is often paired with Envoy Gateway, which turns Gateway API resources into Envoy configuration. In that setup Envoy runs as pods inside the cluster.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig01-legacy-en.png" alt="Four cases where Envoy is needed, the earlier setup in which Envoy pods run inside the cluster and Envoy Gateway sends them configuration over xDS, and four things the platform team had to run" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> The earlier setup with Envoy inside the cluster and what the team had to run</figcaption></figure>
+<p>In this setup the Envoy pods are something you operate. The <a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/kubernetes-overview.html" target="_blank" rel="noopener">User Guide</a> lists that work as sizing, scaling, upgrading and patching vulnerabilities (CVEs) in the Envoy pods. When traffic grows you add pods and nodes together, and when a vulnerability is found in Envoy you replace every proxy.</p>
+<p>ELB for Envoy moves those Envoy proxies onto instances that AWS operates. The configuration and the control plane stay with you. At launch it is offered in 14 Regions and the Seoul Region is not among them, so this post records a test in the Tokyo Region. I did not build the earlier setup; it is described from the documentation.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>From 3 to 23 nodes while serving 45.7 million requests without an error</h2></header><div class="prose">
+<p>Under a load held for 10 minutes the proxy grew from 3 nodes to 23 and throughput rose from 29,131 to 100,661 requests per second. All 45,687,745 requests sent in that time returned 200. I configured nothing for scaling. I counted nodes by the number of the proxy's network interfaces visible in the VPC.</p>
+<p>There was also a result to be careful about. On Kubernetes, Envoy Gateway stays in the cluster as the control plane. When backend pods were replaced while that pod was down, the proxy never received the new addresses and requests failed. Recovery took about 30 seconds after Envoy Gateway came back.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig02-setup-en.png" alt="The test setup: an Amazon EKS cluster across three private subnets of a VPC in the Tokyo Region with the Envoy Gateway pod, client pods and backend pods, two proxies (one created with the CLI and one created from a Gateway), four ways of measuring and the eight steps of the test" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> Test setup, how it was measured and the order of the tests</figcaption></figure>
+<p>I created two proxies. One was created with the AWS CLI from a static configuration, and the other from a Gateway resource in the Amazon EKS cluster. Both are internal proxies reachable only inside the VPC, and requests came from client pods in the cluster.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Item</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>ELB for Envoy</td><td>Envoy 1.40, internal IPv4, 3 Availability Zones</td></tr>
+<tr><td>Amazon EKS</td><td>1.37, Amazon VPC CNI, EKS Pod Identity</td></tr>
+<tr><td>Envoy Gateway</td><td>v1.10.0</td></tr>
+<tr><td>Controller</td><td><code>elb-envoy-remote-infra-provider</code> v1.0.0</td></tr>
+<tr><td>Gateway API CRDs</td><td>standard channel v1.6.3</td></tr>
+<tr><td>AWS CLI</td><td>2.42.4</td></tr>
+<tr><td>Client and backend nodes</td><td>3 x c7i-flex.xlarge, 1 x c7i-flex.2xlarge for the load generator</td></tr>
+<tr><td>Tools</td><td>fortio 1.77.0, curl 8.14.1</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> Test environment. Tokyo Region (ap-northeast-1), November 26, 2026</p>
+<p>The <code>aws elb-proxy</code> commands first shipped in AWS CLI 2.42.4. Version 2.42.3 and earlier do not know the command, so update the CLI first.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>Envoy Gateway stays in the cluster and AWS runs Envoy</h2></header><div class="prose">
+<p>The resource you create in ELB for Envoy is a proxy. When you create one you give it an Envoy bootstrap configuration file, an Envoy version, an IAM role, two or more subnets in different Availability Zones and security groups. AWS operates the nodes that run Envoy with that configuration, places network interfaces in your subnets and ties them together under one DNS name. In my test those network interfaces were visible in my account, while the instances they were attached to belonged to AWS service accounts.</p>
+<p>There are three ways to supply configuration. You put in a static configuration with the console or the CLI, or you connect the proxy to an xDS control plane that you run, or you use Envoy Gateway on Amazon EKS. With the third way the open source controller <code>elb-envoy-remote-infra-provider</code> runs as a sidecar in the Envoy Gateway pod. When you attach an <code>ELBProxyConfiguration</code> resource to a Gateway, this sidecar calls the ELB for Envoy API and creates the proxy.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig03-structure-en.png" alt="Five steps in which applying a Gateway and an ELBProxyConfiguration makes the controller sidecar in the Envoy Gateway pod create a proxy and security groups, the proxy gets its configuration from Envoy Gateway over xDS and forwards requests straight to pod IPs, with the three security groups the controller manages and three measured values" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> How a Gateway becomes a proxy and the path a request takes</figcaption></figure>
+<p>A franchise restaurant makes this easier to picture. The head office that decides the menu and the recipes (Envoy Gateway) stays in our building (the cluster), and only the kitchen and its staff (the Envoy proxies) are handed to a specialist company (AWS). When more guests arrive the company adds staff, and it also maintains the kitchen equipment. If the line to the head office is cut, the kitchen keeps cooking from the last recipes it received, but it gets no new menu. Where the real system differs: the head office does not send instructions to the kitchen; the proxy connects to Envoy Gateway first and fetches its configuration.</p>
+<p>Requests go from the proxy straight to pod IPs. The peer address a backend pod saw was a network interface address of the proxy, and the client address was in the <code>X-Forwarded-For</code> header. Pod IPs therefore have to be routable in the VPC, which the Amazon VPC CNI satisfies.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>Commands to create a proxy with the CLI and replace its configuration</h2></header><div class="prose">
+<p>I created one proxy with the CLI, without Kubernetes. The network settings go in as a JSON file and the Envoy configuration as a file reference. It became <code>active</code> 169 seconds after the request.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ cat create.json
+{
+  "name": "elblab-static",
+  "type": "envoy",
+  "proxyVersion": "1.40",
+  "roleArn": "arn:aws:iam::111122223333:role/elb-envoy-lab-proxy-role",
+  "networkConfiguration": {
+    "ipConfiguration": {"ipAddressingConfiguration": {"ipv4Addressability": "internal", "ipv6Addressability": "off"}},
+    "vpcConfiguration": {
+      "subnets": [{"subnetId": "subnet-0aaaaaaaaaaaaaaaa"}, {"subnetId": "subnet-0bbbbbbbbbbbbbbbb"}, {"subnetId": "subnet-0cccccccccccccccc"}],
+      "securityGroups": [{"securityGroupId": "sg-0123456789abcdef0"}]
+    }
+  }
+}
+
+$ aws elb-proxy create-proxy \
+    --cli-input-json file://create.json \
+    --configuration "configurationFile={configurationBytes@=file://config-v1.yaml}" \
+    --cli-binary-format raw-in-base64-out \
+    --query '{name:name,dnsName:dnsName,status:status.code}'
+{
+    "name": "elblab-static",
+    "dnsName": "internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws",
+    "status": "create-in-progress"
+}
+
+# 169 seconds later
+$ aws elb-proxy get-proxy --proxy-identifier $PROXY_ARN --query status.code --output text
+active
+
+$ dig +noall +answer A internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.1.10
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.2.10
+internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws. 30 IN A 10.0.3.10
+
+$ curl http://internal-elblab-static-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws/
+config v1</code></pre></div>
+<p>The DNS name returned three A records, one for each Availability Zone, with a TTL of 30 seconds. Next I replaced the configuration file while requests kept flowing. I read the state before and after the update with <code>list-proxy-updates</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># replace with a configuration that only changes the response body to "config v2"
+$ aws elb-proxy update-proxy-configuration --proxy-identifier $PROXY_ARN \
+    --configuration-file "configurationBytes@=file://config-v2.yaml" \
+    --cli-binary-format raw-in-base64-out --query updateId --output text
+a1b2c3d4-5678-90ab-cdef-EXAMPLE11111
+
+# right after the update
+$ aws elb-proxy list-proxy-updates --proxy-identifier $PROXY_ARN --query 'items[0]'
+{
+    "updateId": "a1b2c3d4-5678-90ab-cdef-EXAMPLE11111",
+    "type": "update-proxy-configuration",
+    "validationStatus": "valid",
+    "propagationStatus": "in-progress",
+    "submittedAt": "2026-11-26T05:17:29.530000+00:00",
+    "validatedAt": "2026-11-26T05:17:33.648000+00:00"
+}
+
+# 16 seconds later
+    "propagationStatus": "complete",
+    "completedAt": "2026-11-26T05:17:45.460000+00:00"</code></pre></div>
+<p>Changing the configuration file makes Envoy start again through a hot restart. All 1,116 requests sent on new connections every 0.2 seconds and all 24,000 requests sent at 100 per second over kept-alive connections returned 200. The first response from the new configuration came 3.1 seconds after the call and the last response from the old one 7.1 seconds after it. The nodes switched one Availability Zone at a time, and each of the 8 kept-alive connections was re-established once.</p>
+<p>A configuration that is not supported is rejected by the API call before it reaches the proxy. I put in the constraints listed in the documentation as they are written.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Configuration</th><th>Answer of CreateProxy (ValidationException)</th></tr>
+</thead>
+<tbody>
+<tr><td><code>proxyVersion</code> 1.39</td><td>Proxy version '1.39' is not supported</td></tr>
+<tr><td>File access log <code>envoy.access_loggers.file</code></td><td>field 'access_log' must not use the file access logger</td></tr>
+<tr><td>Bootstrap field <code>layered_runtime</code></td><td>field 'layered_runtime' is not a supported bootstrap field</td></tr>
+<tr><td><code>node.id</code></td><td>field 'node.id' is not a supported bootstrap field</td></tr>
+<tr><td><code>admin.access_log_path</code></td><td>field 'admin.access_log_path' is not supported</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Rejected configurations and the answer of the API. Every answer came back at once</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>Four things I found while installing on EKS</h2></header><div class="prose">
+<p>On the Kubernetes side you install the controller chart and the Envoy Gateway chart and attach an <code>ELBProxyConfiguration</code> to a Gateway. I gave the controller its AWS permissions through EKS Pod Identity on the service account of Envoy Gateway.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># install only Envoy Gateway's own CRDs (the Gateway API CRDs already in the cluster are kept)
+$ helm template eg-crds oci://docker.io/envoyproxy/gateway-crds-helm --version v1.10.0 \
+    --set crds.gatewayAPI.enabled=false --set crds.envoyGateway.enabled=true \
+    | kubectl apply --server-side -f -
+
+# controller chart: the CRD and RBAC for the sidecar
+$ helm install elb-envoy-remote-infra-provider \
+    oci://public.ecr.aws/aws-elb-proxy/elb-envoy-remote-infra-provider-chart --version 1.0.0 \
+    -n elb-envoy-remote-infra-provider-system --create-namespace
+
+# Envoy Gateway: a values file that holds the sidecar and the Remote infrastructure setting
+$ helm install eg oci://docker.io/envoyproxy/gateway-helm --version v1.10.0 \
+    -n envoy-gateway-system --create-namespace --set crds.enabled=false -f eg-values.yaml
+
+$ kubectl get pods -n envoy-gateway-system -l control-plane=envoy-gateway
+NAME                             READY   STATUS    RESTARTS   AGE
+envoy-gateway-6bb9765477-5fm72   2/2     Running   0          10s</code></pre></div>
+<p>Four things were hard to see from the documentation alone.</p>
+<p><b>First, when the Gateway API CRDs are already there, leave them and install around them.</b> For that case the controller's installation guide has you apply the Gateway API CRDs v1.6.1 again. In the cluster I tested, another controller was using the v1.6.3 CRDs, so I added only Envoy Gateway's own CRDs and installed the chart with <code>crds.enabled=false</code>. It worked with this combination as well.</p>
+<p><b>Second, the controller creates a Service of type LoadBalancer.</b> It carries the proxy's DNS name to the Gateway address, and its <code>loadBalancerClass</code> is <code>aws.elbproxy.internal</code>, so no other load balancer is created. But a cluster with an admission policy that forbids the LoadBalancer type needs an exception for this class, or the Gateway gets no address.</p>
+<p><b>Third, the default source of the security group is <code>0.0.0.0/0</code>.</b> The frontend security group that the controller creates allows every address, also for an internal proxy. I set <code>ingressCidrs</code> to the VPC range.</p>
+<p><b>Fourth, Lua is disabled by default.</b> Envoy Gateway v1.10 accepts Lua policies only when <code>extensionApis.enableLua</code> is set. When I attached a Lua policy while it was disabled, the policy was rejected and that route returned 500 until I deleted the policy.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">yaml</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>apiVersion: gateway.elbproxy.aws/v1alpha1
+kind: ELBProxyConfiguration
+metadata:
+  name: web-proxy
+  namespace: elb-lab
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: web
+  roleArn: arn:aws:iam::111122223333:role/elb-envoy-lab-proxy-role
+  ingressCidrs: ["10.0.0.0/16"]        # 0.0.0.0/0 when not set
+  networkConfiguration:
+    ipConfiguration:
+      ipAddressingConfiguration:
+        ipv4Addressability: internal
+        ipv6Addressability: "off"       # without the quotes it is read as false</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># before attaching the ELBProxyConfiguration: no address, and nothing is created in AWS
+$ kubectl get gateway web -n elb-lab
+NAME   CLASS           ADDRESS   PROGRAMMED   AGE
+web    elb-proxy-aws             False        20s
+
+$ kubectl apply -f proxy.yaml
+elbproxyconfiguration.gateway.elbproxy.aws/web-proxy created
+
+# about 4 minutes later
+$ kubectl get gateway web -n elb-lab
+NAME   CLASS           ADDRESS                                                                PROGRAMMED   AGE
+web    elb-proxy-aws   internal-elblab-web-0123456789abcdef.elb-proxy.ap-northeast-1.on.aws   True         4m38s</code></pre></div>
+<p>The proxy became <code>active</code> 148 seconds after it was created, but the Gateway received its address only after about 243 seconds, because the controller checks a proxy that is being created every 2 minutes. Meanwhile the controller created the frontend and backend security groups and added rules to the node security group that open 18000, 18002 and the backend port. When I added a route with a different backend port, the rules grew within about 5 seconds.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Envoy features used through the Gateway API</h2></header><div class="prose">
+<p>Routing and policies are written with the same resources as with Envoy Gateway. I did not have to modify a resource when the proxy moved to AWS, and changes were delivered at once over xDS. Requests were answered by the new rule from 0.03 seconds after the <code>kubectl apply</code> that changed the HTTPRoute returned.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Feature</th><th>Resource</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td>Weighted split 90:10</td><td>HTTPRoute <code>weight</code></td><td>901 and 99 of 1,000 requests</td></tr>
+<tr><td>Header routing</td><td>HTTPRoute <code>headers</code></td><td>all 100 requests with <code>x-canary: true</code> went to the new version</td></tr>
+<tr><td>Retries (503, up to 3)</td><td>BackendTrafficPolicy <code>retry</code></td><td>503 share from 28.5% to 0.9%</td></tr>
+<tr><td>Local rate limit (10 per second)</td><td>BackendTrafficPolicy <code>rateLimit</code></td><td>31.1 of 100 requests per second passed</td></tr>
+<tr><td>Lua script</td><td>EnvoyExtensionPolicy <code>lua</code></td><td>response header added. <code>io</code>, <code>os.getenv</code> and <code>require</code> are not available</td></tr>
+<tr><td>HTTPS listener</td><td>Gateway and a Secret</td><td>answered with TLS 1.3 and HTTP/2 after 2.5 seconds</td></tr>
+<tr><td>Default access log (file)</td><td>EnvoyProxy default</td><td>the controller rejects it and creates no proxy</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Features checked with Gateway API and Envoy Gateway resources. Request counts are what each test sent</p>
+<p>I checked retries with a backend that answers 503 to 30% of requests. I sent the same 2,000 requests before and after attaching the policy.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># before the policy
+$ fortio load -qps 0 -c 4 -n 2000 "http://$GATEWAY_HOST/fortio/echo?status=503:30"
+Code 200 : 1430 (71.5 %)
+Code 503 : 570 (28.5 %)
+
+$ cat retry.yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: fortio-retry
+  namespace: elb-lab
+spec:
+  targetRefs:
+  - group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: fortio
+  retry:
+    numRetries: 3
+    perRetry:
+      backOff: {baseInterval: 10ms, maxInterval: 100ms}
+      timeout: 1s
+    retryOn:
+      httpStatusCodes: [503]
+      triggers: ["connect-failure", "retriable-status-codes"]
+$ kubectl apply -f retry.yaml
+
+# after the policy
+$ fortio load -qps 0 -c 4 -n 2000 "http://$GATEWAY_HOST/fortio/echo?status=503:30"
+Code 200 : 1982 (99.1 %)
+Code 503 : 18 (0.9 %)</code></pre></div>
+<p>A local rate limit is counted separately on each proxy node. When I sent 100 requests per second for 20 seconds to a route limited to 10 per second, 621 of 1,998 requests passed. That is three nodes allowing 10 each. The allowance grows as the proxy scales out, so it does not fit a use that must hold an exact total limit. Global rate limiting, which counts everything as one, is not supported in this setup.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>When the control plane stops, the proxy does not learn about new backends</h2></header><div class="prose">
+<p>AWS runs Envoy, but Envoy Gateway is still a pod in the cluster. To see what happens when that pod stops, I scaled Envoy Gateway to zero and kept sending requests.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig04-outage-en.png" alt="With Envoy Gateway running 161 of 161 requests returned 200, during 61 seconds with the control plane down and backends unchanged 518 of 518 returned 200, during 94 seconds in which backend pods were replaced 63 requests gave 26 OK, 9 times 503 and 28 timeouts, traffic was back to normal about 30 seconds after recovery, and with two Envoy Gateway replicas 832 of 832 returned 200" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> Request results while the control plane was down and how it recovered</figcaption></figure>
+<p>Nothing went wrong while the backends stayed the same. The proxy served all 518 requests with the last configuration it had received. The problem came when backend pods were replaced in that time. The proxy never received the addresses of the new pods and sent requests to addresses that were gone, and 37 of 63 requests in 94 seconds ended in a 503 or a timeout.</p>
+<p>Recovery took time as well. The proxy reads the IPs of the Envoy Gateway pods from a file in its configuration archive. When Envoy Gateway comes back with a new IP, the proxy reconnects only after the controller replaces the archive. The update was submitted 14 seconds after the new pod was ready, and the last failed request was about 30 seconds after it.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># stop the control plane
+$ kubectl scale deployment envoy-gateway -n envoy-gateway-system --replicas=0
+
+# after recovery: the archive update the controller submitted (new pod ready at 05:34:10)
+$ aws elb-proxy list-proxy-updates --proxy-identifier $PROXY_ARN \
+    --query 'items[0].{status:propagationStatus,submittedAt:submittedAt,completedAt:completedAt}'
+{
+    "status": "complete",
+    "submittedAt": "2026-11-26T05:34:24.617000+00:00",
+    "completedAt": "2026-11-26T05:34:40.376000+00:00"
+}
+
+# proxy logs: a stream is named after a network interface ID of the proxy
+$ aws logs filter-log-events --log-group-name /aws/elb-proxy/elblab-web \
+    --filter-pattern '"xds_cluster"' --query 'events[0].message' --output text
+[2026-11-26 05:31:30.916][2648][warning][config] [...grpc_stream.h:189] DeltaAggregatedResources gRPC config stream to xds_cluster closed: 13, upstream_reset_after_response_s...</code></pre></div>
+<p>The remedy is to run two or more Envoy Gateway replicas. With two replicas, when I deleted one while replacing backend pods, all 832 requests returned 200. In a rolling replacement of backends with the control plane running, 1 of 722 requests returned 503.</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>Latency grows by 1.7 ms on average and scaling starts within 2 minutes</h2></header><div class="prose">
+<p>Going through the proxy added 1.7 ms to the average latency. At 2,000 requests per second over 32 connections for 40 seconds, requests sent from a pod straight to the Service averaged 1.118 ms and requests through the proxy averaged 2.840 ms. This compares with calls that do not pass through a proxy, not with Envoy running inside the cluster.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig05-scaling-en.png" alt="A bar chart in which requests per second in five 2-minute segments grow to 29,131, 83,156, 76,910, 90,855 and 100,661 and the proxy network interfaces at the end of each segment grow to 9, 12, 15, 19 and 23, a total of 45,687,745 requests with 0 errors, and a table comparing a direct call averaging 1.118 ms with a call through the proxy averaging 2.840 ms at 2,000 requests per second" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> Throughput per segment and scaling of the proxy during the 10-minute load, with the latency comparison</figcaption></figure>
+<p>Scaling started within the first 2 minutes of the load. The network interfaces of the proxy went from 3 to 9 after 2 minutes and were 23 after 10 minutes. They grew in all three Availability Zones together. In the first segment, before scaling, the average latency was 17.57 ms, and after scaling it came down to between 5 ms and 7 ms. This means latency grows in the first minutes of a sudden load, so allow for that window.</p>
+<p>For 4 minutes after the load stopped, the number of nodes did not go down. I did not wait longer to see how long scale-in takes. The DNS answer changed too. With 9 or more nodes only 6 to 8 A records came back. If a client resolves DNS once and keeps its connections for a long time, load does not move to the nodes that were added.</p>
+</div></section>
+
+<section class="sec" id="en-s9"><header class="sec-head"><p class="eyebrow">08</p><h2>ACM certificates, AWS WAF and CloudWatch metrics</h2></header><div class="prose">
+<p>I associated an AWS Certificate Manager (ACM) certificate and AWS WAF with the proxy created with the CLI. After the certificate is associated with the proxy, a listener refers to it by using its ARN as the name. The private key does not go into the configuration file. A proxy created from a Gateway works differently. You keep the certificate in a Kubernetes Secret and Envoy Gateway delivers it over xDS.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># associate the ACM certificate: active in a little over a second
+$ aws elb-proxy associate-certificate --proxy-identifier $PROXY_ARN \
+    --certificate-identifier $CERT_ARN --query certificateAssociation.status.code --output text
+associate-in-progress
+$ aws elb-proxy list-certificate-associations --proxy-identifier $PROXY_ARN \
+    --query 'items[0].status.code' --output text
+active
+
+# before associating AWS WAF
+$ curl -s -o /dev/null -w '%{http_code}\n' http://$PROXY_DNS/admin
+200
+
+# the call 8 seconds after creating the web ACL failed, the call 1 minute 38 seconds after it succeeded
+$ aws wafv2 associate-web-acl --web-acl-arn $ACL_ARN --resource-arn $PROXY_ARN
+An error occurred (WAFUnavailableEntityException) when calling the AssociateWebACL operation:
+AWS WAF couldn't retrieve the resource that you requested. Retry your request.
+$ aws wafv2 associate-web-acl --web-acl-arn $ACL_ARN --resource-arn $PROXY_ARN
+
+# from 4.6 seconds after the association
+$ curl -s -o /dev/null -w '%{http_code}\n' http://$PROXY_DNS/admin
+403</code></pre></div>
+<p>After I associated a web ACL with one rule that blocks paths starting with <code>/admin</code>, 403 came back from 4.6 seconds on, and it took 8.9 seconds until all three nodes applied it. In the same time all 225 requests to another path returned 200.</p>
+<p>Metrics are in the <code>AWS/ProxyELB</code> namespace of CloudWatch. The example in the User Guide puts the proxy ARN in a <code>LoadBalancer</code> dimension, but on the day of the test that query returned no data. The actual dimension was <code>Proxy</code>.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">bash</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>$ aws cloudwatch list-metrics --namespace AWS/ProxyELB --metric-name RequestCount \
+    --query 'Metrics[].Dimensions'
+[
+    [ { "Name": "Proxy", "Value": "proxy/elblab-web:0123456789abcdef" } ]
+]
+
+$ aws cloudwatch get-metric-statistics --namespace AWS/ProxyELB --metric-name RequestCount \
+    --dimensions Name=Proxy,Value=proxy/elblab-web:0123456789abcdef \
+    --start-time 2026-11-26T05:54:00Z --end-time 2026-11-26T05:57:00Z --period 60 --statistics Sum \
+    --query 'sort_by(Datapoints,&amp;Timestamp)[].[Timestamp,Sum]' --output text
+2026-11-26T05:54:00+00:00	5609328.0
+2026-11-26T05:55:00+00:00	5088734.0
+2026-11-26T05:56:00+00:00	6040254.0</code></pre></div>
+<p>The metrics I saw were <code>RequestCount</code>, the counts by response code, <code>UpstreamConnectionErrorCount</code> and <code>UpstreamResponseTime</code>. The pricing page says per-minute LCU usage can be seen in CloudWatch, but I did not find an LCU metric in this namespace.</p>
+</div></section>
+
+<section class="sec" id="en-s10"><header class="sec-head"><p class="eyebrow">09</p><h2>Where ELB for Envoy is used</h2></header><div class="prose">
+<p>AWS describes the uses of this service as workloads that need Envoy's extensibility, such as custom authentication, request transformation and advanced traffic routing, along with Kubernetes ingress and migrations from self-managed Envoy. Going by the test results, it fits the following cases well.</p>
+<ul>
+<li><b>Clusters that already use Envoy Gateway</b>: you keep the Gateway API resources and move only the Envoy pods to AWS. It behaved the same although I modified no route or policy.</li>
+<li><b>Ingress that needs filters</b>: when you want to add authentication and request transformation with Lua, WebAssembly or external processing. This is hard to build with the rules of an Application Load Balancer (ALB).</li>
+<li><b>APIs that need retries and per-route limits</b>: one retry policy brought the 503 share from 28.5% down to 0.9%. A different rate limit for each route is also attached as a policy resource.</li>
+<li><b>Services with large swings in traffic</b>: nodes were added with the load although I configured no scaling. You do not have to hold spare capacity for Envoy pods and nodes in advance.</li>
+<li><b>Teams that struggle to keep up with patching</b>: AWS applies the patches for Envoy and the operating system. Each proxy runs on dedicated instances, so it is isolated from the proxies of other customers.</li>
+</ul>
+</div></section>
+
+<section class="sec" id="en-s11"><header class="sec-head"><p class="eyebrow">10</p><h2>Constraints and what I did not test</h2></header><div class="prose">
+<p>I put the constraints from the documentation that affect a design into a table. The last column says whether I saw it myself in this test.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Constraint</th><th>What it says</th><th>Checked</th></tr>
+</thead>
+<tbody>
+<tr><td>Envoy version</td><td>only 1.40 can be chosen at launch</td><td><span class="pill good">checked</span></td></tr>
+<tr><td>Access logs</td><td>no file, stdout or stderr logger. Only a network sink such as OpenTelemetry</td><td><span class="pill good">checked</span></td></tr>
+<tr><td>IP addressing</td><td>internal or internet-facing and the IPv4 and IPv6 settings cannot change after creation</td><td><span class="pill info">docs</span></td></tr>
+<tr><td>Connection draining</td><td>fixed at 60 seconds on a configuration update. Space consecutive updates by at least that long</td><td><span class="pill info">docs</span></td></tr>
+<tr><td>Rate limiting</td><td>the global type is not supported with Envoy Gateway. The local type counts on each node</td><td><span class="pill good">local only</span></td></tr>
+<tr><td>Extensions</td><td>no dynamic modules, WebAssembly on the V8 runtime only, some Lua libraries restricted</td><td><span class="pill good">Lua only</span></td></tr>
+<tr><td>Kubernetes integration</td><td>the API version is <code>v1alpha1</code> and the documentation calls it early development</td><td><span class="pill info">docs</span></td></tr>
+<tr><td>Quotas</td><td>25 proxies per Region, a configuration file of 128 KB</td><td><span class="pill info">docs</span></td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> Main constraints in the User Guide and the controller documentation, as read on November 26, 2026</p>
+<p>There are also things I did not test. I did not set up an internet-facing proxy or IPv6. I also did not test WebAssembly and external processing, a customer managed KMS key, OpenTelemetry access logs or an xDS control plane of my own. I could not confirm how long scale-in takes after a load ends, or the actual bill. Latency and throughput depend on the node type, the request size and the filters in use.</p>
+</div></section>
+
+<section class="sec" id="en-s12"><header class="sec-head"><p class="eyebrow">11</p><h2>A verdict on cost and performance</h2></header><div class="prose">
+<p>For teams that need what Envoy offers, it is worth adopting. The fixed price is 3.94 USD a month above an ALB and latency grows by 1.7 ms on average, and in return you hand over sizing, patching and scaling of the Envoy pods. If you use only standard routing, an ALB is cheaper and simpler.</p>
+<figure class="fig"><div class="canvas wide"><img src="elastic-load-balancing-for-envoy-assets/fig06-verdict-en.png" alt="A table that compares Application Load Balancer, ELB for Envoy and self-managed Envoy by features, what you run, fixed price and usage price, with where ELB for Envoy fits and where another option fits" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 6.</b> ALB, ELB for Envoy and self-managed Envoy compared</figcaption></figure>
+<p>The price is the hourly price of the proxy plus the LCU price. An LCU is set by the largest of processed bytes, flows, vCPU and memory. The table below is calculated from processed bytes alone. With heavy filters the vCPU dimension becomes larger and so does the amount.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Average requests</th><th>ELB for Envoy</th><th>ALB</th><th>2 nodes dedicated to Envoy</th></tr>
+</thead>
+<tbody>
+<tr><td>100 per second</td><td class="num">25.10 USD a month</td><td class="num">20.47 USD a month</td><td class="num">311.67 USD a month</td></tr>
+<tr><td>1,000 per second</td><td class="num">55.85 USD a month</td><td class="num">45.07 USD a month</td><td class="num">311.67 USD a month</td></tr>
+<tr><td>10,000 per second</td><td class="num">363.32 USD a month</td><td class="num">291.05 USD a month</td><td class="num">311.67 USD a month</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 5.</b> Calculated monthly price. Tokyo Region rates, 730 hours, 1.3 KB for a request and its response together, LCUs from processed bytes only. The dedicated nodes are the price of two c7i-flex.xlarge, without the cost of the people who operate them</p>
+<p>In this calculation, running Envoy yourself on two dedicated nodes becomes cheaper from an average of about 8,500 requests per second. I did not measure whether those two nodes handle the same load, though, and running it yourself takes the time of the people who patch and scale it. Weigh the operating work together with the price instead of deciding on price alone.</p>
+<p>Check five things before you adopt it.</p>
+<ul>
+<li>See first whether the rules of an ALB can do what you need. If they can, use an ALB.</li>
+<li>Run two or more Envoy Gateway replicas. With one replica the proxy gets no new configuration for about 30 seconds whenever that pod changes.</li>
+<li>Decide the source of the security group (<code>ingressCidrs</code>) and check before installing whether your cluster policies allow a Service of type LoadBalancer.</li>
+<li>Design access logs for a network sink, and rate limiting for the local type, whose allowance changes with the number of nodes.</li>
+<li>For a service with sudden load, measure the latency of the minutes before scaling with your own traffic.</li>
+</ul>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://aws.amazon.com/ko/about-aws/whats-new/2026/11/elastic-load-balancing-for-envoy-generally-available/" target="_blank" rel="noopener">Elastic Load Balancing for Envoy is now generally available</a></td><td class="nowrap"><span class="l-ko">What's New</span><span class="l-en">What's New</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/what-is.html" target="_blank" rel="noopener">What is Elastic Load Balancing for Envoy?</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/how-proxies-work.html" target="_blank" rel="noopener">How proxies work</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/how-envoy-runs.html" target="_blank" rel="noopener">How the proxy runs Envoy</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/envoy-limits.html" target="_blank" rel="noopener">Envoy configuration limits and unsupported features</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/kubernetes-overview.html" target="_blank" rel="noopener">Use ELB for Envoy with Kubernetes: Overview</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/kubernetes-get-started.html" target="_blank" rel="noopener">Use ELB for Envoy with Kubernetes: Getting started</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/tls-acm-certificate.html" target="_blank" rel="noopener">Terminate TLS with an ACM certificate</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/waf.html" target="_blank" rel="noopener">Protect a proxy with AWS WAF</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/monitoring-metrics.html" target="_blank" rel="noopener">Proxy metrics</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/monitoring-view-metrics.html" target="_blank" rel="noopener">View proxy metrics</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/elbproxy/quotas.html" target="_blank" rel="noopener">Quotas for Elastic Load Balancing for Envoy</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://aws.amazon.com/ko/elasticloadbalancing/pricing/" target="_blank" rel="noopener">Elastic Load Balancing pricing</a></td><td class="nowrap"><span class="l-ko">가격 페이지</span><span class="l-en">Pricing page</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-14"><td class="num"><b>14</b></td><td class="t"><a href="https://github.com/aws/elb-envoy-remote-infra-provider" target="_blank" rel="noopener">elb-envoy-remote-infra-provider</a></td><td class="nowrap"><span class="l-ko">GitHub 저장소</span><span class="l-en">GitHub repository</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-15"><td class="num"><b>15</b></td><td class="t"><a href="https://github.com/aws/elb-envoy-remote-infra-provider/blob/v1.0.0/docs/deploy/installation.md" target="_blank" rel="noopener">elb-envoy-remote-infra-provider: Installation Guide</a></td><td class="nowrap"><span class="l-ko">컨트롤러 문서</span><span class="l-en">Controller docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-16"><td class="num"><b>16</b></td><td class="t"><a href="https://github.com/aws/elb-envoy-remote-infra-provider/blob/v1.0.0/docs/deploy/security_groups.md" target="_blank" rel="noopener">elb-envoy-remote-infra-provider: Security groups</a></td><td class="nowrap"><span class="l-ko">컨트롤러 문서</span><span class="l-en">Controller docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-17"><td class="num"><b>17</b></td><td class="t"><a href="https://github.com/aws/elb-envoy-remote-infra-provider/blob/v1.0.0/docs/how-it-works.md" target="_blank" rel="noopener">elb-envoy-remote-infra-provider: How it works</a></td><td class="nowrap"><span class="l-ko">컨트롤러 문서</span><span class="l-en">Controller docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-18"><td class="num"><b>18</b></td><td class="t"><a href="https://github.com/aws/elb-envoy-remote-infra-provider/blob/v1.0.0/docs/compatibility.md" target="_blank" rel="noopener">elb-envoy-remote-infra-provider: Compatibility</a></td><td class="nowrap"><span class="l-ko">컨트롤러 문서</span><span class="l-en">Controller docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+<tr id="src-19"><td class="num"><b>19</b></td><td class="t"><a href="https://gateway.envoyproxy.io/v1.10/api/extension_types/" target="_blank" rel="noopener">Envoy Gateway v1.10 API reference: Gateway API extensions</a></td><td class="nowrap"><span class="l-ko">Envoy Gateway 문서</span><span class="l-en">Envoy Gateway docs</span></td><td class="nowrap num">2026-11-26</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 26일 도쿄 리전(ap-northeast-1)의 한 계정에서 직접 테스트한 결과입니다. ELB for Envoy는 출시 시점에 서울 리전에서 제공되지 않습니다. 조건은 가용 영역 3개의 내부 IPv4 프록시(Envoy 1.40), Amazon EKS 1.37, Envoy Gateway v1.10.0, 컨트롤러 v1.0.0, AWS CLI 2.42.4입니다. 클라이언트와 백엔드는 같은 클러스터의 c7i-flex 노드에서 실행했습니다. 지연 시간과 처리량, 확장 속도는 요청 크기와 필터 구성, 클라이언트의 연결 방식에 따라 달라집니다. 요금은 Price List API의 도쿄 리전 단가로 계산했고 실제 청구 금액은 확인하지 못했습니다. 클러스터 안에서 Envoy를 실행하는 기존 구성은 구축하지 않고 문서의 설명대로 정리했습니다. AWS의 설명은 같은 날 확인한 What's New 게시물, 사용 설명서, 가격 페이지, 컨트롤러 저장소 v1.0.0을 기준으로 합니다.</span><span class="l-en">The figures in this post come from my own test in one account in the Tokyo Region (ap-northeast-1) on November 26, 2026. ELB for Envoy is not offered in the Seoul Region at launch. The conditions were internal IPv4 proxies in three Availability Zones (Envoy 1.40), Amazon EKS 1.37, Envoy Gateway v1.10.0, the controller v1.0.0 and AWS CLI 2.42.4, with clients and backends on c7i-flex nodes of the same cluster. Latency, throughput and the speed of scaling depend on request size, the filters in use and how clients hold connections. Prices are calculated from the Price List API rates for the Tokyo Region, and I have not seen the actual bill. I did not build the earlier setup that runs Envoy inside the cluster; it is described from the documentation. Statements about AWS follow the What's New post, the User Guide, the pricing page and the controller repository v1.0.0 as read on the same day.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
