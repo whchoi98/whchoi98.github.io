@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="ko" data-lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM 서빙의 캐시 4가지</title>
+<meta name="description" content="LLM 서빙에서 캐시라고 부르는 KV 캐시, 프리픽스 캐시, 프롬프트 캐시, 시맨틱 캐시가 무엇을 저장하고 어디에서 동작하는지 정리하고 작은 실험으로 확인했습니다. 앞의 세 가지는 KV를 저장해 계산을 재사용하고 시맨틱 캐시만 응답을 저장합니다.">
+<link rel="canonical" href="https://whchoi98.github.io/docs/techblog/aiml/llm-serving-four-types-of-caching/">
+<script>
+/* 첫 화면을 그리기 전에 언어와 테마를 정한다. 블로그의 report 레이아웃이 같은 키를 미리 써 둔다. */
+(function(){
+  var r=document.documentElement, q=null, l=null, t=null;
+  try{q=new URLSearchParams(location.search).get('lang')}catch(e){}
+  try{l=localStorage.getItem('techblogs-lang');t=localStorage.getItem('techblogs-theme')}catch(e){}
+  var lang=(q==='en'||q==='ko')?q:(l==='en'?'en':'ko');
+  r.setAttribute('data-lang',lang); r.setAttribute('lang',lang);
+  if(t==='dark'||t==='light')r.setAttribute('data-theme',t);
+})();
+</script>
+<style>
+/* 글꼴: 설치된 나눔스퀘어와 D2Coding을 먼저 쓰고, 없으면 블로그의 /assets/fonts/ 파일을 받는다. */
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acR"),local("NanumSquareOTF_ac Regular"),local("NanumSquare_acR"),url("/assets/fonts/NanumSquare_acR.woff2") format("woff2");font-weight:400;font-display:swap}
+@font-face{font-family:"NanumSquareOTF_ac";src:local("NanumSquareOTF_acB"),local("NanumSquareOTF_ac Bold"),local("NanumSquare_acB"),url("/assets/fonts/NanumSquare_acB.woff2") format("woff2");font-weight:700;font-display:swap}
+@font-face{font-family:"D2Coding";src:local("D2Coding"),url("/assets/fonts/D2Coding.woff2") format("woff2");font-weight:400;font-display:swap}
+/* 디자인: 한 컬럼. .wrap은 좌우 여백을 포함해 최대 1440px이고 가운데에 놓인다. 본문, 그림, 표가 모두 같은 폭을 쓴다. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --ink:#15202b; --muted:#5a6774; --line:#d9e0e7; --soft:#eaf0f7; --code:#eef2f6;
+  --accent:#1d5bb8;
+  --good:#1b7a4a; --warn:#946000; --bad:#bf3a30;
+  --good-bg:#e4f2ea; --warn-bg:#f7eedb; --bad-bg:#f8e5e3;
+  --f-display:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-body:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-data:"NanumSquareOTF_ac","NanumSquare_ac","NanumSquare","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"D2Coding","SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+    --accent:#86abff;
+    --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+    --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#151c24; --ink:#e4e9ef; --muted:#98a4b0; --line:#2a3541; --soft:#1b2631; --code:#1d2732;
+  --accent:#86abff;
+  --good:#5cc790; --warn:#e2aa48; --bad:#f17d73;
+  --good-bg:#15291e; --warn-bg:#2c2413; --bad-bg:#2f1b19;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;word-break:keep-all;overflow-wrap:break-word}
+a{color:var(--accent);text-decoration:none;text-underline-offset:3px}
+a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.num,.mono{font-family:var(--f-data);font-variant-numeric:tabular-nums}
+
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding-left:max(clamp(16px,4vw,64px),env(safe-area-inset-left,0px));padding-right:max(clamp(16px,4vw,64px),env(safe-area-inset-right,0px));padding-block:24px 72px;display:grid;grid-template-columns:minmax(0,1fr);gap:56px}
+.wrap>*{min-width:0}
+
+/* 상단 막대: 목록 링크와 언어, 테마 전환. 블로그에 임베드되면 레이아웃이 .theme-bar를 숨긴다. */
+nav.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+nav.top .home{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+.tog{display:flex;gap:8px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.seg button{font:inherit;font-size:12.5px;padding:3px 10px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+
+/* 머리 */
+.masthead{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.meta-top{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted);letter-spacing:.04em}
+.meta-top span{white-space:nowrap}
+.meta-top .wide,.meta-top .wide span{white-space:normal}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(30px,5vw,44px);line-height:1.2;margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1.one{white-space:nowrap}
+.thesis{font-size:17px;line-height:1.75;margin:0}
+.tags{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted)}
+
+/* 핵심 요점: 상자 없이 목록으로 */
+.facts{margin:0;padding-left:20px;display:grid;gap:4px;font-size:14.5px;line-height:1.6;color:var(--ink)}
+.facts li::marker{color:var(--muted)}
+.facts b{font-weight:700;color:var(--ink)}
+
+/* 절 */
+.col{display:grid;gap:56px;min-width:0}
+.sec{display:grid;gap:20px;min-width:0}
+.sec-head{display:grid;gap:6px;padding-top:20px;border-top:2px solid var(--ink)}
+.eyebrow{margin:0;font-family:var(--f-data);font-size:12px;letter-spacing:.04em;color:var(--muted)}
+h2{font-family:var(--f-display);font-weight:700;font-size:26px;line-height:1.3;margin:0;text-wrap:balance}
+.lede{margin:0;color:var(--muted);font-size:13.5px}
+
+/* 본문: 그림과 표도 같은 폭 */
+.prose{min-width:0}
+.prose>*{margin:0}
+.prose>*+*{margin-top:14px}
+.prose h3{font-size:17px;font-weight:700;margin-top:30px;letter-spacing:-.005em}
+.prose h3+*{margin-top:10px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li+li{margin-top:6px}
+.prose blockquote{background:var(--soft);border-radius:10px;padding:14px 18px}
+.prose blockquote p{margin:0}
+.prose blockquote p+p{margin-top:6px}
+.prose>figure.fig,.prose>.scroll,.prose>pre,.prose>.snippet{margin-top:20px}
+.prose>figure.fig+*,.prose>.scroll+*,.prose>pre+*,.prose>.snippet+*{margin-top:20px}
+code{font-family:var(--f-mono);font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;line-height:1.5}
+pre code{background:none;padding:0;font-size:13px;overflow-wrap:normal}
+/* 코드 스니펫: 언어 이름과 복사 버튼이 있는 상자 */
+.snippet{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.snippet-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 14px;background:var(--soft);border-bottom:1px solid var(--line)}
+.snippet-bar .lang{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.snippet pre{margin:0;border:0;border-radius:0;background:transparent}
+button.copy{font:inherit;font-size:12px;line-height:1.4;padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);cursor:pointer}
+button.copy:hover{border-color:var(--accent);color:var(--accent)}
+button.copy .ok{display:none}
+button.copy.done .ok{display:inline}
+button.copy.done .i{display:none}
+button.copy.done{border-color:var(--good);color:var(--good)}
+sup.cite{font-size:.68em;line-height:0;margin-left:1px}
+sup.cite a{font-weight:700}
+
+/* 표 */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.55}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-size:12px;font-weight:600;color:var(--muted);background:var(--soft);white-space:nowrap}
+td.nowrap,.nowrap{white-space:nowrap}
+.cap{margin:0;font-size:13px;color:var(--muted)}
+.cap b{color:var(--ink);font-weight:700}
+.prose>.scroll+.cap{margin-top:10px}
+
+/* 그림: 본문과 같은 폭의 패널 안에 둔다. 다이어그램은 흰 바탕으로 그리므로 다크 테마에서도 캔버스는 흰색이다. */
+figure.fig{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 20px 14px;min-width:0}
+figure.fig .canvas{background:#ffffff;border-radius:6px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure.fig img{display:block;max-width:100%;height:auto;margin:0 auto}
+figure.fig .canvas.wide img{width:100%;max-width:1280px}
+figure.fig figcaption{font-size:13px;color:var(--muted);margin-top:10px}
+figure.fig figcaption b{color:var(--ink);font-weight:700}
+
+/* 참고 자료 표 */
+.src-t td.t{min-width:240px}
+.src-t .meta{font-size:12.5px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap;line-height:1.6}
+.pill.good{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.info{background:var(--soft);color:var(--muted)}
+
+/* 끝: 글쓴이와 고지 */
+.foot{font-size:13px;color:var(--muted);display:grid;gap:10px;border-top:1px solid var(--line);padding-top:20px}
+.foot h2{font-size:18px;color:var(--ink)}
+.foot p{margin:0;line-height:1.75}
+.foot ul{margin:0;padding-left:20px;line-height:1.75}
+.foot b{color:var(--ink);font-weight:600}
+.colophon{margin:-32px 0 0;font-size:12.5px;color:var(--muted)}
+
+/* 이동 메뉴: 머리 아래에 두고, 문서만 열었을 때는 스크롤해도 화면 위쪽에 붙어 있다 */
+nav.toc{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:6px;margin:-28px 0 -28px;padding:10px 0;overflow-x:auto;white-space:nowrap;background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:thin}
+nav.toc .toc-label{flex:none;margin-right:4px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--muted)}
+nav.toc a{flex:none;font-size:12.5px;line-height:1.4;color:var(--ink);text-decoration:none;padding:4px 11px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+nav.toc a:hover{border-color:var(--accent);color:var(--accent)}
+nav.toc a.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.sec{scroll-margin-top:68px}
+
+html[data-lang="ko"] .l-en{display:none!important}
+html[data-lang="en"] .l-ko{display:none!important}
+
+@media (max-width:640px){
+  .wrap{padding-block:20px 56px;gap:44px}
+  h2{font-size:22px}
+  .thesis{font-size:16px}
+  figure.fig{padding:12px 12px 10px}
+  figure.fig .canvas.wide img{width:760px;max-width:none}
+  figure.fig .canvas.wide+figcaption::after{content:" (가로로 밀어서 보기)"}
+  html[data-lang="en"] figure.fig .canvas.wide+figcaption::after{content:" (scroll sideways)"}
+}
+@media print{
+  nav.top,nav.toc,button.copy{display:none}
+  .wrap{max-width:none;padding:0;gap:36px}
+  .sec,figure.fig,.scroll,.snippet{break-inside:avoid-page}
+  .sec{break-inside:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap page">
+<nav class="top theme-bar">
+  <a class="home" href="/"><span class="l-ko">기술 블로그 홈</span><span class="l-en">Tech blog home</span></a>
+  <div class="tog">
+    <div class="seg" id="langSeg"><button type="button" data-v="ko">한국어</button><button type="button" data-v="en">English</button></div>
+    <div class="seg" id="themeSeg"><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button></div>
+  </div>
+</nav>
+<header class="masthead">
+<div class="meta-top"><span class="mono"><span class="l-ko">게시 2026-11-27</span><span class="l-en">Published 2026-11-27</span></span><span>AIML</span><span><span class="l-ko">읽는 시간 10분</span><span class="l-en">10 min read</span></span></div>
+<h1><span class="l-ko">LLM 서빙의 캐시 4가지</span><span class="l-en">Four types of caching in LLM serving</span></h1>
+<p class="thesis"><span class="l-ko">LLM 서빙의 캐시 네 가지(KV 캐시, 프리픽스 캐시, 프롬프트 캐시, 시맨틱 캐시)가 무엇을 저장하고 어디에서 동작하는지 문서로 정리하고 작은 실험으로 직접 테스트해 보았습니다. 앞의 세 가지는 모두 KV를 저장하며 재사용 범위가 한 요청, 한 엔진, 제공자의 API로 넓어질 뿐이어서 답은 매번 모델이 새로 만듭니다. 시맨틱 캐시만 응답 텍스트를 저장하고 모델을 호출하지 않습니다. 하지만 임베딩 모델 두 가지로 확인해 보면 뜻이 반대인 질문의 유사도가 뜻이 같은 질문보다 높게 나와 임계값만으로는 틀린 응답을 막지 못했습니다.</span><span class="l-en">I went through the documentation for the four caches of LLM serving (KV cache, prefix cache, prompt cache, semantic cache) to see what each one stores and where it works, and tested each with a small experiment. The first three all store KV; only the reuse scope grows, from one request to one engine to a provider's API, so the model still generates every answer. Only the semantic cache stores response text and skips the model. But with two embedding models, a question with the opposite meaning scored a higher similarity than a question with the same meaning, so a threshold alone did not keep wrong answers out.</span></p>
+<div class="tags"><span>#LLM serving</span><span>#KV cache</span><span>#Prefix caching</span><span>#Prompt caching</span><span>#Semantic cache</span><span>#vLLM</span><span>#Amazon Bedrock</span><span>#Amazon ElastiCache</span></div>
+<ul class="facts"><li><span class="l-ko"><b>KV 캐시</b>: 1,027토큰 프롬프트에서 40토큰을 만드는 시간이 캐시 미사용 90.38초, 사용 6.02초였고 출력 토큰은 같았습니다.</span><span class="l-en"><b>KV cache</b>: generating 40 tokens from a 1,027-token prompt took 90.38 s without the cache and 6.02 s with it, with the same output tokens.</span></li><li><span class="l-ko"><b>프리픽스 캐시</b>: 같은 문서에 다른 질문을 보내면 227블록 중 226블록이 적중해 첫 토큰 계산이 7,436.2ms에서 293.9ms가 됐습니다. 문서 앞에 한 줄을 넣으면 적중이 0블록이었습니다.</span><span class="l-en"><b>Prefix cache</b>: a different question on the same document hit 226 of 227 blocks and the first token took 293.9 ms instead of 7,436.2 ms. One line added in front of the document left 0 blocks hit.</span></li><li><span class="l-ko"><b>프롬프트 캐시</b>: Amazon Bedrock에서 첫 요청이 5,233토큰을 캐시에 쓰고 다음 요청이 같은 5,233토큰을 읽었습니다. 같은 질문을 다시 보내도 답은 새로 생성됐습니다.</span><span class="l-en"><b>Prompt cache</b>: on Amazon Bedrock the first request wrote 5,233 tokens to the cache and the next one read the same 5,233 tokens. The same question sent again still got a newly generated answer.</span></li><li><span class="l-ko"><b>시맨틱 캐시</b>: 비활성화 방법을 묻는 새 질문과 활성화 방법을 묻는 저장 질문의 유사도가 0.71과 0.93으로, 같은 뜻을 다른 표현으로 쓴 질문의 0.48과 0.82보다 높았습니다.</span><span class="l-en"><b>Semantic cache</b>: a question about deactivating scored 0.71 and 0.93 against a stored question about activating, above the 0.48 and 0.82 of a reworded question with the same meaning.</span></li><li><span class="l-ko"><b>점검 순서</b>: 고정된 내용을 프롬프트 앞에 두고 캐시 토큰과 적중 지표를 확인합니다. 시맨틱 캐시는 틀린 응답이 나갈 수 있어 마지막에 검토합니다.</span><span class="l-en"><b>Order of checks</b>: put fixed content at the front of the prompt and read the cache tokens and hit metrics. The semantic cache can return a wrong answer, so it comes last.</span></li></ul>
+</header>
+<nav class="toc l-ko" aria-label="목차"><span class="toc-label">목차</span><a href="#ko-s1">이름은 모두 캐시이지만 저장하는 것이 다릅니다</a><a href="#ko-s2">KV 캐시는 한 요청 안에서 계산을 재사용합니다</a><a href="#ko-s3">프리픽스 캐시는 끝난 요청의 KV를 다음 요청에 재사용합니다</a><a href="#ko-s4">프롬프트 캐시는 제공자가 운영하는 프리픽스 캐시입니다</a><a href="#ko-s5">시맨틱 캐시는 모델을 호출하지 않고 저장된 응답을 돌려줍니다</a><a href="#ko-s6">네 캐시의 경계에서 자주 나오는 오해 다섯 가지</a><a href="#ko-s7">캐시가 적중했는지 확인하는 값</a><a href="#ko-s8">내 환경에서 점검하는 순서와 사용 기준</a><a href="#sources">참고 자료</a></nav>
+<nav class="toc l-en" aria-label="Contents"><span class="toc-label">Contents</span><a href="#en-s1">All four are called a cache, but they store different things</a><a href="#en-s2">The KV cache reuses computation inside one request</a><a href="#en-s3">The prefix cache reuses the KV of finished requests for the next one</a><a href="#en-s4">The prompt cache is a prefix cache run by the provider</a><a href="#en-s5">The semantic cache returns a stored response without calling the model</a><a href="#en-s6">Five common misunderstandings where the four caches meet</a><a href="#en-s7">Values that show whether a cache hit</a><a href="#en-s8">The order to check your own environment, and when to use each cache</a><a href="#sources">References</a></nav>
+<div class="col l-ko" lang="ko">
+<section class="sec" id="ko-s1"><header class="sec-head"><h2>이름은 모두 캐시이지만 저장하는 것이 다릅니다</h2></header><div class="prose">
+<p>LLM 서비스의 비용과 응답 시간을 줄이는 방법을 찾다 보면 KV 캐시, 프리픽스 캐시, 프롬프트 캐시, 시맨틱 캐시라는 이름을 차례로 만납니다. 네 가지는 저장하는 것과 동작하는 위치가 서로 달라서 구분하지 못하면 이미 동작하는 캐시를 다시 만들거나 캐시가 답까지 저장해 준다고 오해하기 쉽습니다.</p>
+<p>이름이 나오는 곳도 제각각입니다. vLLM 문서에는 Automatic Prefix Caching이 있고 Claude API와 Amazon Bedrock 문서에는 prompt caching이 있습니다. Amazon ElastiCache 문서에는 semantic caching이 나옵니다. KV 캐시는 따로 설정한 적이 없는데도 추론 엔진이 기본으로 사용합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig01-overview.png" alt="애플리케이션에서 모델까지 요청이 지나는 경로에 캐시 네 가지를 놓은 그림. 애플리케이션 계층의 시맨틱 캐시는 질문 임베딩과 응답 텍스트를 저장하고 적중하면 모델을 호출하지 않는다. 적중하지 않은 요청은 모델 제공자 API의 프롬프트 캐시나 직접 운영하는 추론 엔진의 프리픽스 캐시를 지나 모델 안의 KV 캐시에 이른다. 아래에는 이 글에서 네 캐시를 확인한 방법이 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 1.</b> 요청이 지나는 경로에서 캐시 네 가지의 위치와 이 글에서 확인한 방법</figcaption></figure>
+<p>네 가지를 요청이 지나는 순서로 놓으면 그림 1이 됩니다. 애플리케이션에 가장 가까운 것이 시맨틱 캐시이고 모델 안쪽에 있는 것이 KV 캐시입니다. 프롬프트 캐시와 프리픽스 캐시는 같은 자리에 있습니다. 모델 제공자의 API를 호출하면 프롬프트 캐시를 만나고 추론 엔진을 직접 운영하면 프리픽스 캐시를 만납니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>캐시</th><th>저장하는 것</th><th>재사용 범위</th><th>재사용 조건</th><th>줄어드는 것</th></tr>
+</thead>
+<tbody>
+<tr><td>KV 캐시</td><td>레이어마다의 K, V 텐서</td><td>한 요청 안</td><td>없음(같은 요청의 앞 토큰)</td><td>토큰을 만들 때마다 반복되는 계산</td></tr>
+<tr><td>프리픽스 캐시</td><td>끝난 요청의 KV 블록</td><td>한 엔진의 요청 사이</td><td>앞에서부터 토큰이 정확히 일치</td><td>프롬프트를 읽는 시간</td></tr>
+<tr><td>프롬프트 캐시</td><td>KV 표현과 해시</td><td>제공자 API의 요청 사이, 수명 안</td><td>캐시 지점까지 정확히 일치</td><td>입력 토큰 비용, 프롬프트를 읽는 시간</td></tr>
+<tr><td>시맨틱 캐시</td><td>질문의 임베딩과 응답 텍스트</td><td>애플리케이션의 요청 사이</td><td>임베딩 유사도가 임계값 이상</td><td>모델 호출 전체</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 1.</b> 캐시 네 가지가 저장하는 것과 재사용 조건</p>
+<p>앞의 세 가지는 모두 모델이 프롬프트를 읽으며 만든 중간 계산 결과(K, V)를 저장하고 재사용 범위만 다릅니다. 그래서 답은 매번 모델이 새로 만듭니다. 시맨틱 캐시만 완성된 응답을 저장하고 모델을 호출하지 않습니다.</p>
+<p>법률 사무소에 비유하면 이해하기 쉽습니다. 변호사는 두꺼운 사건 기록을 읽으면서 쪽마다 메모를 붙이고 답변서를 한 문장씩 쓰는 동안 기록을 다시 읽지 않고 메모를 봅니다. 이것이 KV 캐시입니다. 답변서를 다 쓴 뒤에도 메모가 붙은 기록을 책상에 두면 같은 기록으로 시작하는 다음 질문에서는 새 질문만 읽으면 됩니다. 이것이 프리픽스 캐시입니다. 프롬프트 캐시는 법무법인이 그 메모를 정해진 시간 동안 맡아 주고 보관료와 재사용 할인을 따로 계산하는 서비스입니다. 시맨틱 캐시는 접수 창구입니다. 창구 직원이 예전 답변서 철에서 비슷한 질문을 찾으면 변호사에게 넘기지 않고 그 답변서의 사본을 건넵니다.</p>
+<p>메모가 있어도 변호사는 답변서를 새로 쓰고 창구가 건네는 사본은 변호사가 이번 질문을 보지 않고 나간 답입니다. 실제 시스템은 비유와 달리 메모를 골라서 사용하지 못합니다. 기록의 첫 글자부터 똑같이 이어지는 부분까지만 메모를 다시 사용합니다.</p>
+<p>네 가지를 각각 작은 실험으로 확인했습니다. KV 캐시와 프리픽스 캐시는 Qwen2.5-0.5B-Instruct 모델을 CPU(16 vCPU)에서 실행했고 프롬프트 캐시와 시맨틱 캐시는 서울 리전의 Amazon Bedrock을 호출했습니다. 작은 모델을 CPU에서 측정한 값이므로 동작 원리를 확인하는 용도이며 GPU 서빙의 성능과는 다릅니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>KV 캐시는 한 요청 안에서 계산을 재사용합니다</h2></header><div class="prose">
+<p>LLM은 답을 한 토큰씩 만들고 토큰 하나를 만들 때마다 앞의 모든 토큰을 참조합니다. 각 토큰이 어텐션 레이어에서 갖는 K(key)와 V(value) 값은 뒤에 어떤 토큰이 오든 바뀌지 않습니다. KV 캐시는 이 값을 레이어마다 저장해 두고 새 토큰을 만들 때 그 토큰의 K, V만 계산해 뒤에 추가합니다.</p>
+<p>프롬프트 전체의 K, V를 처음 계산하는 단계를 프리필(prefill), 토큰을 하나씩 만드는 단계를 디코드(decode)라고 합니다. 프롬프트가 길수록 첫 토큰이 나올 때까지의 시간(TTFT)에서 프리필의 몫이 커집니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig02-kv-cache.png" alt="프롬프트 토큰이 Transformer 레이어를 지나며 레이어마다 K, V가 저장되고, 다음 토큰을 만들 때 새 토큰의 K, V만 계산해 추가하는 과정. 1,027토큰 프롬프트에서 40토큰을 만드는 시간은 KV 캐시 미사용 90.38초, 사용 6.02초이고 이 모델의 KV 크기는 토큰당 24,576바이트" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 2.</b> KV 캐시의 동작과 캐시 사용 여부에 따른 생성 시간</figcaption></figure>
+<p>Hugging Face Transformers는 <code>use_cache</code> 인자로 KV 캐시를 비활성화할 수 있습니다. 1,027토큰 프롬프트에서 40토큰을 만드는 시간을 두 방식으로 측정했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code># KV 캐시 사용: 프롬프트는 한 번만 읽고, 그 뒤에는 새 토큰 하나만 입력한다
+out = model(input_ids=prompt_ids, use_cache=True)
+kv = out.cache
+out = model(input_ids=next_token, cache=kv, use_cache=True)
+
+# KV 캐시 미사용: 토큰을 만들 때마다 지금까지의 시퀀스 전체를 다시 입력한다
+out = model(input_ids=torch.cat([prompt_ids, generated], dim=-1), use_cache=False)</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{"prompt_tokens": 1027, "new_tokens": 40,
+ "with_cache":    {"prefill_ms": 2812.0, "per_token_ms": 87.0, "total_s": 6.02},
+ "without_cache": {"first_token_ms": 2214.3, "per_token_ms": 2243.3, "total_s": 90.38},
+ "same_output": true}</code></pre></div>
+<p>캐시를 사용하면 6.02초, 사용하지 않으면 90.38초로 15배 차이가 났고 출력 토큰 40개는 같았습니다. 캐시가 없으면 토큰 하나를 만들 때마다 1,000개가 넘는 토큰을 다시 읽어 토큰당 2,243.3ms가 걸렸습니다. 캐시가 있으면 87.0ms였습니다.</p>
+<p>KV 캐시가 대신 사용하는 것은 메모리입니다. 이 모델의 KV는 토큰당 24,576바이트였습니다. 레이어 24개에 K와 V가 하나씩 있고 각각 헤드 2개, 64차원, 4바이트 값이기 때문입니다. GPU에서 Gemma 4 31B를 서빙한 <a href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/" target="_blank" rel="noopener">이전 글</a>에서는 토큰당 450,560바이트였습니다. 프리픽스 캐시와 프롬프트 캐시가 KV를 얼마나 오래 보관할지를 따지는 이유가 이 크기에 있습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>프리픽스 캐시는 끝난 요청의 KV를 다음 요청에 재사용합니다</h2></header><div class="prose">
+<p>KV 캐시는 요청이 끝나면 필요가 없어집니다. 프리픽스 캐시는 그 KV를 지우지 않고 두었다가 같은 내용으로 시작하는 다음 요청에 재사용합니다. 긴 문서에 질문을 여러 번 하거나 대화가 이어질 때처럼 프롬프트의 앞부분(프리픽스)이 반복되는 요청이 대상입니다.</p>
+<p>새 요청의 앞부분이 이전 요청과 같은지는 해시로 확인합니다. <a href="https://docs.vllm.ai/en/latest/design/prefix_caching/" target="_blank" rel="noopener">vLLM의 설계 문서</a>에 따르면 vLLM은 KV를 블록으로 나누고 블록의 해시를 그 블록의 토큰과 바로 앞 블록의 해시로 만듭니다. 해시 하나가 프롬프트의 처음부터 그 블록까지를 대표합니다. 새 요청이 오면 앞에서부터 해시를 비교해 일치하는 블록까지의 KV를 재사용하고 나머지만 계산합니다. vLLM에서 이 기능의 이름은 Automatic Prefix Caching이고 소스의 기본값은 활성화입니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig03-prefix-cache.png" alt="요청 1이 남긴 블록 해시가 앞 블록의 해시와 이어지는 구조와, 뒤따르는 요청 세 건의 재사용 범위. 같은 문서에 다른 질문을 보내면 227블록 중 226블록이 적중해 첫 토큰 계산이 7,436.2ms에서 293.9ms가 되고, 문서 앞에 한 줄을 추가하면 0블록 적중으로 전부 다시 계산하며, 바뀌는 값을 문서 뒤로 옮기면 다시 226블록이 적중한다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 3.</b> 블록 해시로 이전 요청의 KV를 재사용한 결과</figcaption></figure>
+<p>같은 원리를 16토큰 블록과 SHA-256으로 직접 구현해 확인했습니다. 요청 1의 KV와 블록 해시를 저장하고 다음 요청의 해시가 앞에서부터 몇 블록 일치하는지 센 뒤 일치한 만큼의 KV를 모델에 넘겨주었습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>BLOCK = 16
+
+def block_hashes(ids):
+    """블록의 해시 = sha256(앞 블록의 해시 + 이 블록의 토큰). 꽉 찬 블록만 계산한다."""
+    hashes, parent = [], b""
+    for i in range(0, len(ids) - len(ids) % BLOCK, BLOCK):
+        parent = hashlib.sha256(parent + repr(tuple(ids[i:i + BLOCK])).encode()).digest()
+        hashes.append(parent)
+    return hashes
+
+def lookup(ids):
+    """앞에서부터 저장소에 있는 블록의 수. 한 블록이 다르면 거기서 멈춘다."""
+    hits = 0
+    for h in block_hashes(ids):
+        if h not in store:
+            break
+        hits += 1
+    return hits</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{"request": "2 same document, different question", "prompt_tokens": 3644, "blocks": 227, "blocks_hit": 226,
+ "tokens_reused": 3616, "tokens_computed": 28, "first_token_ms_no_reuse": 7436.2, "first_token_ms_with_reuse": 293.9, "same_output": true}
+{"request": "3 one line added in front of the document", "prompt_tokens": 3656, "blocks": 228, "blocks_hit": 0,
+ "tokens_reused": 0, "tokens_computed": 3656, "first_token_ms_no_reuse": 7478.8, "first_token_ms_with_reuse": 7489.7, "same_output": true}
+{"request": "4 changing value moved behind the document", "prompt_tokens": 3656, "blocks": 228, "blocks_hit": 226,
+ "tokens_reused": 3616, "tokens_computed": 40, "first_token_ms_no_reuse": 7232.8, "first_token_ms_with_reuse": 388.6, "same_output": true}</code></pre></div>
+<p>같은 문서에 다른 질문을 보낸 요청 2는 227블록 가운데 226블록이 일치해 28토큰만 계산했습니다. 첫 토큰 계산 시간은 7,436.2ms에서 293.9ms로 줄었고 출력은 재사용하지 않은 경우와 같았습니다.</p>
+<p>요청 3은 문서 앞에 요청 시각 한 줄을 넣은 경우입니다. 첫 블록의 해시가 달라지면서 뒤의 블록이 하나도 일치하지 않아 3,656토큰을 전부 다시 계산했습니다. 같은 값을 문서 뒤의 질문으로 옮긴 요청 4는 다시 226블록이 일치했습니다. 프롬프트에 넣는 시각, 요청 ID, 사용자 이름 같은 값의 위치가 적중률을 정합니다.</p>
+<p>프리픽스 캐시가 줄이는 것은 프리필 시간이고 답을 만드는 디코드 시간은 그대로입니다. 꽉 찬 블록만 캐시하며 메모리가 부족하면 가장 오래 사용하지 않은 블록부터 지웁니다. GPU에서 측정한 이전 글에서는 14,984토큰 프롬프트의 TTFT가 재계산 4,194.8ms, 같은 서버의 GPU 메모리에서 적중했을 때 131.0ms였습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>프롬프트 캐시는 제공자가 운영하는 프리픽스 캐시입니다</h2></header><div class="prose">
+<p>모델을 API로 호출하면 추론 엔진은 제공자의 것이고 프리픽스 캐시도 제공자가 운영합니다. 프롬프트 캐시는 이 캐시를 API의 기능과 요금으로 드러낸 것입니다. 저장하는 것은 여전히 KV입니다. <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Claude API 문서</a>는 KV 캐시 표현과 해시를 메모리에 보관하고 프롬프트와 응답의 원문은 저장하지 않는다고 설명합니다. OpenAI 문서도 프롬프트 캐시가 토큰이 아닌 KV 텐서를 저장한다고 설명합니다.</p>
+<p>사용자가 정하는 것은 어디까지가 반복되는 부분인지입니다. Amazon Bedrock의 Converse API에서는 <code>cachePoint</code>를, Claude API에서는 <code>cache_control</code>을 고정된 내용의 끝에 둡니다. 캐시는 tools, system, messages 순서로 이어지는 프리픽스 전체를 대상으로 하고 그 지점까지 내용이 정확히 같아야 적중합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig04-prompt-cache.png" alt="API 요청의 고정된 프리픽스와 캐시 지점, 제공자의 캐시, 적중하면 캐시 읽기(기본 입력 단가의 0.1배), 적중하지 않으면 프리필 후 캐시 쓰기(1.25배)로 이어지는 흐름. 5,233토큰 프리픽스로 보낸 요청 5건의 캐시 쓰기와 읽기 토큰, 요청 수에 따른 프리픽스 입력 비용 계산식이 함께 있다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 4.</b> 프롬프트 캐시의 동작과 Amazon Bedrock에서 확인한 캐시 토큰</figcaption></figure>
+<p>프리픽스 캐시와 달리 프롬프트 캐시는 수명과 요금이 정해져 있습니다. Claude API 문서 기준으로 캐시의 기본 수명(TTL)은 5분이고 읽을 때마다 추가 비용 없이 갱신되며 1시간을 선택할 수 있습니다. 캐시 쓰기는 기본 입력 단가의 1.25배(1시간은 2배)이고 캐시 읽기는 0.1배이며 일부 모델은 0.05배나 0.025배입니다. 캐시할 수 있는 최소 길이도 있습니다. <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html" target="_blank" rel="noopener">Bedrock 문서</a>의 최소값은 모델에 따라 512토큰에서 4,096토큰입니다.</p>
+<p>서울 리전의 Bedrock에서 Claude Haiku 5.5에 같은 시스템 프롬프트로 요청 5건을 보내고 응답의 캐시 토큰을 확인했습니다.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>resp = client.converse_stream(
+    modelId="global.anthropic.claude-haiku-5-5",
+    system=[{"text": system_text}, {"cachePoint": {"type": "default"}}],   # 여기까지가 캐시할 프리픽스
+    messages=[{"role": "user", "content": [{"text": question}]}],
+    inferenceConfig={"maxTokens": 60},
+)</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>{"request": "1 first request", "inputTokens": 25, "cacheWriteInputTokens": 5233, "cacheReadInputTokens": 0, "outputTokens": 18, "ttft_ms": 738}
+{"request": "2 different question", "inputTokens": 22, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 742}
+{"request": "3 same question again", "inputTokens": 22, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 744}
+{"request": "4 line added before the prefix", "inputTokens": 22, "cacheWriteInputTokens": 5244, "cacheReadInputTokens": 0, "outputTokens": 47, "ttft_ms": 681}
+{"request": "5 changing value after the cache point", "inputTokens": 33, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 777}</code></pre></div>
+<p>첫 요청은 5,233토큰을 캐시에 썼고 질문만 바꾼 두 번째 요청은 같은 5,233토큰을 캐시에서 읽었습니다. 프리픽스 캐시 실험과 같은 결과도 나왔습니다. 프리픽스 앞에 한 줄을 넣은 요청 4는 읽기가 0이 되어 5,244토큰을 다시 썼고 그 값을 캐시 지점 뒤로 옮긴 요청 5는 다시 읽었습니다.</p>
+<p>요청 3은 요청 2와 완전히 같은 요청입니다. 그래도 출력 38토큰이 다시 생성됐습니다. 프롬프트 캐시는 답을 저장하지 않기 때문이며 Claude API 문서도 프롬프트 캐시가 출력 생성에 영향을 주지 않는다고 설명합니다. TTFT는 다섯 요청 모두 681ms에서 777ms 사이여서 차이가 보이지 않았습니다. 이 길이에서는 프리필이 TTFT에서 차지하는 몫이 작기 때문으로 보입니다.</p>
+<p>비용은 계산으로 확인됩니다. 프리픽스를 n번 보낼 때 드는 입력 비용은 캐시가 없으면 n이고 5분 캐시를 사용하면 1.25 + 0.1 × (n - 1)입니다. 두 번째 요청에서 2와 1.35가 되므로 수명 안에 한 번만 다시 읽어도 비용이 줄고 다시 읽지 않는 프롬프트에는 25%를 더 냅니다. 1시간 캐시는 세 번째 요청부터 비용이 줄어듭니다.</p>
+<p>에이전트는 턴마다 같은 시스템 프롬프트와 도구 정의, 이전 대화를 다시 보내므로 프롬프트 캐시의 효과가 큽니다. Claude Code의 14일 세션 기록을 집계한 <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/" target="_blank" rel="noopener">이전 글</a>에서는 입력 토큰의 98%가 캐시 읽기였습니다.</p>
+<p>제공자마다 활성화 방법은 다릅니다. OpenAI API는 지원 모델에서 프롬프트 캐시가 기본으로 활성화되어 있고 Bedrock의 Amazon Nova 모델에는 설정 없이 동작하는 묵시적 캐싱(Implicit Prompt Caching)이 있습니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>시맨틱 캐시는 모델을 호출하지 않고 저장된 응답을 돌려줍니다</h2></header><div class="prose">
+<p>시맨틱 캐시는 앞의 세 가지와 저장하는 것이 다릅니다. 질문과 응답을 함께 저장해 두고 새 질문이 예전 질문과 뜻이 비슷하면 모델을 호출하지 않고 저장된 응답을 돌려줍니다. 글자가 달라도 뜻이 같은 질문을 찾으려고 질문을 임베딩 벡터로 바꿔 유사도를 비교하며 유사도가 임계값 이상이면 적중으로 처리합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig05-semantic-cache.png" alt="새 질문을 임베딩 모델로 벡터로 바꾸고 저장소에서 유사도를 검색해 임계값 이상이면 저장된 응답을 반환하고, 아니면 LLM을 호출한 뒤 응답을 저장하는 흐름. 아래 차트는 새 질문 8개와 가장 가까운 저장 질문의 코사인 유사도를 임베딩 모델 두 가지로 측정한 값이고, 활성화 대신 비활성화를 물은 질문의 유사도가 같은 뜻의 질문 두 개보다 높다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 5.</b> 시맨틱 캐시의 동작과 질문 8개의 유사도</figcaption></figure>
+<p>적중하면 임베딩 모델만 호출하므로 비용과 지연 시간이 가장 많이 줄어듭니다. <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/semantic-caching-benchmarks.html" target="_blank" rel="noopener">ElastiCache 문서의 벤치마크</a>에서는 임계값 0.75에서 추론 비용이 최대 86% 줄었고 캐시가 돌려준 응답의 정확도는 91%였습니다. 트레이드 오프가 있습니다. 앞의 세 캐시는 토큰이 정확히 같을 때만 재사용하지만 시맨틱 캐시는 비슷하면 재사용하므로 다른 질문의 응답을 돌려줄 가능성이 있습니다.</p>
+<p>얼마나 비슷해야 같은 질문인지를 확인하려고 질문 4개를 저장하고 새 질문 8개의 유사도를 임베딩 모델 두 가지로 측정했습니다. 새 질문 가운데 3개는 저장한 질문과 뜻이 같고(<code>hit</code>) 5개는 뜻이 다릅니다(<code>miss</code>).</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>def titan_v2(text):
+    body = json.dumps({"inputText": text, "dimensions": 1024, "normalize": True})
+    out = client.invoke_model(modelId="amazon.titan-embed-text-v2:0", body=body)
+    return json.loads(out["body"].read())["embedding"]
+
+stored = [(q, embed(q)) for q in STORED]                            # 저장한 질문 4개
+for expect, q in QUERIES:                                           # 새 질문 8개
+    v = embed(q)
+    sim, nearest = max((cosine(v, sv), sq) for sq, sv in stored)    # 가장 가까운 저장 질문과 유사도</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">복사</span><span class="ok">복사됨</span></button></div><pre><code>model amazon.titan-embed-text-v2:0 region ap-northeast-2
+  hit  0.4756  람다 함수는 최대 몇 분까지 실행할 수 있나요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.6190  What is the maximum timeout of a Lambda function?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.9480  S3 버킷의 이름을 바꾸는 것이 가능한가요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.6364  Lambda 함수의 최대 메모리는 얼마인가요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  miss 0.6502  도쿄 리전의 가용 영역은 몇 개인가요?  -&gt;  서울 리전의 가용 영역은 몇 개인가요?
+  miss 0.7129  프롬프트 캐싱을 비활성화하는 방법을 알려 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+  miss 0.6379  S3 버킷을 삭제할 수 있나요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.1182  오늘 점심 메뉴를 추천해 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+
+model global.cohere.embed-v4:0 region ap-northeast-2
+  hit  0.8157  람다 함수는 최대 몇 분까지 실행할 수 있나요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.7817  What is the maximum timeout of a Lambda function?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.9503  S3 버킷의 이름을 바꾸는 것이 가능한가요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.7879  Lambda 함수의 최대 메모리는 얼마인가요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  miss 0.7420  도쿄 리전의 가용 영역은 몇 개인가요?  -&gt;  서울 리전의 가용 영역은 몇 개인가요?
+  miss 0.9279  프롬프트 캐싱을 비활성화하는 방법을 알려 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+  miss 0.8095  S3 버킷을 삭제할 수 있나요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.2046  오늘 점심 메뉴를 추천해 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.</code></pre></div>
+<p>두 모델 모두 뜻이 반대인 질문이 뜻이 같은 질문보다 높은 점수를 받았습니다. 비활성화 방법을 묻는 새 질문과 활성화 방법을 묻는 저장 질문의 유사도는 0.7129와 0.9279였습니다. 같은 질문을 다른 표현으로 쓴 첫 번째 질문은 0.4756과 0.8157이었습니다. 이 8개 질문에서는 뜻이 같은 3개를 모두 적중시키면서 틀린 적중을 0으로 만드는 임계값이 어느 모델에도 없었습니다.</p>
+<p>질문 8개로 만든 작은 예이므로 일반적인 정확도를 말해 주지는 않습니다. 다만 같은 벤치마크에서 임계값을 0.95로 높였을 때도 캐시가 돌려준 응답의 정확도는 92.6%였습니다. 임계값은 틀린 적중을 줄일 뿐 없애지 못합니다.</p>
+<p>그래서 시맨틱 캐시는 같은 질문이 반복되고 응답이 자주 바뀌지 않는 곳에 맞습니다. ElastiCache 문서는 임계값을 0.90에서 0.95로 높게 시작해 정확도를 보면서 낮추도록 안내합니다. 제품 ID나 리전, 사용자 그룹 같은 필터로 적중 대상을 좁히고 TTL로 오래된 응답을 지우는 방법도 함께 안내합니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>네 캐시의 경계에서 자주 나오는 오해 다섯 가지</h2></header><div class="prose">
+<p>네 가지는 하나를 고르는 선택지가 아니고 겹쳐서 동작합니다. 시맨틱 캐시에서 적중하지 않은 요청은 모델로 갑니다. 그 요청의 프리픽스는 프롬프트 캐시나 프리픽스 캐시에서 재사용되고 답을 만드는 동안에는 KV 캐시가 동작합니다. 겹치는 곳에서 자주 나오는 오해를 실제 동작과 함께 정리했습니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>오해</th><th>실제 동작</th></tr>
+</thead>
+<tbody>
+<tr><td>프롬프트 캐시를 활성화하면 같은 질문에 저장된 답이 온다</td><td>답은 매번 새로 생성하고 출력 토큰도 그대로 과금됩니다. 저장된 응답을 돌려주는 것은 시맨틱 캐시입니다</td></tr>
+<tr><td>프리픽스의 중간이 조금 달라도 뒷부분은 재사용된다</td><td>달라진 토큰이 있는 블록부터 뒤는 모두 다시 계산합니다</td></tr>
+<tr><td>프리픽스가 적중하면 답 전체가 빨리 나온다</td><td>줄어드는 것은 첫 토큰까지의 시간이고 토큰을 만드는 속도는 그대로입니다</td></tr>
+<tr><td>서버를 늘려도 적중률은 그대로다</td><td>KV는 요청을 처리한 서버에 있으므로 다음 요청이 다른 서버로 가면 적중하지 않습니다</td></tr>
+<tr><td>시맨틱 캐시는 임계값을 높이면 안전하다</td><td>틀린 적중이 줄어들 뿐 없어지지 않고 적중률도 함께 내려갑니다</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 2.</b> 캐시 네 가지의 경계에서 자주 나오는 오해와 실제 동작</p>
+<p>네 번째 항목은 추론 엔진을 여러 대로 늘릴 때 만나는 문제입니다. 같은 세션을 같은 서버로 보내거나 서버들이 KV를 함께 사용하는 공유 캐시를 두는 방법이 있습니다. 공유 캐시는 <a href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/" target="_blank" rel="noopener">Amazon ElastiCache Distributed KV Caching</a> 글에서 테스트했습니다. Bedrock 문서는 교차 리전 추론에서 수요가 높을 때 캐시 쓰기가 늘어날 수 있다고 안내합니다.</p>
+<p>KV를 요청 사이에 재사용하는 캐시에는 격리 범위도 있습니다. vLLM 문서는 응답 시간의 차이로 캐시된 내용을 추측하는 공격을 막는 방법으로 <code>cache_salt</code>를 설명합니다. 요청에 이 값을 넣으면 같은 값을 가진 요청끼리만 KV를 재사용합니다. Claude의 프롬프트 캐시는 조직 단위로 분리되고 Claude API에서는 워크스페이스 단위로도 분리됩니다.</p>
+</div></section>
+
+<section class="sec" id="ko-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>캐시가 적중했는지 확인하는 값</h2></header><div class="prose">
+<p>캐시는 설정이 맞아도 프리픽스가 달라지면 적중하지 않습니다. 이때 오류가 나지 않으므로 응답과 지표의 값을 직접 확인해야 합니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>캐시</th><th>확인하는 값</th><th>읽는 방법</th></tr>
+</thead>
+<tbody>
+<tr><td>KV 캐시</td><td>별도 지표 없음</td><td>엔진이 기본으로 사용합니다. KV가 사용하는 메모리는 컨텍스트 길이와 동시 요청 수에 비례합니다</td></tr>
+<tr><td>프리픽스 캐시(vLLM)</td><td><code>vllm:prefix_cache_hits</code>, <code>vllm:prefix_cache_queries</code></td><td>두 값의 증가분을 나눈 값이 토큰 기준 적중률입니다. 요청별 값은 <code>--enable-prompt-tokens-details</code>로 서버를 시작하면 <code>usage.prompt_tokens_details.cached_tokens</code>에 나옵니다</td></tr>
+<tr><td>프롬프트 캐시(Bedrock Converse API)</td><td><code>cacheReadInputTokens</code>, <code>cacheWriteInputTokens</code></td><td>읽기가 0이고 쓰기가 요청마다 반복되면 프리픽스가 요청마다 달라지는 것입니다</td></tr>
+<tr><td>프롬프트 캐시(Claude API)</td><td><code>cache_read_input_tokens</code>, <code>cache_creation_input_tokens</code></td><td>둘 다 0이면 캐시되지 않은 것이고 최소 길이에 못 미친 경우가 많습니다</td></tr>
+<tr><td>시맨틱 캐시</td><td>적중률, 적중한 응답의 정확도</td><td>적중한 응답을 표본으로 뽑아 새 질문과 대조합니다. 적중률만 보면 틀린 적중이 보이지 않습니다</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 3.</b> 캐시별로 적중 여부를 확인하는 값. 2026년 11월 27일 각 문서 기준</p>
+</div></section>
+
+<section class="sec" id="ko-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>내 환경에서 점검하는 순서와 사용 기준</h2></header><div class="prose">
+<p>점검은 이미 동작하는 캐시부터 시작합니다. KV 캐시는 설정할 것이 없습니다. 추론 엔진을 직접 운영하면 프리픽스 캐시의 적중률을 먼저 보고 API를 호출하면 캐시 지점과 캐시 토큰을 확인합니다. 두 경우 모두 고정된 내용을 프롬프트 앞에, 바뀌는 값을 뒤에 두는 것이 첫 번째 수정입니다. 시맨틱 캐시는 틀린 응답이 나갈 수 있는 유일한 캐시이므로 마지막에 검토합니다.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig06-checklist.png" alt="캐시 네 가지를 점검하는 순서. 첫째 KV 캐시는 설정할 것이 없고, 둘째 프리픽스 캐시는 고정된 내용을 앞에 두고 vLLM의 적중 지표를 확인하며, 셋째 프롬프트 캐시는 캐시 지점을 고정된 프리픽스의 끝에 두고 캐시 읽기와 쓰기 토큰을 확인하고, 넷째 시맨틱 캐시는 반복되고 개인화되지 않은 질문에만 적용하고 적중한 응답의 정확도를 확인한다" width="1280" height="720" loading="lazy"></div><figcaption><b>그림 6.</b> 캐시 네 가지의 점검 순서</figcaption></figure>
+<p>비용과 성능을 함께 비교하면 사용 기준이 정해집니다.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>캐시</th><th>드는 것</th><th>줄어드는 것</th><th>사용 기준</th></tr>
+</thead>
+<tbody>
+<tr><td>KV 캐시</td><td>토큰 수에 비례하는 메모리</td><td>이 글의 측정에서 40토큰 생성 시간이 15분의 1</td><td>항상 사용합니다</td></tr>
+<tr><td>프리픽스 캐시</td><td>별도 비용 없음. 비어 있는 KV 블록에 남겨 두고 메모리가 필요하면 지웁니다</td><td>이 글의 측정에서 첫 토큰 계산 시간이 25분의 1</td><td>프리픽스가 반복되면 항상 사용합니다. 서버가 여러 대이면 라우팅을 함께 확인합니다</td></tr>
+<tr><td>프롬프트 캐시</td><td>캐시 쓰기 1.25배</td><td>캐시 읽기 0.1배</td><td>수명 안에 같은 프리픽스를 한 번 이상 다시 보내면 사용합니다</td></tr>
+<tr><td>시맨틱 캐시</td><td>임베딩 호출, 벡터 저장소, 틀린 응답의 가능성</td><td>적중한 요청의 모델 호출 전체</td><td>같은 질문이 반복되고 틀린 응답의 비용이 낮을 때만 사용합니다</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>표 4.</b> 비용과 성능으로 본 캐시 네 가지의 사용 기준. 배율은 Claude API 문서 기준이고 측정값은 CPU의 0.5B 모델에서 얻은 값</p>
+<p>앞의 세 캐시는 같은 계산을 다시 하지 않는 방법이어서 프리픽스만 맞추면 잃는 것이 거의 없습니다. 시맨틱 캐시는 계산을 건너뛰는 방법이어서 절감 폭이 가장 크고 틀린 응답의 위험이 함께 있습니다. 시맨틱 캐시를 적용하기 전에 운영 중인 서비스의 실제 질문으로 유사도를 측정해 보는 것을 권고합니다.</p>
+</div></section>
+</div>
+<div class="col l-en" lang="en">
+<section class="sec" id="en-s1"><header class="sec-head"><h2>All four are called a cache, but they store different things</h2></header><div class="prose">
+<p>Anyone looking for ways to cut the cost and response time of an LLM service soon runs into four names: KV cache, prefix cache, prompt cache and semantic cache. They store different things and work in different places, so without telling them apart it is easy to rebuild a cache that already works, or to assume that a cache also stores the answer.</p>
+<p>The names also come from different places. The vLLM documentation has Automatic Prefix Caching, and the Claude API and Amazon Bedrock documentation have prompt caching. The Amazon ElastiCache documentation describes semantic caching. The KV cache is used by inference engines by default, even though nobody ever set it up.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig01-overview-en.png" alt="The four caches placed on the path a request takes from the application to the model. The semantic cache in the application layer stores question embeddings and response text and skips the model on a hit. A request that misses goes through the prompt cache of a model provider API or the prefix cache of a self-hosted inference engine and reaches the KV cache inside the model. The strip at the bottom shows how each cache was checked in this post" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 1.</b> Where the four caches sit on the request path, and how each was checked in this post</figcaption></figure>
+<p>Figure 1 puts the four in the order a request meets them. The semantic cache is closest to the application and the KV cache is deepest inside the model. The prompt cache and the prefix cache sit in the same place. A call to a model provider's API meets the prompt cache, and an inference engine you run yourself has the prefix cache.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Cache</th><th>What it stores</th><th>Reuse scope</th><th>Condition for reuse</th><th>What it reduces</th></tr>
+</thead>
+<tbody>
+<tr><td>KV cache</td><td>K and V tensors per layer</td><td>Inside one request</td><td>None (earlier tokens of the same request)</td><td>Computation repeated for every new token</td></tr>
+<tr><td>Prefix cache</td><td>KV blocks of finished requests</td><td>Across requests in one engine</td><td>Tokens match exactly from the start</td><td>Time to read the prompt</td></tr>
+<tr><td>Prompt cache</td><td>KV representations and hashes</td><td>Across requests to a provider API, within the lifetime</td><td>Exact match up to the cache point</td><td>Input token cost, time to read the prompt</td></tr>
+<tr><td>Semantic cache</td><td>Question embeddings and response text</td><td>Across requests of the application</td><td>Embedding similarity at or above a threshold</td><td>The whole model call</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 1.</b> What the four caches store and the condition for reuse</p>
+<p>The first three all store the intermediate results (K and V) that the model computes while reading the prompt, and differ only in reuse scope. So the model still generates the answer every time. Only the semantic cache stores a finished response and does not call the model.</p>
+<p>A law office makes this easier to picture. A lawyer reads a thick case file and puts a note on each page, and while writing the reply one sentence at a time looks at the notes instead of reading the file again. That is the KV cache. If the file with its notes stays on the desk after the reply is finished, the next question that starts with the same file only needs the new question to be read. That is the prefix cache. The prompt cache is a service in which the law firm keeps those notes for a set time and charges a storage fee and a discounted reuse fee separately. The semantic cache is the front desk. When the clerk finds a similar question in the binder of old replies, the clerk hands over a copy of that reply without passing the question to the lawyer.</p>
+<p>Even with the notes the lawyer writes a new reply, and the copy from the front desk is an answer that went out without the lawyer seeing this question. Unlike the analogy, the real system cannot pick which notes to use. Notes are reused only as far as the file is identical from its first character.</p>
+<p>I checked each of the four with a small experiment. The KV cache and the prefix cache ran with the Qwen2.5-0.5B-Instruct model on a CPU (16 vCPUs), and the prompt cache and the semantic cache called Amazon Bedrock in the Seoul Region. The values come from a small model on a CPU, so they confirm how the caches work and differ from GPU serving performance.</p>
+</div></section>
+
+<section class="sec" id="en-s2"><header class="sec-head"><p class="eyebrow">01</p><h2>The KV cache reuses computation inside one request</h2></header><div class="prose">
+<p>An LLM generates its answer one token at a time and refers to every earlier token for each new one. The K (key) and V (value) of a token in each attention layer do not change, whatever tokens come after it. The KV cache stores these values per layer and, for a new token, computes only that token's K and V and appends them.</p>
+<p>Computing K and V for the whole prompt the first time is called prefill, and generating tokens one by one is called decode. The longer the prompt, the larger the share of prefill in the time to first token (TTFT).</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig02-kv-cache-en.png" alt="Prompt tokens pass through the Transformer layers, K and V are stored per layer, and for the next token only the new token's K and V are computed and appended. Generating 40 tokens from a 1,027-token prompt takes 90.38 s without the KV cache and 6.02 s with it, and the KV of this model is 24,576 bytes per token" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 2.</b> How the KV cache works, and generation time with and without it</figcaption></figure>
+<p>Hugging Face Transformers lets you deactivate the KV cache with the <code>use_cache</code> argument. I measured the time to generate 40 tokens from a 1,027-token prompt both ways.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code># With the KV cache: the prompt is read once, then only the one new token is fed in
+out = model(input_ids=prompt_ids, use_cache=True)
+kv = out.cache
+out = model(input_ids=next_token, cache=kv, use_cache=True)
+
+# Without the KV cache: the whole sequence so far is fed in again for every token
+out = model(input_ids=torch.cat([prompt_ids, generated], dim=-1), use_cache=False)</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{"prompt_tokens": 1027, "new_tokens": 40,
+ "with_cache":    {"prefill_ms": 2812.0, "per_token_ms": 87.0, "total_s": 6.02},
+ "without_cache": {"first_token_ms": 2214.3, "per_token_ms": 2243.3, "total_s": 90.38},
+ "same_output": true}</code></pre></div>
+<p>It took 6.02 s with the cache and 90.38 s without it, a 15-fold difference, and the 40 output tokens were the same. Without the cache every new token meant reading more than 1,000 tokens again, at 2,243.3 ms per token. With the cache it was 87.0 ms.</p>
+<p>What the KV cache uses in return is memory. The KV of this model was 24,576 bytes per token: 24 layers, one K and one V each, 2 heads, 64 dimensions and 4-byte values. In an <a href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/" target="_blank" rel="noopener">earlier post</a> that served Gemma 4 31B on GPUs it was 450,560 bytes per token. This size is why the prefix cache and the prompt cache have to decide how long to keep KV.</p>
+</div></section>
+
+<section class="sec" id="en-s3"><header class="sec-head"><p class="eyebrow">02</p><h2>The prefix cache reuses the KV of finished requests for the next one</h2></header><div class="prose">
+<p>The KV cache is no longer needed once the request ends. The prefix cache keeps that KV instead of deleting it and reuses it for the next request that starts with the same content. It targets requests whose beginning (the prefix) repeats, such as several questions on one long document or a continuing conversation.</p>
+<p>Whether a new request starts like an earlier one is checked with hashes. According to the <a href="https://docs.vllm.ai/en/latest/design/prefix_caching/" target="_blank" rel="noopener">vLLM design document</a>, vLLM splits the KV into blocks and builds the hash of a block from the tokens of that block and the hash of the block before it. One hash therefore stands for the prompt from its start up to that block. When a new request arrives, the hashes are compared from the start, the KV is reused up to the last matching block and only the rest is computed. In vLLM the feature is called Automatic Prefix Caching, and in the source it is activated by default.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig03-prefix-cache-en.png" alt="The block hashes left by request 1, each chained to the hash of the block before it, and how far three later requests reuse them. A different question on the same document hits 226 of 227 blocks and the first token takes 293.9 ms instead of 7,436.2 ms; one line added in front of the document hits 0 blocks and everything is computed again; moving the changing value behind the document hits 226 blocks again" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 3.</b> Reusing the KV of an earlier request with block hashes</figcaption></figure>
+<p>I implemented the same idea with 16-token blocks and SHA-256 to check it. The script stores the KV and block hashes of request 1, counts how many blocks of the next request match from the start, and passes that much KV to the model.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>BLOCK = 16
+
+def block_hashes(ids):
+    """Hash of a block = sha256(hash of the previous block + tokens of this block). Full blocks only."""
+    hashes, parent = [], b""
+    for i in range(0, len(ids) - len(ids) % BLOCK, BLOCK):
+        parent = hashlib.sha256(parent + repr(tuple(ids[i:i + BLOCK])).encode()).digest()
+        hashes.append(parent)
+    return hashes
+
+def lookup(ids):
+    """Number of blocks found in the store, counted from the start. Stops at the first block that differs."""
+    hits = 0
+    for h in block_hashes(ids):
+        if h not in store:
+            break
+        hits += 1
+    return hits</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{"request": "2 same document, different question", "prompt_tokens": 3644, "blocks": 227, "blocks_hit": 226,
+ "tokens_reused": 3616, "tokens_computed": 28, "first_token_ms_no_reuse": 7436.2, "first_token_ms_with_reuse": 293.9, "same_output": true}
+{"request": "3 one line added in front of the document", "prompt_tokens": 3656, "blocks": 228, "blocks_hit": 0,
+ "tokens_reused": 0, "tokens_computed": 3656, "first_token_ms_no_reuse": 7478.8, "first_token_ms_with_reuse": 7489.7, "same_output": true}
+{"request": "4 changing value moved behind the document", "prompt_tokens": 3656, "blocks": 228, "blocks_hit": 226,
+ "tokens_reused": 3616, "tokens_computed": 40, "first_token_ms_no_reuse": 7232.8, "first_token_ms_with_reuse": 388.6, "same_output": true}</code></pre></div>
+<p>Request 2, a different question on the same document, matched 226 of 227 blocks and computed only 28 tokens. The time to compute the first token fell from 7,436.2 ms to 293.9 ms, and the output was the same as without reuse.</p>
+<p>Request 3 has one line with the request time in front of the document. The hash of the first block changed, none of the later blocks matched, and all 3,656 tokens were computed again. Request 4 moves the same value into the question behind the document, and 226 blocks matched again. Where a prompt carries values such as the time, a request ID or a user name decides the hit rate.</p>
+<p>The prefix cache shortens prefill; the decode time that produces the answer stays the same. Only full blocks are cached, and when memory runs short the least recently used blocks are deleted first. In the earlier post, measured on GPUs, the TTFT of a 14,984-token prompt was 4,194.8 ms when recomputed and 131.0 ms on a hit in the GPU memory of the same server.</p>
+</div></section>
+
+<section class="sec" id="en-s4"><header class="sec-head"><p class="eyebrow">03</p><h2>The prompt cache is a prefix cache run by the provider</h2></header><div class="prose">
+<p>When you call a model through an API, the inference engine belongs to the provider, and so does the prefix cache. The prompt cache is that cache exposed as an API feature with its own prices. What it stores is still KV. The <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Claude API documentation</a> says that KV cache representations and hashes are held in memory and that the raw text of prompts and responses is not stored. The OpenAI documentation also says that the prompt cache stores KV tensors, not the tokens.</p>
+<p>What the user decides is where the repeated part ends. With the Amazon Bedrock Converse API you place a <code>cachePoint</code>, and with the Claude API a <code>cache_control</code>, at the end of the fixed content. The cache covers the whole prefix in the order tools, system, messages, and it hits only when the content is exactly the same up to that point.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig04-prompt-cache-en.png" alt="The stable prefix and the cache point of an API request, the provider cache, then a cache read on a hit (0.1x the base input price) or prefill and a cache write on a miss (1.25x). Next to it are the cache write and cache read tokens of 5 requests sent with a 5,233-token prefix, and the formulas for the input cost of the prefix by number of requests" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 4.</b> How the prompt cache works, and the cache tokens seen on Amazon Bedrock</figcaption></figure>
+<p>Unlike the prefix cache, the prompt cache has a set lifetime and set prices. According to the Claude API documentation the default lifetime (TTL) is 5 minutes, it is refreshed at no extra cost on every read, and 1 hour can be chosen. A cache write costs 1.25 times the base input price (2 times for 1 hour), and a cache read costs 0.1 times, or 0.05 or 0.025 times on some models. There is also a minimum cacheable length. In the <a href="https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html" target="_blank" rel="noopener">Bedrock documentation</a> the minimum is 512 to 4,096 tokens depending on the model.</p>
+<p>I sent 5 requests with the same system prompt to Claude Haiku 5.5 on Bedrock in the Seoul Region and read the cache tokens in the responses.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>resp = client.converse_stream(
+    modelId="global.anthropic.claude-haiku-5-5",
+    system=[{"text": system_text}, {"cachePoint": {"type": "default"}}],   # the prefix to cache ends here
+    messages=[{"role": "user", "content": [{"text": question}]}],
+    inferenceConfig={"maxTokens": 60},
+)</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">json</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>{"request": "1 first request", "inputTokens": 25, "cacheWriteInputTokens": 5233, "cacheReadInputTokens": 0, "outputTokens": 18, "ttft_ms": 738}
+{"request": "2 different question", "inputTokens": 22, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 742}
+{"request": "3 same question again", "inputTokens": 22, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 744}
+{"request": "4 line added before the prefix", "inputTokens": 22, "cacheWriteInputTokens": 5244, "cacheReadInputTokens": 0, "outputTokens": 47, "ttft_ms": 681}
+{"request": "5 changing value after the cache point", "inputTokens": 33, "cacheWriteInputTokens": 0, "cacheReadInputTokens": 5233, "outputTokens": 38, "ttft_ms": 777}</code></pre></div>
+<p>The first request wrote 5,233 tokens to the cache, and the second, with only the question changed, read the same 5,233 tokens from it. The result of the prefix cache experiment showed up here too. Request 4, with one line in front of the prefix, read 0 and wrote 5,244 tokens again, and request 5, with that value moved behind the cache point, read from the cache again.</p>
+<p>Request 3 is exactly the same request as request 2. It still generated 38 output tokens again. The prompt cache does not store the answer, and the Claude API documentation also says that prompt caching has no effect on output generation. TTFT was between 681 ms and 777 ms for all five requests, with no visible difference. At this length prefill appears to be a small share of TTFT.</p>
+<p>The cost can be checked by calculation. Sending a prefix n times costs n in input without a cache and 1.25 + 0.1 × (n - 1) with the 5-minute cache. At the second request that is 2 against 1.35, so one more read within the lifetime already lowers the cost, and a prompt that is never read again costs 25% more. The 1-hour cache lowers the cost from the third request.</p>
+<p>An agent sends the same system prompt, tool definitions and earlier conversation again on every turn, so the prompt cache has a large effect there. In an <a href="https://whchoi98.github.io/docs/techblog/aiml/claude-code-cost-saving-tips/" target="_blank" rel="noopener">earlier post</a> that added up 14 days of Claude Code session records, 98% of the input tokens were cache reads.</p>
+<p>How the cache is activated differs by provider. The OpenAI API has prompt caching activated by default on supported models, and the Amazon Nova models on Bedrock have Implicit Prompt Caching, which works without any setting.</p>
+</div></section>
+
+<section class="sec" id="en-s5"><header class="sec-head"><p class="eyebrow">04</p><h2>The semantic cache returns a stored response without calling the model</h2></header><div class="prose">
+<p>The semantic cache differs from the first three in what it stores. It keeps questions together with their responses, and when a new question is close in meaning to an earlier one it returns the stored response without calling the model. To find questions that mean the same in different words, it turns each question into an embedding vector, compares similarity, and treats a similarity at or above a threshold as a hit.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig05-semantic-cache-en.png" alt="A new question is turned into a vector by an embedding model, the store is searched by similarity, and above the threshold the stored response is returned; otherwise the LLM is called and its response is stored. The chart below shows the cosine similarity of 8 new questions to the nearest stored question, measured with two embedding models; the question that asks about deactivating instead of activating scores above two of the same-meaning questions" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 5.</b> How the semantic cache works, and the similarity of 8 questions</figcaption></figure>
+<p>A hit calls only the embedding model, so this cache reduces cost and latency the most. In the <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/semantic-caching-benchmarks.html" target="_blank" rel="noopener">benchmark in the ElastiCache documentation</a>, a threshold of 0.75 reduced inference cost by up to 86% and the responses served from the cache were 91% accurate. There is a trade-off. The first three caches reuse only when the tokens are exactly the same, while the semantic cache reuses when the question is merely similar, so it can return the response to a different question.</p>
+<p>To see how similar a question has to be to count as the same, I stored 4 questions and measured the similarity of 8 new ones with two embedding models. Three of the new questions mean the same as a stored one (<code>hit</code>) and five mean something else (<code>miss</code>). The questions are in Korean, apart from one in English; the row labels in Figure 5 give the meaning of each.</p>
+<div class="snippet"><div class="snippet-bar"><span class="lang">python</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>def titan_v2(text):
+    body = json.dumps({"inputText": text, "dimensions": 1024, "normalize": True})
+    out = client.invoke_model(modelId="amazon.titan-embed-text-v2:0", body=body)
+    return json.loads(out["body"].read())["embedding"]
+
+stored = [(q, embed(q)) for q in STORED]                            # the 4 stored questions
+for expect, q in QUERIES:                                           # the 8 new questions
+    v = embed(q)
+    sim, nearest = max((cosine(v, sv), sq) for sq, sv in stored)    # nearest stored question and its similarity</code></pre></div>
+<div class="snippet"><div class="snippet-bar"><span class="lang">text</span><button type="button" class="copy"><span class="i">Copy</span><span class="ok">Copied</span></button></div><pre><code>model amazon.titan-embed-text-v2:0 region ap-northeast-2
+  hit  0.4756  람다 함수는 최대 몇 분까지 실행할 수 있나요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.6190  What is the maximum timeout of a Lambda function?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.9480  S3 버킷의 이름을 바꾸는 것이 가능한가요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.6364  Lambda 함수의 최대 메모리는 얼마인가요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  miss 0.6502  도쿄 리전의 가용 영역은 몇 개인가요?  -&gt;  서울 리전의 가용 영역은 몇 개인가요?
+  miss 0.7129  프롬프트 캐싱을 비활성화하는 방법을 알려 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+  miss 0.6379  S3 버킷을 삭제할 수 있나요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.1182  오늘 점심 메뉴를 추천해 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+
+model global.cohere.embed-v4:0 region ap-northeast-2
+  hit  0.8157  람다 함수는 최대 몇 분까지 실행할 수 있나요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.7817  What is the maximum timeout of a Lambda function?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  hit  0.9503  S3 버킷의 이름을 바꾸는 것이 가능한가요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.7879  Lambda 함수의 최대 메모리는 얼마인가요?  -&gt;  Lambda 함수의 최대 실행 시간은 얼마인가요?
+  miss 0.7420  도쿄 리전의 가용 영역은 몇 개인가요?  -&gt;  서울 리전의 가용 영역은 몇 개인가요?
+  miss 0.9279  프롬프트 캐싱을 비활성화하는 방법을 알려 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.
+  miss 0.8095  S3 버킷을 삭제할 수 있나요?  -&gt;  S3 버킷 이름을 변경할 수 있나요?
+  miss 0.2046  오늘 점심 메뉴를 추천해 주세요.  -&gt;  프롬프트 캐싱을 활성화하는 방법을 알려 주세요.</code></pre></div>
+<p>With both models a question with the opposite meaning scored higher than a question with the same meaning. The new question asking how to deactivate prompt caching scored 0.7129 and 0.9279 against the stored question asking how to activate it. The first question, the same question in other words, scored 0.4756 and 0.8157. For these 8 questions neither model has a threshold that hits all three same-meaning questions with zero wrong hits.</p>
+<p>This is a small example of 8 questions and says nothing about accuracy in general. Still, in the same benchmark the responses served from the cache were 92.6% accurate even with the threshold raised to 0.95. A threshold reduces wrong hits; it does not remove them.</p>
+<p>So the semantic cache fits places where the same questions repeat and the responses do not change often. The ElastiCache documentation advises starting with a high threshold of 0.90 to 0.95 and lowering it while watching accuracy. It also describes narrowing what can hit with filters such as product ID, Region or user segment, and deleting old responses with a TTL.</p>
+</div></section>
+
+<section class="sec" id="en-s6"><header class="sec-head"><p class="eyebrow">05</p><h2>Five common misunderstandings where the four caches meet</h2></header><div class="prose">
+<p>The four are not options to choose between; they work on top of each other. A request that misses the semantic cache goes to the model. Its prefix is reused by the prompt cache or the prefix cache, and the KV cache works while the answer is generated. The table lists misunderstandings that come up where they meet, next to what really happens.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Misunderstanding</th><th>What really happens</th></tr>
+</thead>
+<tbody>
+<tr><td>With the prompt cache activated, the same question gets a stored answer</td><td>The answer is generated every time and the output tokens are billed as usual. The cache that returns a stored response is the semantic cache</td></tr>
+<tr><td>If the middle of the prefix differs a little, the part after it is still reused</td><td>Everything from the block with the changed token onward is computed again</td></tr>
+<tr><td>A prefix hit makes the whole answer arrive sooner</td><td>What gets shorter is the time to the first token; the speed of generating tokens stays the same</td></tr>
+<tr><td>Adding servers leaves the hit rate as it is</td><td>KV stays on the server that handled the request, so the next request misses if it goes to another server</td></tr>
+<tr><td>A semantic cache is safe once the threshold is high</td><td>Wrong hits become fewer but do not disappear, and the hit rate falls with them</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 2.</b> Common misunderstandings where the four caches meet, and what really happens</p>
+<p>The fourth row is the problem you meet when scaling an inference engine to several servers. You can send a session to the same server, or add a shared cache that lets the servers use KV together. I tested the shared cache in the <a href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/" target="_blank" rel="noopener">Amazon ElastiCache Distributed KV Caching</a> post. The Bedrock documentation notes that with cross-Region inference cache writes can increase at times of high demand.</p>
+<p>A cache that reuses KV across requests also has an isolation scope. The vLLM documentation describes <code>cache_salt</code> as a way to stop attacks that infer cached content from differences in response time. With this value in a request, KV is reused only among requests that carry the same value. Claude's prompt cache is isolated by organization, and on the Claude API by workspace as well.</p>
+</div></section>
+
+<section class="sec" id="en-s7"><header class="sec-head"><p class="eyebrow">06</p><h2>Values that show whether a cache hit</h2></header><div class="prose">
+<p>Even with the right settings a cache misses when the prefix changes. No error is raised when that happens, so you have to look at the values in the responses and metrics yourself.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Cache</th><th>Value to check</th><th>How to read it</th></tr>
+</thead>
+<tbody>
+<tr><td>KV cache</td><td>No separate metric</td><td>The engine uses it by default. The memory used by KV grows with context length and the number of concurrent requests</td></tr>
+<tr><td>Prefix cache (vLLM)</td><td><code>vllm:prefix_cache_hits</code>, <code>vllm:prefix_cache_queries</code></td><td>The increase of the first divided by the increase of the second is the hit rate in tokens. For a value per request, start the server with <code>--enable-prompt-tokens-details</code> and read <code>usage.prompt_tokens_details.cached_tokens</code></td></tr>
+<tr><td>Prompt cache (Bedrock Converse API)</td><td><code>cacheReadInputTokens</code>, <code>cacheWriteInputTokens</code></td><td>A read of 0 with a write on every request means the prefix changes from request to request</td></tr>
+<tr><td>Prompt cache (Claude API)</td><td><code>cache_read_input_tokens</code>, <code>cache_creation_input_tokens</code></td><td>If both are 0 the prompt was not cached, most often because it is shorter than the minimum length</td></tr>
+<tr><td>Semantic cache</td><td>Hit rate, accuracy of the responses served</td><td>Take a sample of the responses served from the cache and compare each with the new question. The hit rate alone does not show wrong hits</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 3.</b> Values that show whether each cache hit. Based on each documentation as of November 27, 2026</p>
+</div></section>
+
+<section class="sec" id="en-s8"><header class="sec-head"><p class="eyebrow">07</p><h2>The order to check your own environment, and when to use each cache</h2></header><div class="prose">
+<p>Start with the caches that already work. The KV cache needs no setting. If you run an inference engine yourself, look at the hit rate of the prefix cache first, and if you call an API, check the cache point and the cache tokens. In both cases the first thing to change is to put fixed content at the front of the prompt and changing values at the end. The semantic cache is the only one that can send out a wrong response, so review it last.</p>
+<figure class="fig"><div class="canvas wide"><img src="llm-serving-four-types-of-caching-assets/fig06-checklist-en.png" alt="The order for checking the four caches. First, the KV cache needs no setting. Second, for the prefix cache put fixed content first and read the vLLM hit metrics. Third, for the prompt cache set the cache point at the end of the stable prefix and read the cache read and write tokens. Fourth, use the semantic cache only for repeated questions that are not personalized and check the accuracy of the responses it served" width="1280" height="720" loading="lazy"></div><figcaption><b>Figure 6.</b> The order for checking the four caches</figcaption></figure>
+<p>Comparing cost and performance together gives the criteria for use.</p>
+<div class="scroll"><table>
+<thead>
+<tr><th>Cache</th><th>What it costs</th><th>What it reduces</th><th>When to use it</th></tr>
+</thead>
+<tbody>
+<tr><td>KV cache</td><td>Memory in proportion to the number of tokens</td><td>In this post, the time to generate 40 tokens fell to one fifteenth</td><td>Always</td></tr>
+<tr><td>Prefix cache</td><td>No separate cost. The KV stays in free blocks and is deleted when the memory is needed</td><td>In this post, the time to compute the first token fell to one twenty-fifth</td><td>Always when prefixes repeat. With several servers, check the routing as well</td></tr>
+<tr><td>Prompt cache</td><td>Cache writes at 1.25 times</td><td>Cache reads at 0.1 times</td><td>When the same prefix is sent again at least once within the lifetime</td></tr>
+<tr><td>Semantic cache</td><td>Embedding calls, a vector store, and the chance of a wrong response</td><td>The whole model call for requests that hit</td><td>Only when the same questions repeat and a wrong response costs little</td></tr>
+</tbody>
+</table></div>
+<p class="cap"><b>Table 4.</b> When to use each of the four caches, by cost and performance. Multipliers follow the Claude API documentation; measured values come from a 0.5B model on a CPU</p>
+<p>The first three caches avoid doing the same computation twice, so once the prefix is kept stable there is almost nothing to lose. The semantic cache skips the computation altogether, so it saves the most and carries the risk of a wrong response. Before applying a semantic cache, I recommend measuring similarity with real questions from the service you run.</p>
+</div></section>
+</div>
+<section class="sec" id="sources"><header class="sec-head"><h2><span class="l-ko">참고 자료</span><span class="l-en">References</span></h2></header><div class="prose">
+<div class="scroll"><table class="src-t"><thead><tr><th>No.</th><th><span class="l-ko">출처</span><span class="l-en">Source</span></th><th><span class="l-ko">종류</span><span class="l-en">Kind</span></th><th><span class="l-ko">확인한 날</span><span class="l-en">Checked</span></th></tr></thead>
+<tbody>
+<tr id="src-1"><td class="num"><b>1</b></td><td class="t"><a href="https://huggingface.co/docs/transformers/en/cache_explanation" target="_blank" rel="noopener">How caching works</a></td><td class="nowrap"><span class="l-ko">Hugging Face Transformers 문서</span><span class="l-en">Hugging Face Transformers docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-2"><td class="num"><b>2</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/design/prefix_caching/" target="_blank" rel="noopener">Automatic Prefix Caching (design)</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-3"><td class="num"><b>3</b></td><td class="t"><a href="https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/" target="_blank" rel="noopener">Automatic Prefix Caching (features)</a></td><td class="nowrap"><span class="l-ko">vLLM 문서</span><span class="l-en">vLLM docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-4"><td class="num"><b>4</b></td><td class="t"><a href="https://github.com/vllm-project/vllm/blob/main/vllm/config/cache.py" target="_blank" rel="noopener">vllm/config/cache.py</a></td><td class="nowrap"><span class="l-ko">vLLM 소스</span><span class="l-en">vLLM source</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-5"><td class="num"><b>5</b></td><td class="t"><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching" target="_blank" rel="noopener">Prompt caching</a></td><td class="nowrap"><span class="l-ko">Claude API 문서</span><span class="l-en">Claude API docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-6"><td class="num"><b>6</b></td><td class="t"><a href="https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html" target="_blank" rel="noopener">Prompt caching for faster model inference</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-7"><td class="num"><b>7</b></td><td class="t"><a href="https://developers.openai.com/api/docs/guides/prompt-caching" target="_blank" rel="noopener">Prompt caching</a></td><td class="nowrap"><span class="l-ko">OpenAI API 문서</span><span class="l-en">OpenAI API docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-8"><td class="num"><b>8</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/semantic-caching-overview.html" target="_blank" rel="noopener">Overview of semantic caching</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-9"><td class="num"><b>9</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/semantic-caching-benchmarks.html" target="_blank" rel="noopener">Impact and benchmarks</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-10"><td class="num"><b>10</b></td><td class="t"><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/semantic-caching-best-practices.html" target="_blank" rel="noopener">Best practices</a></td><td class="nowrap"><span class="l-ko">공식 문서</span><span class="l-en">AWS docs</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-11"><td class="num"><b>11</b></td><td class="t"><a href="https://github.com/zilliztech/GPTCache" target="_blank" rel="noopener">GPTCache: A Library for Creating Semantic Cache for LLM Queries</a></td><td class="nowrap"><span class="l-ko">오픈 소스 저장소</span><span class="l-en">Open-source repository</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-12"><td class="num"><b>12</b></td><td class="t"><a href="https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct" target="_blank" rel="noopener">Qwen/Qwen2.5-0.5B-Instruct</a></td><td class="nowrap"><span class="l-ko">모델 카드</span><span class="l-en">Model card</span></td><td class="nowrap num">2026-11-27</td></tr>
+<tr id="src-13"><td class="num"><b>13</b></td><td class="t"><a href="https://whchoi98.github.io/docs/techblog/database/elasticache-distributed-kv-caching/" target="_blank" rel="noopener">Amazon ElastiCache Distributed KV Caching</a></td><td class="nowrap"><span class="l-ko">이 블로그의 이전 글</span><span class="l-en">Earlier post on this blog</span></td><td class="nowrap num">2026-11-27</td></tr>
+</tbody></table></div>
+</div></section>
+<footer class="foot">
+<h2><span class="l-ko">이 글에 대하여</span><span class="l-en">About this post</span></h2>
+<ul>
+<li><span class="l-ko"><b>글쓴이</b> 최우형 (WooHyung Choi)</span><span class="l-en"><b>Author</b> WooHyung Choi</span></li>
+</ul>
+<p><span class="l-ko">이 글의 수치는 2026년 11월 27일에 직접 테스트한 결과입니다. KV 캐시와 프리픽스 캐시는 서울 리전의 r8g.4xlarge(16 vCPU)에서 Qwen2.5-0.5B-Instruct(FP32)를 PyTorch 2.15.0과 Transformers 5.24.1로 실행해 측정했습니다. 프리픽스 캐시는 vLLM을 실행한 결과가 아니고 vLLM 설계 문서의 블록 해시 방식을 16토큰 블록으로 직접 구현한 결과이며 시간은 3회 중앙값입니다. 작은 모델과 CPU의 수치이므로 GPU 서빙의 성능을 나타내지 않습니다. 프롬프트 캐시는 서울 리전에서 Amazon Bedrock Converse API로 Claude Haiku 5.5(global 추론 프로파일)를 요청마다 한 번씩 호출한 결과입니다. 시맨틱 캐시는 Amazon Titan Text Embeddings V2와 Cohere Embed v4로 질문 12개의 임베딩을 한 번씩 구한 작은 예이고 일반적인 정확도를 나타내지 않습니다. 프롬프트 캐시의 단가 배율과 수명은 Claude API 문서 기준이며 Amazon Bedrock의 요금은 모델별 요금표에서 확인해야 합니다. 비용은 배율로 계산한 값이고 청구서 값이 아닙니다. 문서의 설명은 같은 날 확인한 vLLM, Hugging Face Transformers, Claude API, OpenAI API, Amazon Bedrock, Amazon ElastiCache 문서를 기준으로 합니다.</span><span class="l-en">The figures in this post come from my own tests on November 27, 2026. The KV cache and the prefix cache were measured on an r8g.4xlarge (16 vCPUs) in the Seoul Region with Qwen2.5-0.5B-Instruct (FP32), PyTorch 2.15.0 and Transformers 5.24.1. The prefix cache result does not come from running vLLM: it is my own implementation of the block hashing described in the vLLM design document, with 16-token blocks, and the times are medians of three runs. These are numbers from a small model on a CPU and do not represent GPU serving performance. The prompt cache was checked from the Seoul Region with the Amazon Bedrock Converse API and Claude Haiku 5.5 (global inference profile), one call per request. The semantic cache is a small example that embeds 12 questions once with Amazon Titan Text Embeddings V2 and Cohere Embed v4, and it does not represent accuracy in general. The price multipliers and lifetimes of the prompt cache follow the Claude API documentation; for Amazon Bedrock, check the price list of each model. Costs are computed from the multipliers, not read from a bill. Statements about the documentation follow the vLLM, Hugging Face Transformers, Claude API, OpenAI API, Amazon Bedrock and Amazon ElastiCache documentation as read on the same day.</span></p>
+</footer>
+
+</div>
+<script>
+(function(){
+  var root=document.documentElement;
+  function get(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function put(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function mark(id,v){var bs=document.querySelectorAll('#'+id+' button');for(var i=0;i<bs.length;i++){bs[i].setAttribute('aria-pressed',bs[i].getAttribute('data-v')===v?'true':'false')}}
+  function curTheme(){var t=root.getAttribute('data-theme');if(t==='dark'||t==='light')return t;return (window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light'}
+  window.setLang=function(v){v=(v==='en')?'en':'ko';root.setAttribute('data-lang',v);root.setAttribute('lang',v);mark('langSeg',v);put('techblogs-lang',v)};
+  window.setTheme=function(v){v=(v==='dark')?'dark':'light';root.setAttribute('data-theme',v);mark('themeSeg',v);put('techblogs-theme',v)};
+  mark('langSeg',root.getAttribute('data-lang')==='en'?'en':'ko'); mark('themeSeg',curTheme());
+  document.getElementById('langSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setLang(v)});
+  document.getElementById('themeSeg').addEventListener('click',function(e){var v=e.target.getAttribute('data-v');if(v)setTheme(v)});
+  /* 블로그 레이아웃이 속성을 직접 바꾸고 이벤트를 보낸다. 버튼 표시와 lang 속성을 맞춘다. */
+  document.addEventListener('langchange',function(){var v=root.getAttribute('data-lang')==='en'?'en':'ko';root.setAttribute('lang',v);mark('langSeg',v)});
+  document.addEventListener('themechange',function(){mark('themeSeg',curTheme())});
+  /* 제목 맞춤: 보이는 언어의 제목이 한 줄에 들어갈 때까지 글자 크기를 줄인다. 30px에서도 넘치면 30px로 두고 줄을 바꾼다 */
+  (function(){var h=document.querySelector('h1');if(!h)return;var MIN=30,raf=0;
+    function fitTitle(){h.style.fontSize='';h.classList.remove('one');
+      var s=h.querySelector(root.getAttribute('data-lang')==='en'?'.l-en':'.l-ko');if(!s)return;
+      var base=parseFloat(getComputedStyle(h).fontSize),avail=h.getBoundingClientRect().width;if(avail<=0||base<=MIN)return;
+      function wide(){return s.getBoundingClientRect().width>avail}
+      h.classList.add('one');
+      if(!wide()){h.classList.remove('one');return}
+      var size=Math.max(MIN,Math.floor(base*avail/s.getBoundingClientRect().width*2)/2);
+      h.style.fontSize=size+'px';
+      while(size>MIN&&wide()){size-=.5;h.style.fontSize=size+'px'}
+      if(wide())h.classList.remove('one')}
+    function later(){cancelAnimationFrame(raf);raf=requestAnimationFrame(fitTitle)}
+    fitTitle();window.addEventListener('resize',later);
+    if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitTitle);
+    if('MutationObserver' in window)new MutationObserver(later).observe(root,{attributes:true,attributeFilter:['data-lang']});
+  })();
+  /* 이동 메뉴: 지금 보이는 절의 링크를 표시하고 메뉴 안에서 그 링크가 보이게 옮긴다 */
+  (function(){var navs=document.querySelectorAll('nav.toc');if(!navs.length||!('IntersectionObserver' in window))return;
+    var links={};for(var n=0;n<navs.length;n++){var as=navs[n].querySelectorAll('a');for(var j=0;j<as.length;j++){var id=as[j].getAttribute('href').slice(1);(links[id]=links[id]||[]).push(as[j])}}
+    var io=new IntersectionObserver(function(es){for(var k=0;k<es.length;k++){if(!es[k].isIntersecting)continue;var ls=links[es[k].target.id]||[];if(!ls.length)continue;
+      for(var m=0;m<navs.length;m++){var on=navs[m].querySelectorAll('a.on');for(var q=0;q<on.length;q++)on[q].classList.remove('on')}
+      for(var r=0;r<ls.length;r++){ls[r].classList.add('on');var p=ls[r].parentNode;p.scrollLeft=Math.max(0,ls[r].offsetLeft-p.clientWidth/3)}}},{rootMargin:'-72px 0px -65% 0px'});
+    for(var id2 in links){var el=document.getElementById(id2);if(el)io.observe(el)}})();
+  function fallbackCopy(t){var a=document.createElement('textarea');a.value=t;a.setAttribute('readonly','');a.style.position='fixed';a.style.top='-1000px';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}document.body.removeChild(a);return ok}
+  function markCopy(b,ok){b.setAttribute('data-copied',ok?'1':'0');if(!ok)return;b.classList.add('done');clearTimeout(b._t);b._t=setTimeout(function(){b.classList.remove('done')},1600)}
+  document.addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button.copy'):null;if(!b)return;
+    var pre=b.closest('.snippet').querySelector('pre');var txt=pre.innerText.replace(/\n$/,'');
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(txt).then(function(){markCopy(b,true)},function(){markCopy(b,fallbackCopy(txt))})}
+    else{markCopy(b,fallbackCopy(txt))}});
+})();
+</script>
+</body>
+</html>
